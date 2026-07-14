@@ -12,6 +12,3 @@
 
 - [모터 제한 스위치](https://ko.aliexpress.com/item/1005006185484330.html?spm=a2g0o.productlist.main.2.55ffiTixiTixOZ&algo_pvid=b4d5286b-a43f-4e8e-a847-a4369925c676&algo_exp_id=b4d5286b-a43f-4e8e-a847-a4369925c676-1&pdp_ext_f=%7B%22order%22%3A%2290%22%2C%22spu_best_type%22%3A%22price%22%2C%22eval%22%3A%221%22%2C%22fromPage%22%3A%22search%22%7D&pdp_npi=6%40dis%21KRW%211338%211184%21%21%210.87%210.77%21%402102eb1417839996822355970e102d%2112000036180976254%21sea%21KR%214213477428%21X%211%210%21n_tag%3A-29919%3Bd%3Af8fd794e%3Bm03_new_user%3A-29895&curPageLogUid=CQlTm6ZqF0ev&utparam-url=scene%3Asearch%7Cquery_from%3A%7Cx_object_id%3A1005006185484330%7C_p_origin_prod%3A)
 
-
-
-
