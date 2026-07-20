@@ -1,0 +1,32 @@
+# 박스 단일 클래스 데이터셋 구성 (FR-101-1)
+# 경로는 ai/ 디렉터리 기준 상대경로.
+
+class_name: box
+output: data/processed/box_coco.json
+
+sources:
+  # LOCO — 물류 창고 특화, COCO 포맷, 무료
+  # 5개 클래스 중 '박스형 화물'만 채택한다 (forklift/pallet_truck은 장비라 제외).
+  - name: loco
+    type: coco
+    enabled: true
+    annotations: data/raw/loco/loco-all-v1.json
+    images_root: data/raw/loco/images
+    keep_categories: [small_load_carrier, stillage]
+
+  # Roboflow Universe — cardboard box, COCO로 내보내기
+  # 이미 단일 클래스라 keep_categories를 비워 전체를 채택한다.
+  - name: roboflow_cardboard
+    type: coco
+    enabled: true
+    annotations: data/raw/roboflow_cardboard/train/_annotations.coco.json
+    images_root: data/raw/roboflow_cardboard/train
+    keep_categories: []
+
+  # SKU-110K — 밀집 적재 장면. 학술·비영리 라이선스라 기본 비활성.
+  # 사용 여부는 팀 합의 후 결정한다 (README 라이선스 항목 참고).
+  - name: sku110k
+    type: sku110k
+    enabled: false
+    annotations: data/raw/SKU110K/annotations/annotations_train.csv
+    images_root: data/raw/SKU110K/images
