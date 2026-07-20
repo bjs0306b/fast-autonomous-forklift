@@ -85,21 +85,44 @@ def test_정상_라벨은_건드리지_않는다() -> None:
 
 # --- 분할 ---
 
-def test_증강본은_train과_val에_갈라지지_않는다() -> None:
+def test_증강본은_어느_세트에도_갈라지지_않는다() -> None:
     """핵심 요구사항. 실측상 순진한 분할은 val의 54.8%가 오염됐다."""
     images = [
         (i, f"roboflow_cardboard/orig{i // 5}_jpg.rf.{i:032x}.jpg", 640, 640)
-        for i in range(50)  # 원본 10개 × 증강 5장
+        for i in range(100)  # 원본 20개 × 증강 5장
     ]
-    data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(50)])
+    data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(100)])
 
-    train_ids, val_ids, report = split_by_identity(data, val_ratio=0.2, seed=42)
+    splits, report = split_by_identity(data, val_ratio=0.15, test_ratio=0.15, seed=42)
 
-    assert report["leaked"] == 0
-    assert report["groups"] == 10
-    # 그룹 단위라 이미지 수는 5의 배수로 떨어진다
-    assert len(val_ids) % 5 == 0
-    assert train_ids & val_ids == set()
+    assert report["leaked"] == {}
+    assert report["groups"] == 20
+    # 그룹 단위라 각 세트의 이미지 수는 5의 배수로 떨어진다
+    for ids in splits.values():
+        assert len(ids) % 5 == 0
+    assert splits["train"] & splits["val"] == set()
+    assert splits["train"] & splits["test"] == set()
+    assert splits["val"] & splits["test"] == set()
+
+
+def test_세_세트가_전체를_빠짐없이_덮는다() -> None:
+    images = [(i, f"loco/a{i}.jpg", 640, 640) for i in range(100)]
+    data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(100)])
+
+    splits, _ = split_by_identity(data, val_ratio=0.15, test_ratio=0.15, seed=5)
+
+    assert splits["train"] | splits["val"] | splits["test"] == set(range(100))
+
+
+def test_test_비율_0이면_test가_비어_있다() -> None:
+    images = [(i, f"loco/a{i}.jpg", 640, 640) for i in range(100)]
+    data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(100)])
+
+    splits, _ = split_by_identity(data, val_ratio=0.2, test_ratio=0.0, seed=5)
+
+    assert splits["test"] == set()
+    assert len(splits["val"]) == 20
+    assert len(splits["train"]) == 80
 
 
 def test_소스별_비율이_유지된다() -> None:
@@ -109,19 +132,19 @@ def test_소스별_비율이_유지된다() -> None:
     )
     data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(120)])
 
-    _, _, report = split_by_identity(data, val_ratio=0.2, seed=1)
+    _, report = split_by_identity(data, val_ratio=0.15, test_ratio=0.15, seed=1)
 
-    assert report["per_source"]["loco"] == {"train": 80, "val": 20}
-    assert report["per_source"]["logistics"] == {"train": 16, "val": 4}
+    assert report["per_source"]["loco"] == {"train": 70, "val": 15, "test": 15}
+    assert report["per_source"]["logistics"] == {"train": 14, "val": 3, "test": 3}
 
 
 def test_같은_시드는_같은_분할을_준다() -> None:
     images = [(i, f"loco/a{i}.jpg", 640, 640) for i in range(50)]
     data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(50)])
 
-    first, _, _ = split_by_identity(data, val_ratio=0.2, seed=7)
-    second, _, _ = split_by_identity(data, val_ratio=0.2, seed=7)
-    other, _, _ = split_by_identity(data, val_ratio=0.2, seed=8)
+    first, _ = split_by_identity(data, 0.15, 0.15, seed=7)
+    second, _ = split_by_identity(data, 0.15, 0.15, seed=7)
+    other, _ = split_by_identity(data, 0.15, 0.15, seed=8)
 
     assert first == second
     assert first != other
@@ -132,6 +155,6 @@ def test_val_비율이_대체로_지켜진다(ratio: float) -> None:
     images = [(i, f"loco/a{i}.jpg", 640, 640) for i in range(200)]
     data = make_data(images, [(i, i, [10, 10, 50, 50]) for i in range(200)])
 
-    _, val_ids, _ = split_by_identity(data, val_ratio=ratio, seed=3)
+    splits, _ = split_by_identity(data, val_ratio=ratio, test_ratio=0.0, seed=3)
 
-    assert len(val_ids) == round(200 * ratio)
+    assert len(splits["val"]) == round(200 * ratio)
