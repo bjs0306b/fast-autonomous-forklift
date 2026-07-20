@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from dataset.coco import BOX_CATEGORY_ID, BuildStats, CocoBuilder, image_identity
+from dataset.coco import BuildStats, CocoBuilder, image_identity
 from dataset.sources import convert_coco, convert_sku110k
 
 
@@ -33,7 +34,7 @@ def test_같은_파일명은_한_번만_등록된다(builder: CocoBuilder) -> No
 def test_경계를_넘는_bbox는_이미지_안으로_잘린다(builder: CocoBuilder) -> None:
     stats = BuildStats()
     image_id = builder.add_image("a/1.jpg", 100, 100, stats)
-    builder.add_annotation(image_id, (90, 90, 50, 50), stats)
+    builder.add_annotation(image_id, (90, 90, 50, 50), stats, "box")
 
     bbox = builder.to_dict()["annotations"][0]["bbox"]
     assert bbox == [90, 90, 10, 10]
@@ -43,8 +44,8 @@ def test_이미지_밖의_bbox는_버려진다(builder: CocoBuilder) -> None:
     stats = BuildStats()
     image_id = builder.add_image("a/1.jpg", 100, 100, stats)
 
-    assert builder.add_annotation(image_id, (150, 150, 20, 20), stats) is False
-    assert builder.add_annotation(image_id, (10, 10, 0, 20), stats) is False
+    assert builder.add_annotation(image_id, (150, 150, 20, 20), stats, "box") is False
+    assert builder.add_annotation(image_id, (10, 10, 0, 20), stats, "box") is False
     assert stats.skipped_annotations == 2
     assert builder.num_annotations == 0
 
@@ -53,7 +54,7 @@ def test_어노테이션_없는_이미지는_제거된다(builder: CocoBuilder) 
     stats = BuildStats()
     keep = builder.add_image("a/keep.jpg", 100, 100, stats)
     builder.add_image("a/empty.jpg", 100, 100, stats)
-    builder.add_annotation(keep, (10, 10, 20, 20), stats)
+    builder.add_annotation(keep, (10, 10, 20, 20), stats, "box")
 
     assert builder.drop_empty_images() == 1
     assert [img["file_name"] for img in builder.to_dict()["images"]] == ["a/keep.jpg"]
@@ -134,13 +135,111 @@ def test_coco_소스는_지정한_카테고리만_박스로_변환한다(tmp_pat
         encoding="utf-8",
     )
 
-    stats = convert_coco(builder, source, prefix="loco", keep_categories=["small_load_carrier"])
+    stats = convert_coco(builder, source, prefix="loco", class_map={"box": ["small_load_carrier"]})
 
     assert stats.annotations == 1
     assert stats.reasons["대상 외 카테고리"] == 1
     result = builder.to_dict()
     assert result["images"][0]["file_name"] == "loco/img.jpg"
-    assert result["annotations"][0]["category_id"] == BOX_CATEGORY_ID
+    assert result["annotations"][0]["category_id"] == 1      # classes[0] = box
+
+
+def _loco_like(tmp_path) -> Path:
+    """LOCO 카테고리 구성을 본뜬 소스. 박스형 2종 + 파렛트 + 장비 2종."""
+    source = tmp_path / "loco.json"
+    source.write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"id": 3, "name": "small_load_carrier"},
+                    {"id": 5, "name": "forklift"},
+                    {"id": 7, "name": "pallet"},
+                    {"id": 10, "name": "stillage"},
+                    {"id": 11, "name": "pallet_truck"},
+                ],
+                "images": [{"id": 1, "file_name": "a.jpg", "width": 500, "height": 500}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 3, "bbox": [10, 10, 30, 30]},
+                    {"id": 2, "image_id": 1, "category_id": 10, "bbox": [50, 10, 30, 30]},
+                    {"id": 3, "image_id": 1, "category_id": 7, "bbox": [90, 10, 40, 40]},
+                    {"id": 4, "image_id": 1, "category_id": 5, "bbox": [10, 90, 40, 40]},
+                    {"id": 5, "image_id": 1, "category_id": 11, "bbox": [90, 90, 40, 40]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return source
+
+
+def test_박스와_파렛트를_다른_클래스로_낸다(tmp_path, builder: CocoBuilder) -> None:
+    """측정 스테이션에는 파렛트 위에 박스가 올라오므로 구분이 필요하다."""
+    stats = convert_coco(
+        builder,
+        _loco_like(tmp_path),
+        prefix="loco",
+        class_map={"box": ["small_load_carrier", "stillage"], "pallet": ["pallet"]},
+    )
+
+    assert stats.per_class == {"box": 2, "pallet": 1}
+    assert builder.class_counts() == {"box": 2, "pallet": 1}
+
+    categories = {c["id"]: c["name"] for c in builder.to_dict()["categories"]}
+    assert categories == {1: "box", 2: "pallet"}
+
+
+def test_나열되지_않은_카테고리는_제외된다(tmp_path, builder: CocoBuilder) -> None:
+    """forklift·pallet_truck은 장비라 어느 클래스에도 넣지 않는다."""
+    stats = convert_coco(
+        builder,
+        _loco_like(tmp_path),
+        prefix="loco",
+        class_map={"box": ["small_load_carrier", "stillage"], "pallet": ["pallet"]},
+    )
+
+    assert stats.reasons["대상 외 카테고리"] == 2      # forklift, pallet_truck
+
+
+def test_와일드카드는_나머지_전부를_맡는다(tmp_path, builder: CocoBuilder) -> None:
+    """Carboard Box처럼 모든 카테고리가 같은 대상인 소스용."""
+    stats = convert_coco(
+        builder,
+        _loco_like(tmp_path),
+        prefix="loco",
+        class_map={"pallet": ["pallet"], "box": "*"},
+    )
+
+    # pallet만 명시됐고 나머지 4종이 box로 간다
+    assert stats.per_class == {"box": 4, "pallet": 1}
+
+
+def test_와일드카드를_두_클래스에_쓰면_거부한다(tmp_path, builder: CocoBuilder) -> None:
+    with pytest.raises(ValueError, match=r"'\*'는 한 클래스에만"):
+        convert_coco(
+            builder, _loco_like(tmp_path), prefix="loco",
+            class_map={"box": "*", "pallet": "*"},
+        )
+
+
+def test_한_카테고리를_두_클래스에_지정하면_거부한다(tmp_path, builder: CocoBuilder) -> None:
+    with pytest.raises(ValueError, match="양쪽에 지정"):
+        convert_coco(
+            builder, _loco_like(tmp_path), prefix="loco",
+            class_map={"box": ["pallet"], "pallet": ["pallet"]},
+        )
+
+
+def test_정의되지_않은_클래스는_거부한다(builder: CocoBuilder) -> None:
+    stats = BuildStats()
+    image_id = builder.add_image("a/1.jpg", 100, 100, stats)
+
+    with pytest.raises(ValueError, match="정의되지 않은 클래스"):
+        builder.add_annotation(image_id, (10, 10, 20, 20), stats, "forklift")
+
+
+def test_클래스_이름이_중복되면_거부한다() -> None:
+    with pytest.raises(ValueError, match="중복"):
+        CocoBuilder(classes=["box", "box"])
 
 
 def test_path_key로_디렉터리까지_보존한다(tmp_path, builder: CocoBuilder) -> None:
@@ -183,7 +282,7 @@ def test_path_key로_디렉터리까지_보존한다(tmp_path, builder: CocoBuil
         builder,
         source,
         prefix="loco",
-        keep_categories=["small_load_carrier"],
+        class_map={"box": ["small_load_carrier"]},
         path_key="path",
         strip_path_prefix="/dataset/",
     )
@@ -212,7 +311,7 @@ def test_path_key_없이는_basename이_충돌한다(tmp_path, builder: CocoBuil
         encoding="utf-8",
     )
 
-    stats = convert_coco(builder, source, prefix="loco")
+    stats = convert_coco(builder, source, prefix="loco", class_map={"box": "*"})
 
     assert builder.num_images == 1
     assert stats.reasons["중복 file_name"] == 1
@@ -226,7 +325,7 @@ def test_없는_카테고리를_지정하면_에러(tmp_path, builder: CocoBuild
     )
 
     with pytest.raises(ValueError, match="없는 카테고리"):
-        convert_coco(builder, source, prefix="loco", keep_categories=["typo_name"])
+        convert_coco(builder, source, prefix="loco", class_map={"box": ["typo_name"]})
 
 
 def test_sku110k_csv는_코너좌표를_wh로_바꾼다(tmp_path, builder: CocoBuilder) -> None:

@@ -1,6 +1,6 @@
 # AI / 비전 (EPIC-1)
 
-지게차 화물 인식 파트. 박스 **단일 클래스** 기준으로 RTMDet을 학습해
+지게차 화물 인식 파트. **박스·파렛트 2클래스**로 RTMDet을 학습해
 Jetson Orin Nano에 배포하는 것이 최종 목표다 (FR-101).
 
 | 목표 지표 | 값 |
@@ -30,9 +30,20 @@ ai/
 
 ```bash
 cd ai
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
+
+> **conda 환경(`ai_env`)에서는 반드시 `conda run`으로 실행한다.**
+>
+> ```
+> ❌  C:\...\envs\ai_env\python.exe -m dataset.convert ...
+> ✅  conda run -n ai_env python -m dataset.convert ...
+> ```
+>
+> `python.exe`를 전체 경로로 직접 호출하면 환경이 활성화되지 않아 `Library\bin`이 DLL
+> 검색 경로에 들어가지 않는다. 그러면 MKL을 못 찾아 `numpy`의 `@`(matmul)와 `linalg`에서
+> **프로세스가 그대로 죽는다**(`0xc06d007f`). import와 원소별 연산은 멀쩡히 되므로
+> numpy 설치가 깨진 것처럼 보이기 쉽다.
 
 `src` 레이아웃이라 **editable 설치가 필요**하다. 설치하지 않으면
 `python -m dataset.convert`가 모듈을 찾지 못한다.
@@ -81,22 +92,17 @@ unzip dataset.zip
 
 LOCO 전체는 이미지 5,097장 / 어노테이션 151,428개이며 클래스 분포는 아래와 같다.
 
-| 클래스 | 수 | 채택 |
+| 원본 클래스 | 수 | 우리 클래스 |
 |---|---:|---|
-| pallet | 120,445 | O — 포크를 꽂는 대상이라 인식 필요 (FR-303 연계) |
-| small_load_carrier | 22,151 | O — 박스형 화물 |
-| stillage | 5,407 | O — 박스형 화물 |
-| pallet_truck | 2,827 | X — 장비 |
-| forklift | 598 | X — 장비 |
+| pallet | 120,445 | **pallet** |
+| small_load_carrier | 22,151 | **box** |
+| stillage | 5,407 | **box** |
+| pallet_truck | 2,827 | 제외 (장비) |
+| forklift | 598 | 제외 (장비) |
 
-채택 기준에 따른 수율:
+LOCO 단독 수율: 이미지 4,885장 / 어노테이션 148,003개 (box 27,558 + pallet 120,445).
 
-| 기준 | 학습 가능 이미지 | 박스 수 |
-|---|---:|---:|
-| pallet 제외 | 2,009장 | 27,558 |
-| **pallet 포함 (현재)** | **4,885장** | **148,003** |
-
-채택 기준을 바꾸려면 `configs/datasets.yaml`의 `keep_categories`를 수정한다.
+매핑을 바꾸려면 `configs/datasets.yaml`의 `class_map`을 수정한다.
 
 ### LOCO 경로 처리
 
@@ -106,10 +112,10 @@ LOCO의 `file_name`은 `1613832,4601.jpg` 같은 타임스탬프 basename이라 
 
 ### 다른 소스의 클래스 채택 기준
 
-| 소스 | 채택 | 제외 |
-|---|---|---|
-| Logistics (21개 클래스) | `cardboard box`, `wood pallet` | 장비·사람·차량·안전장구·화재 등 |
-| Carboard Box (4개 클래스) | 전부 (`keep_categories: []`) | 없음 |
+| 소스 | box로 | pallet로 | 제외 |
+|---|---|---|---|
+| Logistics (21개 클래스) | `cardboard box` | `wood pallet` | 장비·사람·차량·안전장구·화재 등 |
+| Carboard Box (4개 클래스) | 전부 (`"*"`) | 없음 | 없음 |
 
 Carboard Box의 카테고리는 이름이 제각각이지만 **실물을 확인한 결과 전부
 종이박스**였다: `Cardboard-Box`(더미, 어노테이션 0), `0`(13,977), `box`(4,958),
@@ -134,7 +140,10 @@ LOCO를 맨 앞에 두는 이유:
   바꿀 여지가 남는다 (Logistics는 이를 `wood pallet` 하나로 뭉갰다)
 
 중복 제거는 데이터를 줄이는 게 아니라 **품질을 올린다**. 걸러진 Logistics 이미지가
-대부분 LOCO에서 온 파렛트 밀집 장면이라, 파렛트 편중이 68.2% → 56.2%로 개선됐다.
+대부분 LOCO에서 온 파렛트 밀집 장면이라, 파렛트 비중이 68.2% → 56.2%로 내려갔다.
+
+> 2클래스로 전환한 뒤로는 이 비중이 **편중이 아니라 두 클래스의 분포**다. 단일 클래스
+> 시절에는 파렛트가 박스에 섞여 있어 편중으로 보였을 뿐이다.
 
 | 단계 | 파렛트 비중 |
 |---|---:|
@@ -151,7 +160,7 @@ python -m dataset.convert --config configs/datasets.yaml --verify-images
 ```
 
 - 소스별 이미지·박스 수와 제외 사유가 출력된다.
-- 결과: `data/processed/box_coco.json` (박스 단일 클래스, `category_id=1`)
+- 결과: `data/processed/box_coco.json` (`box`=1, `pallet`=2)
 - 특정 소스만: `--only loco`
 - 어노테이션 없는 이미지 유지: `--keep-empty`
 - `--verify-images`: 변환 결과의 모든 이미지가 실제로 존재하는지 확인한다.
@@ -161,7 +170,7 @@ python -m dataset.convert --config configs/datasets.yaml --verify-images
 변환기가 하는 일:
 
 1. 소스별로 겹치는 image/annotation id를 전부 새로 발급
-2. 카테고리를 박스 하나(`id=1`)로 재매핑
+2. 소스별 카테고리를 우리 클래스(`box`/`pallet`)로 재매핑
 3. 이미지 경계를 넘는 bbox는 잘라내고, 완전히 벗어났거나 면적 0이면 제외
 4. `file_name`에 소스 이름을 접두사로 붙여 파일명 충돌 방지
 5. **데이터셋 간 같은 원본 사진 제거** (위 "데이터셋 간 중복" 참고)
@@ -177,7 +186,16 @@ python -m dataset.convert --config configs/datasets.yaml --verify-images
 | Logistics | 6,331 | 51,894 | 23.4% |
 | Carboard Box | 10,393 | 21,880 | 9.9% |
 
-파렛트류 124,598개(56.2%) / 박스류 97,179개(43.8%).
+**클래스별**: `pallet` 124,598개(56.2%) / `box` 97,179개(43.8%).
+
+소스별 기여가 뚜렷하게 갈린다 — LOCO가 파렛트를 대부분 대고, Carboard Box는 박스만,
+Logistics는 둘 다 조금씩 낸다.
+
+| 소스 | box | pallet |
+|---|---:|---:|
+| LOCO | 27,558 | 120,445 |
+| Carboard Box | 21,880 | — |
+| Logistics | 47,741 | 4,153 |
 
 Logistics는 99,238장 중 6,331장(6%)만 남았다. 대상 클래스가 없는 장면(화재·교통
 등)이 84,332장, LOCO·Carboard Box와 중복이 4,937장이다.
@@ -264,8 +282,10 @@ mAP@0.5 ≥ 92% 달성 여부는 이 수치로 판단한다.
   하지 않았다.** 학습 결과가 기대 이하면 여기를 먼저 의심한다.
 - **해상도 불일치**: Logistics·Carboard Box는 640x640 stretch 리사이즈라 종횡비가
   왜곡돼 있다. LOCO만 원본 해상도(1920x1080 등)다.
-- **파렛트 비중 56.2%**: 종이박스 기준 mAP가 목표에 못 미치면 pallet 샘플링을
-  검토한다 (`configs/datasets.yaml`의 `keep_categories`).
+- **클래스 불균형**: `pallet` 56.2% / `box` 43.8%. 2클래스 학습으로는 문제없는 수준이나,
+  박스 쪽 mAP가 목표에 못 미치면 `configs/datasets.yaml`의 `class_map`으로 조정한다.
+- **실행은 `conda run`으로**: `python.exe`를 전체 경로로 직접 호출하면 환경이 활성화되지
+  않아 MKL DLL을 못 찾고 `numpy`의 `@`·`linalg`에서 프로세스가 죽는다.
 
 ## 테스트
 

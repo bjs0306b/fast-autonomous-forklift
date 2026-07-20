@@ -18,16 +18,23 @@ def convert_coco(
     builder: CocoBuilder,
     annotations: Path,
     prefix: str,
-    keep_categories: list[str] | None = None,
+    class_map: dict[str, list[str] | str],
     path_key: str = "file_name",
     strip_path_prefix: str = "",
     group: str | None = None,
 ) -> BuildStats:
-    """COCO 포맷 소스를 읽어 박스 단일 클래스로 재매핑한다.
+    """COCO 포맷 소스를 읽어 우리 클래스 체계로 재매핑한다.
 
-    ``keep_categories``가 비어 있으면 전체 카테고리를 박스로 본다
-    (Roboflow cardboard box처럼 이미 단일 클래스인 경우).
-    LOCO처럼 여러 클래스가 섞인 소스는 박스형 클래스만 골라 넘긴다.
+    ``class_map``은 ``{우리 클래스: [원본 카테고리명, ...]}`` 형태다.
+    값에 ``"*"``를 주면 다른 클래스가 가져가지 않은 나머지 전부를 뜻한다
+    (Roboflow Carboard Box처럼 모든 카테고리가 같은 대상인 경우).
+
+        class_map:
+          box:    [small_load_carrier, stillage]
+          pallet: [pallet]
+
+    나열되지 않은 카테고리는 제외된다 — LOCO의 forklift·pallet_truck처럼
+    장비에 해당하는 것들이다.
 
     ``path_key``는 이미지 경로로 쓸 필드다. LOCO는 ``file_name``이
     ``1583416214257,48.jpg`` 같은 타임스탬프 basename이라 subset을 합치면
@@ -38,7 +45,7 @@ def convert_coco(
     with annotations.open(encoding="utf-8-sig") as f:
         raw = json.load(f)
 
-    wanted = _resolve_categories(raw.get("categories", []), keep_categories, annotations)
+    class_of = _resolve_class_map(raw.get("categories", []), class_map, annotations)
 
     # 원본 image_id → 새 image_id
     id_map: dict[int, int] = {}
@@ -59,25 +66,33 @@ def convert_coco(
             id_map[image["id"]] = new_id
 
     for ann in raw.get("annotations", []):
-        if ann.get("category_id") not in wanted:
+        class_name = class_of.get(ann.get("category_id"))
+        if class_name is None:
             stats.skip("annotation", "대상 외 카테고리")
             continue
         new_id = id_map.get(ann["image_id"])
         if new_id is None:
             stats.skip("annotation", "이미지 누락")
             continue
-        builder.add_annotation(new_id, ann["bbox"], stats, iscrowd=int(ann.get("iscrowd", 0)))
+        builder.add_annotation(
+            new_id, ann["bbox"], stats, class_name, iscrowd=int(ann.get("iscrowd", 0))
+        )
 
     return stats
 
 
 def convert_sku110k(
-    builder: CocoBuilder, annotations: Path, prefix: str, group: str | None = None
+    builder: CocoBuilder,
+    annotations: Path,
+    prefix: str,
+    class_name: str = "box",
+    group: str | None = None,
 ) -> BuildStats:
     """SKU-110K CSV를 COCO로 변환한다.
 
     CSV는 헤더가 없고 한 줄이 bbox 하나이며, 같은 이미지가 여러 줄에 걸쳐 나온다.
     좌표는 x1,y1,x2,y2(코너)라서 COCO의 x,y,w,h로 바꿔야 한다.
+    클래스 구분이 없는 소스라 전부 ``class_name``으로 넣는다.
     """
     stats = BuildStats()
     image_ids: dict[str, int] = {}
@@ -104,7 +119,7 @@ def convert_sku110k(
 
             bbox = (_to_float(x1), _to_float(y1), _to_float(x2) - _to_float(x1),
                     _to_float(y2) - _to_float(y1))
-            builder.add_annotation(image_id, bbox, stats)
+            builder.add_annotation(image_id, bbox, stats, class_name)
 
     return stats
 
@@ -121,20 +136,53 @@ def _relative_path(image: dict, path_key: str, strip_prefix: str) -> str | None:
     return rel.lstrip("/")
 
 
-def _resolve_categories(
-    categories: list[dict], keep: list[str] | None, source: Path
-) -> set[int]:
-    """이름으로 지정한 카테고리를 원본 category_id 집합으로 바꾼다."""
-    if not keep:
-        return {c["id"] for c in categories}
+WILDCARD = "*"
+
+
+def _resolve_class_map(
+    categories: list[dict], class_map: dict[str, list[str] | str], source: Path
+) -> dict[int, str]:
+    """{우리 클래스: [원본 카테고리명]}을 {원본 category_id: 우리 클래스}로 바꾼다.
+
+    값이 ``"*"``면 다른 클래스가 가져가지 않은 나머지 카테고리를 전부 맡는다.
+    나열되지 않은 카테고리는 결과에 없으므로 변환 시 제외된다.
+    """
+    if not class_map:
+        raise ValueError(f"{source}: class_map이 비어 있습니다")
 
     by_name = {c["name"]: c["id"] for c in categories}
-    missing = [name for name in keep if name not in by_name]
-    if missing:
-        raise ValueError(
-            f"{source}에 없는 카테고리: {missing} (사용 가능: {sorted(by_name)})"
-        )
-    return {by_name[name] for name in keep}
+    resolved: dict[int, str] = {}
+    wildcard_class: str | None = None
+
+    for class_name, wanted in class_map.items():
+        if wanted == WILDCARD:
+            if wildcard_class is not None:
+                raise ValueError(
+                    f"{source}: '*'는 한 클래스에만 쓸 수 있습니다 "
+                    f"('{wildcard_class}'와 '{class_name}'에 중복)"
+                )
+            wildcard_class = class_name
+            continue
+
+        missing = [name for name in wanted if name not in by_name]
+        if missing:
+            raise ValueError(
+                f"{source}에 없는 카테고리: {missing} (사용 가능: {sorted(by_name)})"
+            )
+        for name in wanted:
+            category_id = by_name[name]
+            if category_id in resolved:
+                raise ValueError(
+                    f"{source}: 카테고리 '{name}'이 '{resolved[category_id]}'와 "
+                    f"'{class_name}' 양쪽에 지정됐습니다"
+                )
+            resolved[category_id] = class_name
+
+    if wildcard_class is not None:
+        for category_id in by_name.values():
+            resolved.setdefault(category_id, wildcard_class)
+
+    return resolved
 
 
 def _to_int(value: str) -> int:

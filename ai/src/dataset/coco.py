@@ -1,8 +1,12 @@
-"""COCO 포맷 빌더 — 박스 단일 클래스(FR-101) 기준.
+"""COCO 포맷 빌더 (FR-101).
 
 여러 공개 데이터셋을 하나의 COCO 어노테이션으로 합치기 위한 최소 구현.
 pycocotools 없이 동작하며, 학습 프레임워크(MMDetection/RTMDet)가 읽는
 detection 필드만 채운다.
+
+**박스와 파렛트를 별개 클래스로 낸다.** 측정 스테이션에는 파렛트 위에 박스가
+올라간 상태로 들어오는데, 한 클래스로 합치면 어느 검출을 측정할지 알 수 없다.
+공개 데이터셋은 원래 둘을 따로 라벨링해 두었으므로 그 구분을 살려서 쓴다.
 """
 
 from __future__ import annotations
@@ -12,8 +16,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# 박스 단일 클래스이므로 카테고리는 항상 1개(id=1)로 고정한다.
-BOX_CATEGORY_ID = 1
+# 클래스 이름 → COCO category_id. 1부터 발급한다.
+DEFAULT_CLASSES = ("box", "pallet")
 
 # Roboflow 증강본 접미사: '<원본>_jpg.rf.<해시>.jpg'
 _ROBOFLOW_SUFFIX = re.compile(r"^(.*?)_(?:jpg|jpeg|png)\.rf\.[0-9a-f]+\.", re.IGNORECASE)
@@ -44,6 +48,7 @@ class BuildStats:
     skipped_images: int = 0
     skipped_annotations: int = 0
     reasons: dict[str, int] = field(default_factory=dict)
+    per_class: dict[str, int] = field(default_factory=dict)
 
     def skip(self, kind: str, reason: str) -> None:
         if kind == "image":
@@ -63,8 +68,15 @@ class CocoBuilder:
       증강본은 같은 원본을 공유하므로, 같은 group 안에서는 중복으로 보지 않는다.
     """
 
-    def __init__(self, class_name: str = "box") -> None:
-        self.class_name = class_name
+    def __init__(self, classes: tuple[str, ...] | list[str] = DEFAULT_CLASSES) -> None:
+        if not classes:
+            raise ValueError("클래스가 최소 하나는 있어야 합니다")
+        if len(set(classes)) != len(classes):
+            raise ValueError(f"클래스 이름이 중복됩니다: {classes}")
+
+        self.classes = tuple(classes)
+        # COCO category_id는 1부터 발급한다.
+        self._class_id = {name: i for i, name in enumerate(self.classes, start=1)}
         self._images: list[dict] = []
         self._annotations: list[dict] = []
         self._image_by_id: dict[int, dict] = {}
@@ -112,9 +124,16 @@ class CocoBuilder:
         image_id: int,
         bbox: tuple[float, float, float, float],
         stats: BuildStats,
+        class_name: str,
         iscrowd: int = 0,
     ) -> bool:
         """bbox는 COCO 규약대로 [x, y, w, h] (좌상단 기준, 픽셀)."""
+        category_id = self._class_id.get(class_name)
+        if category_id is None:
+            raise ValueError(
+                f"정의되지 않은 클래스 '{class_name}' (사용 가능: {list(self.classes)})"
+            )
+
         image = self._image_by_id[image_id]
         clipped = _clip_bbox(bbox, image["width"], image["height"])
         if clipped is None:
@@ -126,7 +145,7 @@ class CocoBuilder:
             {
                 "id": self._next_annotation_id,
                 "image_id": image_id,
-                "category_id": BOX_CATEGORY_ID,
+                "category_id": category_id,
                 "bbox": [x, y, w, h],
                 "area": w * h,
                 "iscrowd": iscrowd,
@@ -134,7 +153,16 @@ class CocoBuilder:
         )
         self._next_annotation_id += 1
         stats.annotations += 1
+        stats.per_class[class_name] = stats.per_class.get(class_name, 0) + 1
         return True
+
+    def class_counts(self) -> dict[str, int]:
+        """클래스별 어노테이션 수. 변환 후 분포를 확인하기 위함."""
+        by_id = {i: name for name, i in self._class_id.items()}
+        counts = dict.fromkeys(self.classes, 0)
+        for ann in self._annotations:
+            counts[by_id[ann["category_id"]]] += 1
+        return counts
 
     def drop_empty_images(self) -> int:
         """어노테이션이 하나도 없는 이미지를 제거한다.
@@ -155,12 +183,14 @@ class CocoBuilder:
     def to_dict(self) -> dict:
         return {
             "info": {
-                "description": "S15P11A304 지게차 화물 인식 데이터셋 (박스 단일 클래스)",
-                "version": "0.1",
+                "description": "S15P11A304 지게차 화물 인식 데이터셋 ("
+                + "·".join(self.classes) + ")",
+                "version": "0.2",
             },
             "licenses": [],
             "categories": [
-                {"id": BOX_CATEGORY_ID, "name": self.class_name, "supercategory": "cargo"}
+                {"id": self._class_id[name], "name": name, "supercategory": "cargo"}
+                for name in self.classes
             ],
             "images": self._images,
             "annotations": self._annotations,
