@@ -37,9 +37,25 @@ pip install -e ".[dev]"
 
 | 소스 | 배치 경로 | 라이선스 | 비고 |
 |---|---|---|---|
-| [LOCO](https://github.com/tum-fml/loco) | `data/raw/loco/` | CC BY 4.0 | 물류 창고 특화, COCO 포맷 그대로 |
+| [LOCO](https://github.com/tum-fml/loco) | `data/raw/loco/` | CC BY 4.0 | 물류 창고 특화, COCO 포맷 그대로 (아래 절차) |
 | [Roboflow Universe — cardboard box](https://universe.roboflow.com/) | `data/raw/roboflow_cardboard/` | 프로젝트별 상이 (대개 CC BY 4.0) | **COCO 포맷으로 내보내기** |
 | [SKU-110K](https://github.com/eg4000/SKU110K_CVPR19) | `data/raw/SKU110K/` | 학술·비영리 | 밀집 적재 장면. 기본 비활성 — 사용 전 팀 합의 필요 |
+
+### LOCO 내려받기
+
+```bash
+cd ai/data/raw/loco
+# 어노테이션 (103MB)
+curl -sL -o loco-all-v1.json \
+  https://raw.githubusercontent.com/tum-fml/loco/main/rgb/loco-all-v1.json
+# 이미지 (733MB) — 풀면 dataset/subset-1..5/ 구조가 나온다
+curl -L -o dataset.zip https://go.mytum.de/239870
+unzip dataset.zip
+```
+
+어노테이션 5,097장이 모두 `dataset/` 아래 실제 파일과 1:1로 매칭되는 것을 확인했다
+(`--verify-images`로 재확인 가능). zip에는 라벨 없는 이미지 4,518장이 더 들어 있는데,
+변환 시 자동으로 제외된다.
 
 ### LOCO 클래스 채택 기준
 
@@ -77,13 +93,27 @@ LOCO의 `file_name`은 `1613832,4601.jpg` 같은 타임스탬프 basename이라 
 
 ```bash
 cd ai
-python -m dataset.convert --config configs/datasets.yaml
+python -m dataset.convert --config configs/datasets.yaml --verify-images
 ```
 
 - 소스별 이미지·박스 수와 제외 사유가 출력된다.
 - 결과: `data/processed/box_coco.json` (박스 단일 클래스, `category_id=1`)
 - 특정 소스만: `--only loco`
 - 어노테이션 없는 이미지 유지: `--keep-empty`
+- `--verify-images`: 변환 결과의 모든 이미지가 실제로 존재하는지 확인한다.
+  경로 규칙이 어긋나면 학습 단계까지 가서야 터지므로, 새 소스를 추가할 때는
+  반드시 붙여서 돌린다.
+
+LOCO 단독 실행 결과 (2026-07-20 기준):
+
+```
+loco: 이미지 5,097장 / 박스 148,003개
+  제외 — 대상 외 카테고리 3,425
+[정리] 어노테이션 없는 이미지 212장 제거
+[검증] 이미지 4,885장 모두 존재
+완료 → data/processed/box_coco.json
+  이미지 4,885장 / 박스 148,003개
+```
 
 변환기가 하는 일:
 
@@ -94,6 +124,12 @@ python -m dataset.convert --config configs/datasets.yaml
 5. 어노테이션이 없는 이미지 제거 (부분 라벨링으로 인한 오탐 학습 방지)
 
 > train/val 분할과 라벨 검수는 이 단계가 아니라 **FR-101-2 (S15P11A304-66)**에서 한다.
+
+FR-101-2로 넘길 실측 소견:
+
+- bbox 면적 중앙값 2,688px, 이미지당 박스 중앙값 21개 — 밀집 장면이 많다.
+- **면적 100px 미만 박스가 816개**(최소 1px). 학습에 해로울 수 있어 검수 때
+  하한선을 정해 걸러낼지 판단이 필요하다.
 
 ## 테스트
 

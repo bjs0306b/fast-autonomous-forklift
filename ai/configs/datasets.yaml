@@ -15,8 +15,9 @@ sources:
   - name: loco
     type: coco
     enabled: true
+    # dataset.zip을 data/raw/loco/에 풀면 dataset/subset-N/... 구조가 나온다.
     annotations: data/raw/loco/loco-all-v1.json
-    images_root: data/raw/loco/images
+    images_root: data/raw/loco/dataset
     keep_categories: [small_load_carrier, stillage, pallet]
     path_key: path
     strip_path_prefix: /dataset/

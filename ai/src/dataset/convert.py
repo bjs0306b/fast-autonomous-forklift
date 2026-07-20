@@ -27,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="어노테이션 없는 이미지도 남긴다 (기본은 제거)",
     )
+    parser.add_argument(
+        "--verify-images",
+        action="store_true",
+        help="변환 후 이미지 파일이 실제로 존재하는지 확인한다 (경로 규칙 검증)",
+    )
     args = parser.parse_args(argv)
 
     config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
@@ -35,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
 
     builder = CocoBuilder(class_name=config.get("class_name", "box"))
     converted = 0
+    roots: dict[str, Path] = {}  # prefix → 이미지 루트 (검증용)
 
     for source in config["sources"]:
         name = source["name"]
@@ -52,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[변환] {name} ← {annotations}")
         stats = _convert_one(builder, source, annotations)
         _print_stats(name, stats)
+        roots[source.get("prefix", name)] = root / source["images_root"]
         converted += 1
 
     if converted == 0:
@@ -64,12 +71,42 @@ def main(argv: list[str] | None = None) -> int:
         if removed:
             print(f"[정리] 어노테이션 없는 이미지 {removed:,}장 제거")
 
+    if args.verify_images and not _verify_images(builder, roots):
+        return 1
+
     builder.save(out_path)
     print(
         f"\n완료 → {out_path}\n"
         f"  이미지 {builder.num_images:,}장 / 박스 {builder.num_annotations:,}개"
     )
     return 0
+
+
+def _verify_images(builder: CocoBuilder, roots: dict[str, Path]) -> bool:
+    """file_name이 실제 이미지 파일을 가리키는지 확인한다.
+
+    어노테이션의 경로 규칙과 실제 배치가 어긋나면 학습 단계에 가서야
+    터지므로, 변환 시점에 잡는다.
+    """
+    missing: list[str] = []
+    for image in builder.to_dict()["images"]:
+        prefix, _, rel = image["file_name"].partition("/")
+        root = roots.get(prefix)
+        if root is None or not (root / rel).exists():
+            missing.append(image["file_name"])
+
+    if not missing:
+        print(f"[검증] 이미지 {builder.num_images:,}장 모두 존재")
+        return True
+
+    print(
+        f"\n[검증 실패] 이미지 {len(missing):,}장을 찾을 수 없습니다 "
+        f"(전체 {builder.num_images:,}장). images_root 또는 path_key 설정을 확인하세요.",
+        file=sys.stderr,
+    )
+    for name in missing[:5]:
+        print(f"    {name}", file=sys.stderr)
+    return False
 
 
 def _convert_one(builder: CocoBuilder, source: dict, annotations: Path) -> BuildStats:
