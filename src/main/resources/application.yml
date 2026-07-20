@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: fast-backend
+  profiles:
+    active: local
+  jackson:
+    default-property-inclusion: always
+
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.fast.backend: INFO

@@ -1,0 +1,54 @@
+# local 프로필 전용 설정 파일
+# 민감한 값(비밀번호, 토큰 등)은 이 파일에 직접 작성하지 않는다.
+# MQTT 접속 관련 값은 환경변수(${VAR:기본값})로 오버라이드할 수 있다(prompt11.md).
+# 환경변수를 아무것도 설정하지 않으면 아래 기본값(로컬 Mosquitto, 인증 없음)이 그대로 적용되어
+# 기존 로컬 개발 흐름과 동일하게 동작한다. EC2 공용 Broker에 접속하려면 MQTT_BROKER_URL/
+# MQTT_USERNAME/MQTT_PASSWORD 등을 환경변수로 주입하면 된다(자세한 내용은
+# prompt/answer/answer11.md, README.md의 "EC2 Mosquitto Broker 연동" 참고).
+# username/password는 값이 비어 있으면 MqttConfig가 MqttConnectOptions에 아예 설정하지 않는다.
+
+mqtt:
+  # MQTT 인프라(Client Factory/Channel/Adapter/Handler) 활성화 여부.
+  enabled: ${MQTT_ENABLED:true}
+  # POST /api/mqtt/test(검증용 임시 발행 API) 활성화 여부. 기본값은 false(비활성)이며,
+  # 로컬 개발 환경에서만 명시적으로 true로 켠다(prompt9.md 기준 기본값 정책과 동일).
+  test-api:
+    enabled: ${MQTT_TEST_API_ENABLED:true}
+  broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
+  username: ${MQTT_USERNAME:}
+  password: ${MQTT_PASSWORD:}
+  inbound-client-id: ${MQTT_INBOUND_CLIENT_ID:fast-backend-inbound}
+  outbound-client-id: ${MQTT_OUTBOUND_CLIENT_ID:fast-backend-outbound}
+  connection-timeout: 10
+  keep-alive-interval: 30
+  automatic-reconnect: true
+  clean-session: true
+  default-qos: ${MQTT_DEFAULT_QOS:1}
+  completion-timeout: 5000
+  recovery-interval: 5000
+  topics:
+    forklift-status: forklift/+/status
+    forklift-location: forklift/+/location
+    cargo-detected: cargo/detected
+    forklift-command: forklift/%s/command
+    forklift-emergency: forklift/%s/emergency
+
+# ---------------------------------------------------------------
+# 향후 추가 예정 설정 위치 (현재는 비활성 상태로 주석만 유지)
+# ---------------------------------------------------------------
+
+# 향후 MySQL 연결 정보가 추가될 위치
+# spring:
+#   datasource:
+#     url:
+#     username:
+#     password:
+
+# 향후 MyBatis 설정이 추가될 위치
+# mybatis:
+#   mapper-locations:
+#   type-aliases-package:
+
+# 향후 WebSocket 엔드포인트 설정이 추가될 위치
+# websocket:
+#   endpoint:
