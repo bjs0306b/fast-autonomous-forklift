@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from .coco import BuildStats, CocoBuilder
+from .coco import DEFAULT_CLASSES, BuildStats, CocoBuilder
 from .sources import convert_coco, convert_sku110k
 
 
@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     root = args.config.parent.parent  # ai/ 기준으로 상대경로 해석
     out_path = args.out or (root / config["output"])
 
-    builder = CocoBuilder(class_name=config.get("class_name", "box"))
+    builder = CocoBuilder(classes=config.get("classes", DEFAULT_CLASSES))
     converted = 0
     roots: dict[str, Path] = {}  # prefix → 이미지 루트 (검증용)
 
@@ -75,10 +75,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     builder.save(out_path)
-    print(
-        f"\n완료 → {out_path}\n"
-        f"  이미지 {builder.num_images:,}장 / 박스 {builder.num_annotations:,}개"
-    )
+    counts = builder.class_counts()
+    total = builder.num_annotations
+    print(f"\n완료 → {out_path}")
+    print(f"  이미지 {builder.num_images:,}장 / 어노테이션 {total:,}개")
+    print("  클래스별:")
+    for name, n in counts.items():
+        share = n / total * 100 if total else 0
+        print(f"    {name:<10}{n:>9,}  ({share:.1f}%)")
     return 0
 
 
@@ -117,24 +121,34 @@ def _convert_one(builder: CocoBuilder, source: dict, annotations: Path) -> Build
     group = source.get("group", prefix)
 
     if kind == "coco":
+        if "class_map" not in source:
+            raise ValueError(
+                f"소스 '{source['name']}'에 class_map이 없습니다. "
+                "2클래스 전환으로 keep_categories는 class_map으로 대체됐습니다."
+            )
         return convert_coco(
             builder,
             annotations,
             prefix,
-            keep_categories=source.get("keep_categories"),
+            class_map=source["class_map"],
             path_key=source.get("path_key", "file_name"),
             strip_path_prefix=source.get("strip_path_prefix", ""),
             group=group,
         )
     if kind == "sku110k":
-        return convert_sku110k(builder, annotations, prefix, group=group)
+        return convert_sku110k(
+            builder, annotations, prefix, class_name=source.get("class_name", "box"), group=group
+        )
     raise ValueError(f"알 수 없는 소스 type: {kind}")
 
 
 def _print_stats(name: str, stats: BuildStats) -> None:
-    print(f"  {name}: 이미지 {stats.images:,}장 / 박스 {stats.annotations:,}개")
+    detail = ""
+    if stats.per_class:
+        detail = "  (" + ", ".join(f"{k} {v:,}" for k, v in sorted(stats.per_class.items())) + ")"
+    print(f"  {name}: 이미지 {stats.images:,}장 / 어노테이션 {stats.annotations:,}개{detail}")
     if stats.skipped_images or stats.skipped_annotations:
-        print(f"    제외 — 이미지 {stats.skipped_images:,} / 박스 {stats.skipped_annotations:,}")
+        print(f"    제외 — 이미지 {stats.skipped_images:,} / 어노테이션 {stats.skipped_annotations:,}")
         for reason, count in sorted(stats.reasons.items(), key=lambda kv: -kv[1]):
             print(f"      {reason}: {count:,}")
 
