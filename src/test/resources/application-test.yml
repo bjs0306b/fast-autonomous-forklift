@@ -1,0 +1,35 @@
+# 테스트 전용 프로필.
+# 기본 mvn test가 실제 MQTT Broker에 연결하지 않도록 mqtt.enabled를 false로 둔다.
+# MqttConfig의 Client Factory/Channel/Adapter/Handler Bean이 아예 생성되지 않아,
+# @SpringBootTest 컨텍스트가 여러 개 뜰 때 같은 MQTT Client ID로 실제 Broker에
+# 동시 접속하면서 발생하던 "Lost connection" 로그(answer5.md/answer7.md 참고)를 없앤다.
+#
+# MQTT 관련 순수 단위 테스트(MqttTopicsTest, MqttMessageRouterTest, MqttPublisherTest)는
+# @SpringBootTest를 쓰지 않아 이 프로필과 무관하게 항상 동작한다.
+#
+# mqtt.enabled가 false라도 MqttTopics/MqttMessageRouter/MqttMessageReceiver Bean 자체는
+# (실제 연결을 하지 않을 뿐) 계속 생성되므로, MqttProperties가 정상적으로 바인딩되도록
+# topics 등 나머지 값은 application-local.yml과 동일하게 채워둔다. 이 값들은 실제로
+# Broker에 접속하는 데 쓰이지 않는다.
+mqtt:
+  enabled: false
+  test-api:
+    enabled: false
+  broker-url: tcp://localhost:1883
+  username:
+  password:
+  inbound-client-id: fast-backend-test-inbound
+  outbound-client-id: fast-backend-test-outbound
+  connection-timeout: 10
+  keep-alive-interval: 30
+  automatic-reconnect: true
+  clean-session: true
+  default-qos: 1
+  completion-timeout: 5000
+  recovery-interval: 5000
+  topics:
+    forklift-status: forklift/+/status
+    forklift-location: forklift/+/location
+    cargo-detected: cargo/detected
+    forklift-command: forklift/%s/command
+    forklift-emergency: forklift/%s/emergency
