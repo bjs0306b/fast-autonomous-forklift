@@ -87,6 +87,81 @@ def test_coco_소스는_지정한_카테고리만_박스로_변환한다(tmp_pat
     assert result["annotations"][0]["category_id"] == BOX_CATEGORY_ID
 
 
+def test_path_key로_디렉터리까지_보존한다(tmp_path, builder: CocoBuilder) -> None:
+    """LOCO는 file_name이 타임스탬프 basename이라 subset 간 충돌한다.
+
+    실제 LOCO 레코드 형태를 그대로 본떠, path를 쓰면 디렉터리가 남고
+    공통 접두사 '/dataset/'만 떨어지는지 확인한다.
+    """
+    source = tmp_path / "loco.json"
+    source.write_text(
+        json.dumps(
+            {
+                "categories": [{"id": 3, "name": "small_load_carrier"}],
+                "images": [
+                    {
+                        "id": 1,
+                        "path": "/dataset/subset-5/2020-03-05_1/Kinect/color/1613832,4601.jpg",
+                        "file_name": "1613832,4601.jpg",
+                        "width": 1920,
+                        "height": 1080,
+                    },
+                    {
+                        "id": 2,
+                        "path": "/dataset/subset-2/2020-03-05_1/Kinect/color/1613832,4601.jpg",
+                        "file_name": "1613832,4601.jpg",
+                        "width": 1920,
+                        "height": 1080,
+                    },
+                ],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 3, "bbox": [10, 10, 30, 30]},
+                    {"id": 2, "image_id": 2, "category_id": 3, "bbox": [10, 10, 30, 30]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    convert_coco(
+        builder,
+        source,
+        prefix="loco",
+        keep_categories=["small_load_carrier"],
+        path_key="path",
+        strip_path_prefix="/dataset/",
+    )
+
+    file_names = [img["file_name"] for img in builder.to_dict()["images"]]
+    assert file_names == [
+        "loco/subset-5/2020-03-05_1/Kinect/color/1613832,4601.jpg",
+        "loco/subset-2/2020-03-05_1/Kinect/color/1613832,4601.jpg",
+    ]
+
+
+def test_path_key_없이는_basename이_충돌한다(tmp_path, builder: CocoBuilder) -> None:
+    """path_key를 안 쓰면 서로 다른 이미지가 하나로 합쳐지는 것을 명시한다."""
+    source = tmp_path / "loco.json"
+    source.write_text(
+        json.dumps(
+            {
+                "categories": [{"id": 3, "name": "small_load_carrier"}],
+                "images": [
+                    {"id": 1, "file_name": "1613832.jpg", "width": 100, "height": 100},
+                    {"id": 2, "file_name": "1613832.jpg", "width": 100, "height": 100},
+                ],
+                "annotations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stats = convert_coco(builder, source, prefix="loco")
+
+    assert builder.num_images == 1
+    assert stats.reasons["중복 file_name"] == 1
+
+
 def test_없는_카테고리를_지정하면_에러(tmp_path, builder: CocoBuilder) -> None:
     source = tmp_path / "loco.json"
     source.write_text(

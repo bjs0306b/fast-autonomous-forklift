@@ -19,12 +19,18 @@ def convert_coco(
     annotations: Path,
     prefix: str,
     keep_categories: list[str] | None = None,
+    path_key: str = "file_name",
+    strip_path_prefix: str = "",
 ) -> BuildStats:
     """COCO 포맷 소스를 읽어 박스 단일 클래스로 재매핑한다.
 
     ``keep_categories``가 비어 있으면 전체 카테고리를 박스로 본다
     (Roboflow cardboard box처럼 이미 단일 클래스인 경우).
     LOCO처럼 여러 클래스가 섞인 소스는 박스형 클래스만 골라 넘긴다.
+
+    ``path_key``는 이미지 경로로 쓸 필드다. LOCO는 ``file_name``이
+    ``1583416214257,48.jpg`` 같은 타임스탬프 basename이라 subset을 합치면
+    충돌하므로, 디렉터리까지 담긴 ``path``를 써야 한다.
     """
     stats = BuildStats()
     # Windows에서 내보낸 어노테이션에 BOM이 붙는 경우가 있어 utf-8-sig로 읽는다.
@@ -36,8 +42,13 @@ def convert_coco(
     # 원본 image_id → 새 image_id
     id_map: dict[int, int] = {}
     for image in raw.get("images", []):
+        rel = _relative_path(image, path_key, strip_path_prefix)
+        if rel is None:
+            stats.skip("image", f"{path_key} 필드 없음")
+            continue
+
         new_id = builder.add_image(
-            file_name=f"{prefix}/{image['file_name']}",
+            file_name=f"{prefix}/{rel}",
             width=int(image.get("width", 0)),
             height=int(image.get("height", 0)),
             stats=stats,
@@ -91,6 +102,18 @@ def convert_sku110k(builder: CocoBuilder, annotations: Path, prefix: str) -> Bui
             builder.add_annotation(image_id, bbox, stats)
 
     return stats
+
+
+def _relative_path(image: dict, path_key: str, strip_prefix: str) -> str | None:
+    """이미지 레코드에서 이미지 루트 기준 상대경로를 뽑는다."""
+    raw = image.get(path_key)
+    if not raw:
+        return None
+
+    rel = str(raw).replace("\\", "/")
+    if strip_prefix and rel.startswith(strip_prefix):
+        rel = rel[len(strip_prefix) :]
+    return rel.lstrip("/")
 
 
 def _resolve_categories(

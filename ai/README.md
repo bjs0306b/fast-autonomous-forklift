@@ -41,10 +41,37 @@ pip install -e ".[dev]"
 | [Roboflow Universe — cardboard box](https://universe.roboflow.com/) | `data/raw/roboflow_cardboard/` | 프로젝트별 상이 (대개 CC BY 4.0) | **COCO 포맷으로 내보내기** |
 | [SKU-110K](https://github.com/eg4000/SKU110K_CVPR19) | `data/raw/SKU110K/` | 학술·비영리 | 밀집 적재 장면. 기본 비활성 — 사용 전 팀 합의 필요 |
 
-LOCO는 클래스가 5개(`pallet`, `stillage`, `small_load_carrier`, `forklift`,
-`pallet_truck`)라서 박스형인 `small_load_carrier`·`stillage`만 채택한다.
-지게차·핸드파렛트는 화물이 아니므로 제외한다. 채택 기준을 바꾸려면
-`configs/datasets.yaml`의 `keep_categories`를 수정한다.
+### LOCO 클래스 채택 기준
+
+LOCO 전체는 이미지 5,097장 / 어노테이션 151,428개이며 클래스 분포는 아래와 같다.
+
+| 클래스 | 수 | 채택 |
+|---|---:|---|
+| pallet | 120,445 | O — 포크를 꽂는 대상이라 인식 필요 (FR-303 연계) |
+| small_load_carrier | 22,151 | O — 박스형 화물 |
+| stillage | 5,407 | O — 박스형 화물 |
+| pallet_truck | 2,827 | X — 장비 |
+| forklift | 598 | X — 장비 |
+
+채택 기준에 따른 수율:
+
+| 기준 | 학습 가능 이미지 | 박스 수 |
+|---|---:|---:|
+| pallet 제외 | 2,009장 | 27,558 |
+| **pallet 포함 (현재)** | **4,885장** | **148,003** |
+
+> **주의 — 클래스 편중**: pallet이 채택분의 81%를 차지한다. 단일 클래스로 합치면
+> 모델이 파렛트 위주로 학습될 수 있어, 종이박스 기준 mAP가 목표(92%)에 못 미칠
+> 위험이 있다. Roboflow cardboard 비중 조절이나 pallet 샘플링으로 대응한다.
+> 판단은 학습(FR-101-3) 결과를 보고 조정한다.
+
+채택 기준을 바꾸려면 `configs/datasets.yaml`의 `keep_categories`를 수정한다.
+
+### LOCO 경로 처리
+
+LOCO의 `file_name`은 `1613832,4601.jpg` 같은 타임스탬프 basename이라 subset을
+합치면 서로 다른 이미지가 충돌한다. 디렉터리가 담긴 `path` 필드를 쓰도록
+`path_key: path`, `strip_path_prefix: /dataset/`를 지정해 두었다.
 
 ## 변환 실행
 

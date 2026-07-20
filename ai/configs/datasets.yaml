@@ -6,13 +6,20 @@ output: data/processed/box_coco.json
 
 sources:
   # LOCO — 물류 창고 특화, COCO 포맷, 무료
-  # 5개 클래스 중 '박스형 화물'만 채택한다 (forklift/pallet_truck은 장비라 제외).
+  # 실제 카테고리: small_load_carrier(3), forklift(5), pallet(7), stillage(10), pallet_truck(11)
+  # 이 중 '적재 대상'만 채택한다. forklift/pallet_truck은 장비라 제외.
+  # pallet은 받침대지만 포크를 꽂는 대상이라 인식이 필요해 포함한다(FR-303 연계).
+  #
+  # file_name이 '1583416214257,48.jpg' 같은 타임스탬프 basename이라 subset을 합치면
+  # 충돌한다. 디렉터리가 담긴 path를 쓰고 공통 접두사 '/dataset/'만 떼어낸다.
   - name: loco
     type: coco
     enabled: true
     annotations: data/raw/loco/loco-all-v1.json
     images_root: data/raw/loco/images
-    keep_categories: [small_load_carrier, stillage]
+    keep_categories: [small_load_carrier, stillage, pallet]
+    path_key: path
+    strip_path_prefix: /dataset/
 
   # Roboflow Universe — cardboard box, COCO로 내보내기
   # 이미 단일 클래스라 keep_categories를 비워 전체를 채택한다.

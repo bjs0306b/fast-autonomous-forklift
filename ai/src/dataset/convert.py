@@ -78,7 +78,12 @@ def _convert_one(builder: CocoBuilder, source: dict, annotations: Path) -> Build
 
     if kind == "coco":
         return convert_coco(
-            builder, annotations, prefix, keep_categories=source.get("keep_categories")
+            builder,
+            annotations,
+            prefix,
+            keep_categories=source.get("keep_categories"),
+            path_key=source.get("path_key", "file_name"),
+            strip_path_prefix=source.get("strip_path_prefix", ""),
         )
     if kind == "sku110k":
         return convert_sku110k(builder, annotations, prefix)
