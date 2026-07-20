@@ -3,3 +3,46 @@
 .env.local
 .env.*.local
 *.env
+
+# ===== Java / Spring Boot (Gradle) =====
+build/
+.gradle/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# ===== Node / React (Vite) =====
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ===== ROS2 (colcon) =====
+install/
+log/
+*.db3
+
+# ===== AI / 학습 산출물 (대용량 — Git LFS 또는 외부 저장) =====
+*.pt
+*.pth
+*.onnx
+*.engine
+runs/
+wandb/
+
+# ===== IDE / OS =====
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
