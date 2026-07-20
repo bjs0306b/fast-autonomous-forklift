@@ -17,6 +17,8 @@ ai/
 │  ├─ coco.py              COCO 빌더, 중복 판별(image_identity)
 │  ├─ sources.py           소스별 변환기 (COCO / SKU-110K CSV)
 │  ├─ convert.py           변환 CLI
+│  ├─ review.py            라벨 검수 CLI
+│  ├─ split.py             train/val 분할 CLI (원본 단위)
 │  └─ extract_roboflow.py  Roboflow zip 추출 (Windows 경로 길이 대응)
 ├─ tests/                  변환 로직 테스트
 └─ data/                   원본·변환 결과 (git 제외)
@@ -180,22 +182,72 @@ python -m dataset.convert --config configs/datasets.yaml --verify-images
 Logistics는 99,238장 중 6,331장(6%)만 남았다. 대상 클래스가 없는 장면(화재·교통
 등)이 84,332장, LOCO·Carboard Box와 중복이 4,937장이다.
 
-## FR-101-2 (S15P11A304-66)로 넘길 사항
+## 라벨 검수 (FR-101-2)
 
-> train/val 분할과 라벨 검수는 이 단계가 아니라 FR-101-2에서 한다.
+```bash
+cd ai
+python -m dataset.review --input data/processed/box_coco.json \
+    --output data/processed/box_coco_clean.json
+```
 
-1. **분할 시 `image_identity()`로 묶어야 한다.** 고유 정체성은 11,210개인데
-   이미지는 21,609장이다. 차이는 Carboard Box 증강본(원본 1장이 최대 102장까지
-   불어남)이며, 무작위 분할하면 같은 사진의 뒤집기본이 train과 val에 갈라져
-   **mAP가 실제보다 부풀려진다.** 함수는 `dataset.coco`에 있으니 그대로 쓰면 된다.
-2. **초소형 bbox 처리 기준.** LOCO 기준 면적 100px 미만이 816개(최소 1px).
-   하한선을 정해 걸러낼지 판단이 필요하다.
-3. **Logistics 라벨 품질.** 데이터셋 설명상 일부가 Autodistill DETIC 자동
-   라벨링이고 베이스 모델 mAP도 76% 수준이다. 표본으로 확인한 종이박스 라벨은
-   양호했고, LOCO 재수록분은 박스 수가 정확히 일치해 원본 라벨을 그대로 가져온
-   것으로 보인다. 다만 전수 검증은 하지 않았다.
-4. **Carboard Box는 640x640 stretch 리사이즈**라 종횡비가 왜곡돼 있다.
-   Logistics도 마찬가지다. LOCO만 원본 해상도(1920x1080 등)다.
+품질 지표를 출력하고 **명백히 못 쓸 어노테이션만** 제거한다. 실측 결과 라벨
+품질이 전반적으로 양호해서 기본 임계값을 보수적으로 잡았다.
+
+| 기준 | 기본값 | 실측 제거량 |
+|---|---|---:|
+| IoU 중복 (같은 이미지 내) | 0.9 이상 | 109 |
+| 종횡비 | 20:1 초과 | 45 |
+| 최소 면적 | 16px 미만 | 6 |
+| **합계** | | **160 (0.07%)** |
+
+`--min-area` / `--max-aspect` / `--dup-iou`로 조절한다.
+
+**전체 프레임을 덮는 박스 1,133개는 걸러내지 않는다.** 실물을 확인한 결과
+96.5%가 '박스 클로즈업 한 장'이라 정상 라벨이었다. 나머지 40개는 적재 단위
+전체를 하나로 본 라벨이다.
+
+참고 분포: 박스 면적 p1=150 / p50=5,727 / p99=345,625px, 이미지당 박스
+p50=2 / p90=29 / 최대 345개.
+
+## train/val 분할 (FR-101-2)
+
+```bash
+cd ai
+python -m dataset.split --input data/processed/box_coco_clean.json --val-ratio 0.2
+```
+
+> ⚠️ **반드시 원본 단위로 묶어 나눠야 한다.**
+>
+> Roboflow는 원본 1장을 최대 113장까지 증강해 내보낸다. 이미지 단위로 무작위
+> 분할하면 같은 사진의 뒤집기·회전본이 train과 val 양쪽에 들어간다.
+>
+> **실측: 순진한 이미지 단위 분할 시 val 4,321장 중 2,370장(54.8%)이 학습 때 본
+> 사진의 변형본이었다.** 모델이 val에서 사실상 외운 것을 맞히게 되어 mAP가 크게
+> 부풀려진다. 목표가 mAP 92%인 만큼 이 착시는 치명적이다.
+
+`image_identity()`로 같은 원본을 묶고(21,607장 → 11,208그룹) 그룹 단위로 나눈다.
+소스별로 따로 배분해 val이 특정 데이터셋에 쏠리지 않게 한다. 시드 고정(기본 42).
+
+현재 결과:
+
+| | 그룹 | 이미지 | 박스 |
+|---|---:|---:|---:|
+| train | 8,966 | 17,365 | 177,587 |
+| val | 2,242 | 4,242 | 44,030 |
+
+소스별 val 비율 19.1~23.3%로 고르게 배분됐고, **train/val에 걸친 원본은 0개**다.
+출력은 `box_coco_train.json` / `box_coco_val.json`.
+
+## 남은 판단 사항
+
+- **Logistics 라벨 품질**: 일부가 Autodistill DETIC 자동 라벨링이고 베이스 모델
+  mAP가 76% 수준이다. 표본으로 확인한 종이박스 라벨은 양호했고 LOCO 재수록분은
+  박스 수가 정확히 일치해 원본 라벨을 그대로 가져온 것으로 보이나, **전수 검증은
+  하지 않았다.** 학습 결과가 기대 이하면 여기를 먼저 의심한다.
+- **해상도 불일치**: Logistics·Carboard Box는 640x640 stretch 리사이즈라 종횡비가
+  왜곡돼 있다. LOCO만 원본 해상도(1920x1080 등)다.
+- **파렛트 비중 56.2%**: 종이박스 기준 mAP가 목표에 못 미치면 pallet 샘플링을
+  검토한다 (`configs/datasets.yaml`의 `keep_categories`).
 
 ## 테스트
 
