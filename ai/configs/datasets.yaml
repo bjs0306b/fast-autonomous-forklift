@@ -22,13 +22,33 @@ sources:
     path_key: path
     strip_path_prefix: /dataset/
 
-  # Roboflow Universe — cardboard box, COCO로 내보내기
+  # Roboflow Universe — cardboard box, COCO로 내보내기.
+  # Roboflow는 train/valid/test로 나눠 내보내므로 셋 다 읽어 합친다.
+  # (분할은 FR-101-2에서 우리 기준으로 다시 하므로 여기선 원본 분할을 무시한다.)
   # 이미 단일 클래스라 keep_categories를 비워 전체를 채택한다.
-  - name: roboflow_cardboard
+  # 없는 split은 자동으로 건너뛴다.
+  - name: roboflow_cardboard_train
     type: coco
     enabled: true
+    prefix: roboflow_cardboard
     annotations: data/raw/roboflow_cardboard/train/_annotations.coco.json
     images_root: data/raw/roboflow_cardboard/train
+    keep_categories: []
+
+  - name: roboflow_cardboard_valid
+    type: coco
+    enabled: true
+    prefix: roboflow_cardboard_valid
+    annotations: data/raw/roboflow_cardboard/valid/_annotations.coco.json
+    images_root: data/raw/roboflow_cardboard/valid
+    keep_categories: []
+
+  - name: roboflow_cardboard_test
+    type: coco
+    enabled: true
+    prefix: roboflow_cardboard_test
+    annotations: data/raw/roboflow_cardboard/test/_annotations.coco.json
+    images_root: data/raw/roboflow_cardboard/test
     keep_categories: []
 
   # SKU-110K — 밀집 적재 장면. 학술·비영리 라이선스라 기본 비활성.
