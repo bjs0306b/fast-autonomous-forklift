@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from dataset.coco import BOX_CATEGORY_ID, BuildStats, CocoBuilder
+from dataset.coco import BOX_CATEGORY_ID, BuildStats, CocoBuilder, image_identity
 from dataset.sources import convert_coco, convert_sku110k
 
 
@@ -57,6 +57,62 @@ def test_어노테이션_없는_이미지는_제거된다(builder: CocoBuilder) 
 
     assert builder.drop_empty_images() == 1
     assert [img["file_name"] for img in builder.to_dict()["images"]] == ["a/keep.jpg"]
+
+
+@pytest.mark.parametrize(
+    ("file_name", "expected"),
+    [
+        # LOCO: 디렉터리를 떼고 구분자를 통일
+        ("loco/subset-1/1564563638.9526272.jpg", "1564563638-9526272"),
+        ("loco/subset-5/2020-03-05_1/RealSense/color/0/1583416214257,48.jpg", "1583416214257-48"),
+        # Roboflow: 증강 접미사를 떼면 같은 원본으로 묶인다
+        ("logistics/1564563638-9526272_jpg.rf.8685fc40f5efaa04.jpg", "1564563638-9526272"),
+        ("roboflow_cardboard/cardboard-1308_jpg.rf.000778936f4e4529.jpg", "cardboard-1308"),
+        ("roboflow_cardboard/cardboard-1308_jpg.rf.ffff778936f4e452.jpg", "cardboard-1308"),
+    ],
+)
+def test_정체성_키는_소스별_파일명_차이를_흡수한다(file_name: str, expected: str) -> None:
+    assert image_identity(file_name) == expected
+
+
+def test_다른_데이터셋의_같은_원본은_먼저_온_쪽을_남긴다(builder: CocoBuilder) -> None:
+    """LOCO 3,830장이 Logistics에 재수록돼 있어 실제로 발생한 상황."""
+    stats = BuildStats()
+    kept = builder.add_image(
+        "loco/subset-1/1564563638.9526272.jpg", 1920, 1080, stats, group="loco"
+    )
+    dropped = builder.add_image(
+        "logistics/1564563638-9526272_jpg.rf.8685fc40f5efaa04.jpg", 640, 640, stats,
+        group="logistics",
+    )
+
+    assert kept == 1
+    assert dropped is None
+    assert stats.reasons["loco와 동일 원본"] == 1
+    assert builder.num_images == 1
+
+
+def test_같은_데이터셋의_증강본은_중복이_아니다(builder: CocoBuilder) -> None:
+    """증강본은 원본을 공유하지만 의도된 학습 데이터라 살려야 한다."""
+    stats = BuildStats()
+    first = builder.add_image(
+        "roboflow_cardboard/cardboard-1308_jpg.rf.aaaa778936f4e452.jpg", 640, 640, stats,
+        group="roboflow_cardboard",
+    )
+    second = builder.add_image(
+        "roboflow_cardboard/cardboard-1308_jpg.rf.bbbb778936f4e452.jpg", 640, 640, stats,
+        group="roboflow_cardboard",
+    )
+
+    assert (first, second) == (1, 2)
+    assert builder.num_images == 2
+
+
+def test_group을_안_주면_소스마다_독립으로_본다(builder: CocoBuilder) -> None:
+    """group 미지정(None)끼리는 같은 group이므로 중복 제거가 걸리지 않는다."""
+    stats = BuildStats()
+    assert builder.add_image("a/img.jpg", 100, 100, stats) == 1
+    assert builder.add_image("b/img.jpg", 100, 100, stats) == 2
 
 
 def test_coco_소스는_지정한_카테고리만_박스로_변환한다(tmp_path, builder: CocoBuilder) -> None:

@@ -8,11 +8,31 @@ detection 필드만 채운다.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 # 박스 단일 클래스이므로 카테고리는 항상 1개(id=1)로 고정한다.
 BOX_CATEGORY_ID = 1
+
+# Roboflow 증강본 접미사: '<원본>_jpg.rf.<해시>.jpg'
+_ROBOFLOW_SUFFIX = re.compile(r"^(.*?)_(?:jpg|jpeg|png)\.rf\.[0-9a-f]+\.", re.IGNORECASE)
+
+
+def image_identity(file_name: str) -> str:
+    """서로 다른 소스에서 온 '같은 원본 사진'을 알아보기 위한 키.
+
+    공개 데이터셋은 서로를 재수록한다. 실제로 LOCO 5,097장 중 3,830장이
+    Roboflow Logistics에 다시 들어 있었는데, 파일명이 각각
+    ``subset-1/1564563638.9526272.jpg`` 와
+    ``1564563638-9526272_jpg.rf.<해시>.jpg`` 라서 그냥은 걸러지지 않는다.
+
+    디렉터리·증강 접미사를 떼고 구분자를 통일해 원본 이름만 남긴다.
+    """
+    stem = Path(file_name).name
+    match = _ROBOFLOW_SUFFIX.match(stem)
+    stem = match.group(1) if match else Path(stem).stem
+    return stem.replace(".", "-").replace(",", "-").lower()
 
 
 @dataclass
@@ -38,7 +58,9 @@ class CocoBuilder:
 
     - id는 소스별로 겹치므로 전부 새로 발급한다.
     - file_name은 최종 이미지 루트 기준 상대경로로 저장한다.
-    - 같은 file_name이 두 번 들어오면 뒤엣것을 버린다(소스 간 중복 방지).
+    - 같은 file_name이 두 번 들어오면 뒤엣것을 버린다.
+    - ``group``(데이터셋)이 다른데 같은 원본 사진이면 먼저 온 쪽을 남긴다.
+      증강본은 같은 원본을 공유하므로, 같은 group 안에서는 중복으로 보지 않는다.
     """
 
     def __init__(self, class_name: str = "box") -> None:
@@ -47,15 +69,29 @@ class CocoBuilder:
         self._annotations: list[dict] = []
         self._image_by_id: dict[int, dict] = {}
         self._index_by_file: dict[str, int] = {}
+        self._identity_owner: dict[str, str] = {}  # 정체성 → 선점한 group
         self._next_image_id = 1
         self._next_annotation_id = 1
 
-    def add_image(self, file_name: str, width: int, height: int, stats: BuildStats) -> int | None:
+    def add_image(
+        self,
+        file_name: str,
+        width: int,
+        height: int,
+        stats: BuildStats,
+        group: str | None = None,
+    ) -> int | None:
         """이미지를 등록하고 새 image_id를 돌려준다. 중복·비정상이면 None."""
         file_name = file_name.replace("\\", "/")
 
         if file_name in self._index_by_file:
             stats.skip("image", "중복 file_name")
+            return None
+
+        identity = image_identity(file_name)
+        owner = self._identity_owner.get(identity)
+        if owner is not None and owner != group:
+            stats.skip("image", f"{owner}와 동일 원본")
             return None
         if width <= 0 or height <= 0:
             stats.skip("image", "width/height 없음")
@@ -67,6 +103,7 @@ class CocoBuilder:
         self._images.append(image)
         self._image_by_id[image_id] = image
         self._index_by_file[file_name] = image_id
+        self._identity_owner.setdefault(identity, group)
         stats.images += 1
         return image_id
 

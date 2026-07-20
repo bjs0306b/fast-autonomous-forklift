@@ -112,6 +112,9 @@ def _verify_images(builder: CocoBuilder, roots: dict[str, Path]) -> bool:
 def _convert_one(builder: CocoBuilder, source: dict, annotations: Path) -> BuildStats:
     kind = source.get("type", "coco")
     prefix = source.get("prefix", source["name"])
+    # group은 '같은 데이터셋'의 단위. train/valid/test처럼 한 데이터셋을 여러
+    # 소스로 쪼개 선언한 경우 같은 group을 줘야 증강본이 중복으로 걸리지 않는다.
+    group = source.get("group", prefix)
 
     if kind == "coco":
         return convert_coco(
@@ -121,9 +124,10 @@ def _convert_one(builder: CocoBuilder, source: dict, annotations: Path) -> Build
             keep_categories=source.get("keep_categories"),
             path_key=source.get("path_key", "file_name"),
             strip_path_prefix=source.get("strip_path_prefix", ""),
+            group=group,
         )
     if kind == "sku110k":
-        return convert_sku110k(builder, annotations, prefix)
+        return convert_sku110k(builder, annotations, prefix, group=group)
     raise ValueError(f"알 수 없는 소스 type: {kind}")
 
 

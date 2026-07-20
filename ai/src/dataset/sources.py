@@ -21,6 +21,7 @@ def convert_coco(
     keep_categories: list[str] | None = None,
     path_key: str = "file_name",
     strip_path_prefix: str = "",
+    group: str | None = None,
 ) -> BuildStats:
     """COCO 포맷 소스를 읽어 박스 단일 클래스로 재매핑한다.
 
@@ -52,6 +53,7 @@ def convert_coco(
             width=int(image.get("width", 0)),
             height=int(image.get("height", 0)),
             stats=stats,
+            group=group,
         )
         if new_id is not None:
             id_map[image["id"]] = new_id
@@ -69,7 +71,9 @@ def convert_coco(
     return stats
 
 
-def convert_sku110k(builder: CocoBuilder, annotations: Path, prefix: str) -> BuildStats:
+def convert_sku110k(
+    builder: CocoBuilder, annotations: Path, prefix: str, group: str | None = None
+) -> BuildStats:
     """SKU-110K CSV를 COCO로 변환한다.
 
     CSV는 헤더가 없고 한 줄이 bbox 하나이며, 같은 이미지가 여러 줄에 걸쳐 나온다.
@@ -92,6 +96,7 @@ def convert_sku110k(builder: CocoBuilder, annotations: Path, prefix: str) -> Bui
                     width=_to_int(width),
                     height=_to_int(height),
                     stats=stats,
+                    group=group,
                 )
                 if image_id is None:
                     continue

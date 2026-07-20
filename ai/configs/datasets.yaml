@@ -4,6 +4,13 @@
 class_name: box
 output: data/processed/box_coco.json
 
+# 소스 선언 순서 = 중복 시 우선순위. 공개 데이터셋은 서로를 재수록하므로
+# (실측: LOCO 5,097장 중 3,830장이 Logistics에 재수록됨) 같은 원본 사진은
+# 먼저 선언된 group이 가져간다. LOCO를 맨 앞에 두는 이유:
+#   - 수동 라벨 원본이다
+#   - small_load_carrier / stillage / pallet 구분이 살아 있어, 나중에 채택
+#     기준을 바꿀 여지가 남는다 (Logistics는 이를 wood pallet으로 뭉갰다)
+# group이 같으면 중복으로 보지 않는다 — 증강본은 원본을 공유하기 때문이다.
 sources:
   # LOCO — 물류 창고 특화, COCO 포맷, 무료
   # 실제 카테고리: small_load_carrier(3), forklift(5), pallet(7), stillage(10), pallet_truck(11)
@@ -13,6 +20,7 @@ sources:
   # file_name이 '1583416214257,48.jpg' 같은 타임스탬프 basename이라 subset을 합치면
   # 충돌한다. 디렉터리가 담긴 path를 쓰고 공통 접두사 '/dataset/'만 떼어낸다.
   - name: loco
+    group: loco
     type: coco
     enabled: true
     # dataset.zip을 data/raw/loco/에 풀면 dataset/subset-N/... 구조가 나온다.
@@ -22,12 +30,22 @@ sources:
     path_key: path
     strip_path_prefix: /dataset/
 
-  # Roboflow Universe — cardboard box, COCO로 내보내기.
+  # Roboflow Universe "Carboard Box" v4 (CC BY 4.0, 원본 ~1.1k장을 증강해 10,393장).
   # Roboflow는 train/valid/test로 나눠 내보내므로 셋 다 읽어 합친다.
   # (분할은 FR-101-2에서 우리 기준으로 다시 하므로 여기선 원본 분할을 무시한다.)
-  # 이미 단일 클래스라 keep_categories를 비워 전체를 채택한다.
+  #
+  # 카테고리가 4개인데 실물을 확인한 결과 전부 종이박스였다:
+  #   Cardboard-Box(id 0) — Roboflow 더미, 어노테이션 0개
+  #   '0', 'box'          — 같은 대상. 하위 데이터셋 병합 중 이름만 갈라짐
+  #   snake-in-cardboard-boxes — 박스에 숨는 밈 사진. bbox는 박스에 있음(71개)
+  # 따라서 keep_categories를 비워 전체를 채택한다.
+  #
+  # 주의: 증강본이라 file_name이 '<원본>_jpg.rf.<해시>.jpg' 형태다. FR-101-2에서
+  # 분할할 때 '_jpg.rf.' 앞부분으로 묶지 않으면 같은 원본이 train/val에 갈라져
+  # 성능이 부풀려진다.
   # 없는 split은 자동으로 건너뛴다.
   - name: roboflow_cardboard_train
+    group: roboflow_cardboard
     type: coco
     enabled: true
     prefix: roboflow_cardboard
@@ -36,6 +54,7 @@ sources:
     keep_categories: []
 
   - name: roboflow_cardboard_valid
+    group: roboflow_cardboard
     type: coco
     enabled: true
     prefix: roboflow_cardboard_valid
@@ -44,12 +63,46 @@ sources:
     keep_categories: []
 
   - name: roboflow_cardboard_test
+    group: roboflow_cardboard
     type: coco
     enabled: true
     prefix: roboflow_cardboard_test
     annotations: data/raw/roboflow_cardboard/test/_annotations.coco.json
     images_root: data/raw/roboflow_cardboard/test
     keep_categories: []
+
+  # Roboflow Universe "Logistics" v2 (CC BY 4.0, 99,238장, 640x640 stretch 리사이즈).
+  # 창고에서 지게차가 화물을 다루는 장면. 21개 클래스 중 적재 대상만 채택하고
+  # 장비(forklift, pallet truck)·사람·차량·안전장구는 제외한다.
+  #
+  # 주의: 설명에 따르면 일부가 Autodistill DETIC으로 자동 라벨링됐다.
+  # 베이스 모델 mAP도 76% 수준이라 라벨 노이즈를 전제하고 FR-101-2에서 검수한다.
+  - name: logistics_train
+    group: logistics
+    type: coco
+    enabled: true
+    prefix: logistics
+    annotations: data/raw/logistics/train/_annotations.coco.json
+    images_root: data/raw/logistics/train
+    keep_categories: ["cardboard box", "wood pallet"]
+
+  - name: logistics_valid
+    group: logistics
+    type: coco
+    enabled: true
+    prefix: logistics_valid
+    annotations: data/raw/logistics/valid/_annotations.coco.json
+    images_root: data/raw/logistics/valid
+    keep_categories: ["cardboard box", "wood pallet"]
+
+  - name: logistics_test
+    group: logistics
+    type: coco
+    enabled: true
+    prefix: logistics_test
+    annotations: data/raw/logistics/test/_annotations.coco.json
+    images_root: data/raw/logistics/test
+    keep_categories: ["cardboard box", "wood pallet"]
 
   # SKU-110K — 밀집 적재 장면. 학술·비영리 라이선스라 기본 비활성.
   # 사용 여부는 팀 합의 후 결정한다 (README 라이선스 항목 참고).
