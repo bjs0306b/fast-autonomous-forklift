@@ -30,7 +30,10 @@ model = dict(bbox_head=dict(num_classes=2))
 # base는 8GPU×batch32=256, base_lr 0.004. 단일 GPU batch 32 → lr 선형 축소.
 max_epochs = 100
 stage2_num_epochs = 10             # 마지막 10ep는 약증강(모자이크 off)으로 전환
-base_lr = 0.004 * 32 / 256         # = 0.0005
+# 파인튜닝용 lr. from-scratch 기본값(0.004×32/256=5e-4)은 사전학습 feature를 덮어써
+# val mAP가 붕괴했다(ep5 0.31 → ep15 0.18). 1/5로 낮추니 단조 상승(ep5 0.14 → ep10
+# 0.33 → ep15 0.39). 2026-07-21 LOCO 베이스라인에서 검증.
+base_lr = 1.0e-4
 val_interval = 5
 
 train_batch_size = 32
