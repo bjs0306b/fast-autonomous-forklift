@@ -4,8 +4,10 @@
 서버에서 mmdeploy로 export (NMS 포함). 입력 [1,3,H,W] float32, 출력
 ``dets`` [1,N,5](x1,y1,x2,y2,score — 입력 좌표계)와 ``labels`` [1,N].
 
-전처리는 mmdet 추론 파이프라인과 동일해야 한다:
-비율 유지 축소 → 좌상단 기준 114 패딩 → mean/std 정규화(BGR, to_rgb=False).
+전처리: 비율 유지 축소 → 좌상단 기준 114 패딩 → BGR 원시 픽셀(float32).
+**정규화(mean/std)는 하지 않는다** — mmdeploy가 export 시 정규화를 ONNX 그래프
+안에 내장했다. 밖에서 또 하면 이중 정규화로 입력이 망가져 점수가 붕괴한다
+(2026-07-22 실측: 이중 정규화 시 박스 최고점수 0.11 → 원시 픽셀 0.42로 회복).
 출력 bbox는 패딩이 좌상단 기준이므로 scale로 나누기만 하면 원본 좌표가 된다.
 
 onnxruntime만 쓰므로 mmdet/mmcv 스택이 필요 없다 — Windows 스테이션 PC에서
@@ -44,8 +46,8 @@ class OnnxDetector:
         self.input_size = input_size
         self.score_threshold = score_threshold
         self.class_names = class_names
-        self._mean = np.array(norm_mean, dtype=np.float32)
-        self._std = np.array(norm_std, dtype=np.float32)
+        # norm_mean/std는 받아두되 쓰지 않는다 (모델 내장). 시그니처 호환 유지용.
+        del norm_mean, norm_std
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
         """프레임 한 장 → Detection 리스트 (bbox는 원본 픽셀 좌표)."""
@@ -63,8 +65,8 @@ class OnnxDetector:
         padded = np.full((size, size, 3), PAD_VALUE, dtype=np.uint8)
         padded[:new_h, :new_w] = resized
 
-        normalized = (padded.astype(np.float32) - self._mean) / self._std
-        tensor = normalized.transpose(2, 0, 1)[np.newaxis]  # HWC → NCHW
+        # 정규화는 모델 내장 — 원시 BGR 픽셀을 float32로만 넘긴다 (클래스 도크스트링 참고)
+        tensor = padded.astype(np.float32).transpose(2, 0, 1)[np.newaxis]  # HWC → NCHW
         return np.ascontiguousarray(tensor), scale
 
     def _postprocess(
