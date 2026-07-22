@@ -4,8 +4,9 @@
 박스·파렛트 bbox의 중심을 비교해 화물이 한쪽으로 치우쳤는지(편하중) 판단한다.
 
 무게를 직접 잴 수단이 없으므로(로드셀 미탑재) **밀도 균일을 가정**하고 박스 bbox의
-기하 중심을 무게중심으로 본다. 박스가 하나뿐이라 여러 박스의 부피 가중평균(FR-103
-용적 로직)은 필요 없다 — 박스 중심 하나가 곧 무게중심이다.
+기하 중심을 무게중심으로 본다. 박스가 여러 개면 **중심들의 단순 평균**을 쓴다
+(2026-07-22 결정 — bbox는 정면 투영이라 깊이가 없어 부피 가중이 어차피 반쪽이고,
+데모 스케일에선 단순 평균이 가정도 적다. FR-103 용적 의존 없음).
 
 **치우침은 절대 거리(cm)가 아니라 박스 크기 대비 비율로 판정한다.** 그래야:
 
@@ -114,16 +115,40 @@ class LoadBalance:
 
 
 def assess(box: BBox, pallet: BBox, threshold: float = DEFAULT_THRESHOLD) -> LoadBalance:
-    """박스가 파렛트 위에서 치우쳤는지 판정한다.
+    """박스 하나가 파렛트 위에서 치우쳤는지 판정한다. ``assess_load``의 특수 케이스."""
+    return assess_load([box], pallet, threshold=threshold)
 
-    박스 중심과 파렛트 중심의 차이를 박스 반폭/반높이로 정규화한다. 박스가 폭이나
-    높이가 0인 퇴화 bbox면 감지가 잘못된 것이므로 ``ValueError``.
+
+def assess_load(
+    boxes: list[BBox], pallet: BBox, threshold: float = DEFAULT_THRESHOLD
+) -> LoadBalance:
+    """박스 1~N개의 화물 무게중심이 파렛트 위에서 치우쳤는지 판정한다.
+
+    무게중심은 **박스 중심들의 단순 평균**이다 (2026-07-22 결정). 부피·면적 가중은
+    쓰지 않는다 — bbox는 정면 투영이라 깊이가 없어 무게 대리값으로 불충분하고,
+    데모 스케일에선 단순 평균이 가정도 적고 설명도 쉽다. 밀도·크기 차이가 큰
+    화물 조합에서는 오차가 생길 수 있는 추정치다.
+
+    정규화 분모는 **박스들을 모두 감싸는 외곽(hull)의 반폭/반높이** — 박스가
+    하나면 그 박스 자신이라 단일 박스 판정과 정확히 같아지고, 여러 개여도
+    화물 덩어리 크기 대비 비율이라 스케일 불변이 유지된다.
+
+    빈 목록이거나 퇴화 bbox가 섞여 있으면 ``ValueError``.
     """
-    if box.w <= 0 or box.h <= 0:
-        raise ValueError(f"박스 bbox 크기가 0 이하다: w={box.w}, h={box.h}")
+    if not boxes:
+        raise ValueError("박스가 없다")
+    for b in boxes:
+        if b.w <= 0 or b.h <= 0:
+            raise ValueError(f"박스 bbox 크기가 0 이하다: w={b.w}, h={b.h}")
 
-    ratio_x = (box.center_x - pallet.center_x) / (box.w / 2)
-    ratio_y = (box.center_y - pallet.center_y) / (box.h / 2)
+    center_x = sum(b.center_x for b in boxes) / len(boxes)
+    center_y = sum(b.center_y for b in boxes) / len(boxes)
+
+    hull_half_w = (max(b.x + b.w for b in boxes) - min(b.x for b in boxes)) / 2
+    hull_half_h = (max(b.y + b.h for b in boxes) - min(b.y for b in boxes)) / 2
+
+    ratio_x = (center_x - pallet.center_x) / hull_half_w
+    ratio_y = (center_y - pallet.center_y) / hull_half_h
     return LoadBalance(ratio_x=ratio_x, ratio_y=ratio_y, threshold=threshold)
 
 
@@ -186,11 +211,38 @@ def select_targets(
     return box, pallet
 
 
+def select_load(
+    detections: list[Detection], min_score: float = DEFAULT_MIN_SCORE
+) -> tuple[list[BBox], BBox]:
+    """감지 목록에서 (파렛트 위 박스들, 파렛트)를 고른다 — 다중 박스 대응.
+
+    파렛트는 점수 최고, 박스는 **그 파렛트와 겹치는 전부**. 배경 박스는 겹침이
+    0이라 자연히 배제된다. 겹치는 박스가 하나도 없으면(박스가 파렛트를 벗어나
+    놓인 경우) 점수 최고 박스 하나로 폴백한다.
+    """
+    boxes = [d for d in detections if d.label == LABEL_BOX and d.score >= min_score]
+    pallets = [d for d in detections if d.label == LABEL_PALLET and d.score >= min_score]
+    if not pallets:
+        raise NoTargets("파렛트 감지 없음 (점수 미달 포함)")
+    if not boxes:
+        raise NoTargets("박스 감지 없음 (점수 미달 포함)")
+
+    pallet = max(pallets, key=lambda d: d.score).box
+    on_pallet = [d.box for d in boxes if _intersection_area(d.box, pallet) > 0]
+    if not on_pallet:
+        on_pallet = [max(boxes, key=lambda d: d.score).box]
+    return on_pallet, pallet
+
+
 def assess_detections(
     detections: list[Detection],
     threshold: float = DEFAULT_THRESHOLD,
     min_score: float = DEFAULT_MIN_SCORE,
 ) -> LoadBalance:
-    """감지 목록 → 편하중 판정. 모델 추론과 FR-104를 잇는 진입점."""
-    box, pallet = select_targets(detections, min_score=min_score)
-    return assess(box, pallet, threshold=threshold)
+    """감지 목록 → 편하중 판정. 모델 추론과 FR-104를 잇는 진입점.
+
+    파렛트 위 박스가 여러 개면 중심 평균으로 합산 무게중심을 판정한다
+    (``assess_load`` 참고). 하나면 기존 단일 박스 판정과 동일.
+    """
+    boxes, pallet = select_load(detections, min_score=min_score)
+    return assess_load(boxes, pallet, threshold=threshold)

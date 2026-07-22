@@ -10,6 +10,8 @@ from perception.load_balance import (
     NoTargets,
     assess,
     assess_detections,
+    assess_load,
+    select_load,
     select_targets,
 )
 
@@ -136,3 +138,57 @@ def test_파렛트나_박스가_없으면_거부한다() -> None:
         assess_detections([Detection("box", centered_box(), 0.9)])
     with pytest.raises(NoTargets):
         assess_detections([Detection("pallet", PALLET, 0.9)])
+
+
+# --- 다중 박스 (중심 단순 평균, 2026-07-22 결정) ---
+
+def test_단일_박스는_assess와_동일하다() -> None:
+    box = BBox(x=100 - 20 + 8, y=80, w=40, h=40)
+
+    single = assess(box, PALLET)
+    multi = assess_load([box], PALLET)
+
+    assert multi.ratio_x == pytest.approx(single.ratio_x)
+    assert multi.ratio_y == pytest.approx(single.ratio_y)
+
+
+def test_대칭_배치는_정상이다() -> None:
+    """파렛트 중심 기준 좌우 대칭 박스 2개 → 합산 중심이 중앙."""
+    left = BBox(x=100 - 30, y=90, w=20, h=20)    # 중심 x=80
+    right = BBox(x=100 + 10, y=90, w=20, h=20)   # 중심 x=120
+    r = assess_load([left, right], PALLET)
+
+    assert r.ratio_x == pytest.approx(0)
+    assert not r.eccentric
+
+
+def test_한쪽으로_몰린_박스들은_편하중이다() -> None:
+    """둘 다 오른쪽에 몰림 → 중심 평균 x=113.75, hull=[95,130] 반폭 17.5 → 0.786."""
+    a = BBox(x=95, y=90, w=20, h=20)     # 중심 x=105
+    b = BBox(x=115, y=90, w=15, h=20)    # 중심 x=122.5
+    r = assess_load([a, b], PALLET)
+
+    assert r.ratio_x == pytest.approx((113.75 - 100) / 17.5)
+    assert r.eccentric
+    assert "오른쪽" in r.direction
+
+
+def test_select_load는_겹치는_박스_전부를_고른다() -> None:
+    on1 = BBox(x=70, y=90, w=20, h=20)
+    on2 = BBox(x=110, y=90, w=20, h=20)
+    far = BBox(x=500, y=500, w=40, h=40)         # 배경 — 제외돼야 함
+    dets = [
+        Detection("pallet", PALLET, 0.9),
+        Detection("box", on1, 0.8),
+        Detection("box", on2, 0.7),
+        Detection("box", far, 0.99),
+    ]
+    boxes, pallet = select_load(dets)
+
+    assert set((b.x, b.y) for b in boxes) == {(70, 90), (110, 90)}
+    assert pallet == PALLET
+
+
+def test_빈_박스_목록은_거부한다() -> None:
+    with pytest.raises(ValueError):
+        assess_load([], PALLET)
