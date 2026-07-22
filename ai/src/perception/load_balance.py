@@ -211,14 +211,22 @@ def select_targets(
     return box, pallet
 
 
+def _x_overlap(a: BBox, b: BBox) -> float:
+    """가로(x) 구간 겹침 길이. 정면 뷰에서 '파렛트 위에 있음'의 판별 기준 —
+    위에 얹힌 박스는 bbox 면적이 파렛트와 안 겹칠 수 있지만(맞닿기만 함)
+    x 구간은 반드시 겹친다."""
+    return min(a.x + a.w, b.x + b.w) - max(a.x, b.x)
+
+
 def select_load(
     detections: list[Detection], min_score: float = DEFAULT_MIN_SCORE
 ) -> tuple[list[BBox], BBox]:
     """감지 목록에서 (파렛트 위 박스들, 파렛트)를 고른다 — 다중 박스 대응.
 
-    파렛트는 점수 최고, 박스는 **그 파렛트와 겹치는 전부**. 배경 박스는 겹침이
-    0이라 자연히 배제된다. 겹치는 박스가 하나도 없으면(박스가 파렛트를 벗어나
-    놓인 경우) 점수 최고 박스 하나로 폴백한다.
+    파렛트는 점수 최고, 박스는 **그 파렛트와 x 구간이 겹치는 전부** (정면 뷰
+    기준 — 위에 쌓인 박스는 면적은 안 겹쳐도 x는 겹친다). 옆에 떨어진 배경
+    박스는 x가 어긋나 배제된다. 겹치는 박스가 하나도 없으면 점수 최고 박스
+    하나로 폴백한다.
     """
     boxes = [d for d in detections if d.label == LABEL_BOX and d.score >= min_score]
     pallets = [d for d in detections if d.label == LABEL_PALLET and d.score >= min_score]
@@ -228,7 +236,7 @@ def select_load(
         raise NoTargets("박스 감지 없음 (점수 미달 포함)")
 
     pallet = max(pallets, key=lambda d: d.score).box
-    on_pallet = [d.box for d in boxes if _intersection_area(d.box, pallet) > 0]
+    on_pallet = [d.box for d in boxes if _x_overlap(d.box, pallet) > 0]
     if not on_pallet:
         on_pallet = [max(boxes, key=lambda d: d.score).box]
     return on_pallet, pallet
