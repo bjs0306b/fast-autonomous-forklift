@@ -4,11 +4,19 @@
 서버에서 mmdeploy로 export (NMS 포함). 입력 [1,3,H,W] float32, 출력
 ``dets`` [1,N,5](x1,y1,x2,y2,score — 입력 좌표계)와 ``labels`` [1,N].
 
-전처리: 비율 유지 축소 → 좌상단 기준 114 패딩 → BGR 원시 픽셀(float32).
-**정규화(mean/std)는 하지 않는다** — mmdeploy가 export 시 정규화를 ONNX 그래프
-안에 내장했다. 밖에서 또 하면 이중 정규화로 입력이 망가져 점수가 붕괴한다
-(2026-07-22 실측: 이중 정규화 시 박스 최고점수 0.11 → 원시 픽셀 0.42로 회복).
-출력 bbox는 패딩이 좌상단 기준이므로 scale로 나누기만 하면 원본 좌표가 된다.
+전처리는 mmdet test_pipeline과 정확히 일치해야 한다 (2026-07-22 서버 진단이
+torch .pth 오라클과 대조해 확정 — 일치 시 onnx가 torch와 top score 0.6496까지
+완전 일치):
+
+1. **keep_ratio 리사이즈** — scale=min(size/W, size/H)로 종횡비 유지 축소
+2. **좌상단 114 패딩** — size×size 캔버스에 (0,0) 배치
+3. **BGR 유지** (RGB 변환 안 함)
+4. **정규화** (pixel - mean) / std — mmdeploy가 정규화를 그래프에 넣지 않았으므로
+   호출자가 해야 한다. 안 하면 점수 붕괴.
+
+⚠️ 함정: 종횡비를 무시한 단순 정사각 리사이즈(cv2.resize(img,(size,size)))를 쓰면
+왜곡으로 score가 0.65→0.58로 떨어진다. input size를 키워도 왜곡은 그대로라 안 오른다.
+출력 bbox는 패딩이 좌상단 기준이므로 scale로 나누면 원본 좌표가 된다.
 
 onnxruntime만 쓰므로 mmdet/mmcv 스택이 필요 없다 — Windows 스테이션 PC에서
 의존성 지옥 없이 돈다. 결과는 perception.load_balance의 Detection으로 감싸
@@ -46,8 +54,8 @@ class OnnxDetector:
         self.input_size = input_size
         self.score_threshold = score_threshold
         self.class_names = class_names
-        # norm_mean/std는 받아두되 쓰지 않는다 (모델 내장). 시그니처 호환 유지용.
-        del norm_mean, norm_std
+        self._mean = np.array(norm_mean, dtype=np.float32)   # BGR 순서 그대로
+        self._std = np.array(norm_std, dtype=np.float32)
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
         """프레임 한 장 → Detection 리스트 (bbox는 원본 픽셀 좌표)."""
@@ -65,8 +73,8 @@ class OnnxDetector:
         padded = np.full((size, size, 3), PAD_VALUE, dtype=np.uint8)
         padded[:new_h, :new_w] = resized
 
-        # 정규화는 모델 내장 — 원시 BGR 픽셀을 float32로만 넘긴다 (클래스 도크스트링 참고)
-        tensor = padded.astype(np.float32).transpose(2, 0, 1)[np.newaxis]  # HWC → NCHW
+        normalized = (padded.astype(np.float32) - self._mean) / self._std
+        tensor = normalized.transpose(2, 0, 1)[np.newaxis]  # HWC → NCHW
         return np.ascontiguousarray(tensor), scale
 
     def _postprocess(
