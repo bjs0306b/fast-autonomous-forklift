@@ -17,13 +17,7 @@ from __future__ import annotations
 import datetime as _dt
 import itertools
 
-from perception.load_balance import (
-    BBox,
-    Detection,
-    NoTargets,
-    assess_load,
-    select_load,
-)
+from perception.load_balance import BBox, Detection, assess_load
 from perception.tfnova import Measurement
 
 from station import measure
@@ -51,9 +45,14 @@ def build_payload(
 ) -> dict:
     """감지·거리 → 측정 결과 페이로드.
 
-    distance가 None이면 거리 취득 실패로 보고 status="unreliable"을 낸다.
-    박스나 파렛트가 없으면 status="no_detection". 두 경우 모두 dimensions·
-    load_balance는 null (규격 v1.0).
+    status 값 (규격 v1.0 + dimensions_only):
+    - ``ok``: 박스+파렛트+거리 모두 있음 → 치수·편하중 다 채움
+    - ``dimensions_only``: **파렛트가 없음** → 치수만 내고 load_balance는 null.
+      3D 프린트 파렛트 전 임시 검증·치수 KPI(FR-103-4) 확인용.
+    - ``no_detection``: 박스가 없음 → 잴 게 없음
+    - ``unreliable``: 거리 취득 실패 → 치수 계산 불가
+
+    편하중은 파렛트를 기준점으로 요구하므로, 파렛트가 없으면 치수만 가능하다.
     """
     now = now or _dt.datetime.now().astimezone()
     base = {
@@ -63,43 +62,50 @@ def build_payload(
         "measured_at": now.isoformat(timespec="seconds"),
     }
 
-    try:
-        boxes, pallet = select_load(detections, min_score=cfg.score_threshold)
-    except NoTargets:
-        return {**base, "status": "no_detection",
-                "detection": _detection_block(detections, None),
+    boxes = [d.box for d in detections
+             if d.label == "box" and d.score >= cfg.score_threshold]
+    pallets = [d for d in detections
+               if d.label == "pallet" and d.score >= cfg.score_threshold]
+    pallet = max(pallets, key=lambda d: d.score).box if pallets else None
+    detection_block = _detection_block(detections, pallet)
+
+    if not boxes:
+        return {**base, "status": "no_detection", "detection": detection_block,
                 "distance": _distance_block(distance),
                 "dimensions": None, "load_balance": None}
-
     if distance is None:
-        return {**base, "status": "unreliable",
-                "detection": _detection_block(detections, pallet),
+        return {**base, "status": "unreliable", "detection": detection_block,
                 "distance": None, "dimensions": None, "load_balance": None}
 
     load = hull(boxes)
     height = measure.height_cm(load.h, distance.distance_cm, cfg.calib.fy)
     width = measure.width_cm(load.w, distance.distance_cm, cfg.calib.fx)
+    dimensions = {
+        "height_cm": round(height, 1),
+        "width_cm": round(width, 1),
+        "depth_cm": None,   # 정면 카메라로 측정 불가 — 항상 null (규격 v1.0)
+        "miniature_scale": cfg.miniature_scale,
+        "miniature_height_mm": round(height * 10 / cfg.miniature_scale, 1),
+        "miniature_width_mm": round(width * 10 / cfg.miniature_scale, 1),
+    }
+
+    if pallet is None:   # 파렛트 없음 → 치수만, 편하중은 판정 불가
+        return {**base, "status": "dimensions_only", "detection": detection_block,
+                "distance": _distance_block(distance),
+                "dimensions": dimensions, "load_balance": None}
 
     # 편하중: assess_load(중심 단순 평균 + hull 정규화) 재사용하되 좌우(x)만 채택
     # (모듈 도크스트링 참고). 부호 → 방향 코드.
-    balance = assess_load(boxes, pallet, threshold=cfg.eccentric_threshold)
-    ratio_x = balance.ratio_x
+    ratio_x = assess_load(boxes, pallet, threshold=cfg.eccentric_threshold).ratio_x
     eccentric = abs(ratio_x) > cfg.eccentric_threshold
     direction = (["right"] if ratio_x > 0 else ["left"]) if eccentric else []
 
     return {
         **base,
         "status": "ok",
-        "detection": _detection_block(detections, pallet),
+        "detection": detection_block,
         "distance": _distance_block(distance),
-        "dimensions": {
-            "height_cm": round(height, 1),
-            "width_cm": round(width, 1),
-            "depth_cm": None,   # 정면 카메라로 측정 불가 — 항상 null (규격 v1.0)
-            "miniature_scale": cfg.miniature_scale,
-            "miniature_height_mm": round(height * 10 / cfg.miniature_scale, 1),
-            "miniature_width_mm": round(width * 10 / cfg.miniature_scale, 1),
-        },
+        "dimensions": dimensions,
         "load_balance": {
             "eccentric": eccentric,
             "direction": direction,

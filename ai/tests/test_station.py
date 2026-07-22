@@ -69,11 +69,21 @@ def test_오른쪽_치우침은_right_코드를_낸다() -> None:
     assert "오른쪽" in lb["message"]
 
 
-def test_감지_없으면_no_detection() -> None:
+def test_박스_없으면_no_detection() -> None:
     p = build_payload([Detection("pallet", BBox(0, 0, 100, 100), 0.9)], DIST, CFG)
 
     assert p["status"] == "no_detection"
     assert p["dimensions"] is None and p["load_balance"] is None
+
+
+def test_파렛트_없으면_치수만_낸다() -> None:
+    """3D 프린트 파렛트 전 임시 검증 — 박스 치수는 나오고 편하중은 null."""
+    p = build_payload([Detection("box", BBox(760, 300, 400, 400), 0.95)], DIST, CFG)
+
+    assert p["status"] == "dimensions_only"
+    assert p["dimensions"]["height_cm"] == pytest.approx(29.4, abs=0.1)
+    assert p["load_balance"] is None
+    assert p["detection"]["pallet"] is None
 
 
 def test_거리_없으면_unreliable() -> None:
