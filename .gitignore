@@ -37,3 +37,17 @@ build/
 
 ### Mac OS ###
 .DS_Store
+### Python (S15P11A304-121 규칙 복원 — Spring 템플릿 커밋으로 덮였던 것)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.env
+
+### ROS2
+install/
+log/
+
+### Node
+node_modules/
