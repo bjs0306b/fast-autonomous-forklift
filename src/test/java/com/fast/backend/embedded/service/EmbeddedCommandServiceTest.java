@@ -117,6 +117,25 @@ class EmbeddedCommandServiceTest {
     }
 
     @Test
+    void issueCommand_emergencyStop_publishesTrackableEmergencyPayload() {
+        ArgumentCaptor<EmbeddedVehicleCommand> entityCaptor = ArgumentCaptor.forClass(EmbeddedVehicleCommand.class);
+        ArgumentCaptor<EmbeddedForkliftCommandMessage> messageCaptor =
+                ArgumentCaptor.forClass(EmbeddedForkliftCommandMessage.class);
+
+        EmbeddedCommandResponse response = service.issueCommand("REAL01", "EMERGENCY_STOP", "관제 비상 정지");
+
+        verify(commandMapper).insert(entityCaptor.capture());
+        verify(publisher).publish(messageCaptor.capture());
+        assertThat(response.status()).isEqualTo(EmbeddedCommandStatus.PUBLISHED.name());
+        assertThat(response.command()).isEqualTo("EMERGENCY_STOP");
+        assertThat(response.commandId()).isEqualTo(entityCaptor.getValue().getCommandId());
+        assertThat(messageCaptor.getValue().commandId()).isEqualTo(response.commandId());
+        assertThat(messageCaptor.getValue().forkliftId()).isEqualTo("REAL01");
+        assertThat(messageCaptor.getValue().command()).isEqualTo("EMERGENCY_STOP");
+        assertThat(messageCaptor.getValue().timestamp()).isNotNull();
+    }
+
+    @Test
     void findByCommandId_notFound_throwsCommandNotFound() {
         when(commandMapper.findByCommandId("CMD-NONE")).thenReturn(Optional.empty());
 

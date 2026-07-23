@@ -115,6 +115,44 @@ class EmbeddedCommandIntegrationTest {
     }
 
     @Test
+    void issueCommand_emergencyStop_returnsTrackablePublishAttempt() throws Exception {
+        registerVehicle("IT-REAL09");
+
+        mockMvc.perform(post("/api/vehicles/IT-REAL09/embedded-commands")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new EmbeddedCommandRequest("EMERGENCY_STOP", "관제 비상 정지"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.error").doesNotExist())
+                .andExpect(jsonPath("$.data.commandId").isNotEmpty())
+                .andExpect(jsonPath("$.data.forkliftId").value("IT-REAL09"))
+                .andExpect(jsonPath("$.data.command").value("EMERGENCY_STOP"))
+                .andExpect(jsonPath("$.data.issuedAt").isNotEmpty())
+                // 테스트 프로필에는 MQTT 채널이 없으므로 실제 발행 성공이 아니라 시도 실패 상태다.
+                .andExpect(jsonPath("$.data.status").value("PUBLISH_FAILED"));
+    }
+
+    @Test
+    void issueCommand_missingOrNullCommand_returns400CommonError() throws Exception {
+        registerVehicle("IT-REAL10");
+
+        mockMvc.perform(post("/api/vehicles/IT-REAL10/embedded-commands")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("EMBEDDED_COMMAND_TYPE_INVALID"));
+
+        mockMvc.perform(post("/api/vehicles/IT-REAL10/embedded-commands")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"command\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("EMBEDDED_COMMAND_TYPE_INVALID"));
+    }
+
+    @Test
     void getCommand_unknownCommandId_returns404() throws Exception {
         registerVehicle("IT-REAL03");
 

@@ -14,6 +14,8 @@ import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -103,12 +105,27 @@ public class VehicleStatusService {
         log.info("Vehicle current status updated: vehicleId={}, status={}, battery={}, receivedAt={}",
                 vehicleId, normalizedStatus, command.battery(), receivedAt);
 
-        // 7. WebSocket 브로드캐스트 (DB 갱신 이후, 실패해도 이 트랜잭션 결과는 유지됨 — Broadcaster가
-        //    내부적으로 예외를 흡수하므로 여기서 별도 try/catch가 필요 없다)
+        // 7. WebSocket 브로드캐스트는 실제 트랜잭션 커밋 뒤 실행한다. 커밋이 실패하거나 롤백되면
+        //    아직 저장되지 않은 상태를 관제에 먼저 전송하지 않는다. Broadcaster는 자체적으로 전송
+        //    예외를 흡수하므로 커밋된 DB 결과에는 영향을 주지 않는다.
         VehicleStatusResponse statusResponse = toStatusResponse(newStatus);
-        vehicleWebSocketBroadcaster.broadcastStatus(vehicleId, statusResponse, effectiveMessageAt);
+        broadcastStatusAfterCommit(vehicleId, statusResponse, effectiveMessageAt);
 
         return statusResponse;
+    }
+
+    private void broadcastStatusAfterCommit(
+            String vehicleId, VehicleStatusResponse statusResponse, LocalDateTime occurredAt) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            vehicleWebSocketBroadcaster.broadcastStatus(vehicleId, statusResponse, occurredAt);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                vehicleWebSocketBroadcaster.broadcastStatus(vehicleId, statusResponse, occurredAt);
+            }
+        });
     }
 
     private void validateBatteryRange(Integer battery) {

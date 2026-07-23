@@ -87,9 +87,11 @@ public class EmbeddedCommandService {
             publisher.publish(message);
             entity.setStatus(EmbeddedCommandStatus.PUBLISHED);
             entity.setPublishedAt(now);
+            log.info("Embedded command published: commandId={}, forkliftId={}, command={}",
+                    entity.getCommandId(), entity.getForkliftId(), commandType);
         } catch (RuntimeException e) {
-            log.error("Failed to publish embedded command: commandId={}, forkliftId={}, error={}",
-                    entity.getCommandId(), entity.getForkliftId(), e.getMessage());
+            log.error("Failed to publish embedded command: commandId={}, forkliftId={}, command={}, error={}",
+                    entity.getCommandId(), entity.getForkliftId(), commandType, e.getMessage());
             entity.setStatus(EmbeddedCommandStatus.PUBLISH_FAILED);
         }
         entity.setUpdatedAt(now);
