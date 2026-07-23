@@ -22,6 +22,10 @@ public record MqttProperties(
     public record Topics(
             String forkliftStatus,
             String forkliftLocation,
+            String forkliftPath,
+            String forkliftCommandResult,
+            String forkliftForkStatus,
+            String forkliftError,
             String cargoDetected,
             String forkliftCommand,
             String forkliftEmergency

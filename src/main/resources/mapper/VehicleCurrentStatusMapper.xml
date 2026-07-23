@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper">
+
+    <resultMap id="vehicleCurrentStatusResultMap" type="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
+        <id property="vehicleId" column="vehicle_id"/>
+        <result property="status" column="status"/>
+        <result property="battery" column="battery"/>
+        <result property="positionX" column="position_x"/>
+        <result property="positionY" column="position_y"/>
+        <result property="heading" column="heading"/>
+        <result property="speed" column="speed"/>
+        <result property="messageAt" column="message_at"/>
+        <result property="receivedAt" column="received_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findByVehicleId" resultMap="vehicleCurrentStatusResultMap">
+        SELECT vehicle_id, status, battery, position_x, position_y, heading, speed,
+               message_at, received_at, updated_at
+        FROM vehicle_current_status
+        WHERE vehicle_id = #{vehicleId}
+    </select>
+
+    <select id="findAllByVehicleIds" resultMap="vehicleCurrentStatusResultMap">
+        SELECT vehicle_id, status, battery, position_x, position_y, heading, speed,
+               message_at, received_at, updated_at
+        FROM vehicle_current_status
+        WHERE vehicle_id IN
+        <foreach collection="list" item="vehicleId" open="(" separator="," close=")">
+            #{vehicleId}
+        </foreach>
+    </select>
+
+    <insert id="upsert" parameterType="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
+        INSERT INTO vehicle_current_status
+            (vehicle_id, status, battery, position_x, position_y, heading, speed,
+             message_at, received_at, updated_at)
+        VALUES
+            (#{vehicleId}, #{status}, #{battery}, #{positionX}, #{positionY}, #{heading}, #{speed},
+             #{messageAt}, #{receivedAt}, #{updatedAt})
+        ON DUPLICATE KEY UPDATE
+            status = VALUES(status),
+            battery = VALUES(battery),
+            position_x = VALUES(position_x),
+            position_y = VALUES(position_y),
+            heading = VALUES(heading),
+            speed = VALUES(speed),
+            message_at = VALUES(message_at),
+            received_at = VALUES(received_at),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+    <!--
+        활성 차량 기준 상태별 집계. vehicle_current_status에 아직 행이 없는(=한 번도 상태를 받은 적
+        없는) 활성 차량도 LEFT JOIN + COALESCE로 UNKNOWN에 포함시킨다(prompt16.md 14장 분석 결과,
+        answer15.md 11장에서 상세 설명).
+    -->
+    <select id="countByStatusForActiveVehicles" resultType="com.fast.backend.vehicle.mapper.VehicleStatusCountRow">
+        SELECT COALESCE(s.status, 'UNKNOWN') AS status, COUNT(*) AS count
+        FROM vehicle v
+        LEFT JOIN vehicle_current_status s ON v.vehicle_id = s.vehicle_id
+        WHERE v.active = true
+        GROUP BY COALESCE(s.status, 'UNKNOWN')
+    </select>
+
+</mapper>

@@ -30,6 +30,41 @@ mqtt:
   topics:
     forklift-status: forklift/+/status
     forklift-location: forklift/+/location
+    forklift-path: forklift/+/path
+    forklift-command-result: forklift/+/command-result
+    forklift-fork-status: forklift/+/fork-status
+    forklift-error: forklift/+/error
     cargo-detected: cargo/detected
     forklift-command: forklift/%s/command
     forklift-emergency: forklift/%s/emergency
+
+# FR-501-1: 실제 MySQL 대신 임베디드 H2(MySQL 호환 모드)를 사용한다. mvnw test가 외부 인프라(EC2/로컬
+# MySQL) 없이도 완전히 자체 완결적으로 동작해야 하고, db/schema.sql이 실제로 실행 가능한지도 매 테스트
+# 실행마다 검증하기 위함이다(answer15.md 14장 "테스트 결과" 참고). data-locations는 설정하지 않는다 —
+# 테스트 픽스처는 각 테스트가 필요한 데이터를 직접 삽입해 테스트 간 독립성을 유지한다.
+spring:
+  datasource:
+    url: jdbc:h2:mem:fast_backend_test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.fast.backend.vehicle.domain
+  configuration:
+    map-underscore-to-camel-case: true
+
+vehicle:
+  auto-registration-enabled: false
+  offline-check-enabled: false
+  offline-timeout-seconds: 10
+  status-test-api:
+    enabled: false
+
+websocket:
+  allowed-origin-patterns: "*"
