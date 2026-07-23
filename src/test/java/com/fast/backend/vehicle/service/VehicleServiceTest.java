@@ -24,10 +24,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 /**
  * VehicleMapper/VehicleCurrentStatusMapper를 모킹해 실제 DB 없이 VehicleService의 조합·판단
@@ -54,6 +56,12 @@ class VehicleServiceTest {
                 new VehicleCreateRequest("SIM-F01", "시뮬레이션 지게차 1호", VehicleSource.SIMULATION));
 
         verify(vehicleMapper).insert(any(Vehicle.class));
+        ArgumentCaptor<VehicleCurrentStatus> statusCaptor = ArgumentCaptor.forClass(VehicleCurrentStatus.class);
+        verify(vehicleCurrentStatusMapper).upsert(statusCaptor.capture());
+        assertThat(statusCaptor.getValue().getVehicleId()).isEqualTo("SIM-F01");
+        assertThat(statusCaptor.getValue().getStatus()).isEqualTo(VehicleStatus.UNKNOWN);
+        assertThat(statusCaptor.getValue().getMessageAt()).isNull();
+        assertThat(statusCaptor.getValue().getReceivedAt()).isNotNull();
         assertThat(response.vehicleId()).isEqualTo("SIM-F01");
         assertThat(response.source()).isEqualTo(VehicleSource.SIMULATION);
         assertThat(response.active()).isTrue();
@@ -70,6 +78,34 @@ class VehicleServiceTest {
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.VEHICLE_ID_DUPLICATED);
         verify(vehicleMapper, never()).insert(any());
+        verify(vehicleCurrentStatusMapper, never()).upsert(any());
+    }
+
+    @Test
+    void updateActive_existingVehicle_updatesAndReturnsDetailWithStatus() {
+        Vehicle vehicle = vehicle("SIM-F01");
+        VehicleCurrentStatus status = new VehicleCurrentStatus();
+        status.setVehicleId("SIM-F01");
+        status.setStatus(VehicleStatus.ACTIVE);
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle));
+        when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(status));
+
+        VehicleDetailResponse response = vehicleService.updateActive("SIM-F01", false);
+
+        verify(vehicleMapper).updateActive(eq("SIM-F01"), eq(false), any(LocalDateTime.class));
+        assertThat(response.active()).isFalse();
+        assertThat(response.status().status()).isEqualTo(VehicleStatus.ACTIVE);
+    }
+
+    @Test
+    void updateActive_unknownVehicle_throwsNotFoundAndNeverUpdates() {
+        when(vehicleMapper.findByVehicleId("NOPE")).thenReturn(Optional.empty());
+
+        BusinessException exception = catchThrowableOfType(
+                () -> vehicleService.updateActive("NOPE", false), BusinessException.class);
+
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.VEHICLE_NOT_FOUND);
+        verify(vehicleMapper, never()).updateActive(any(), any(Boolean.class), any());
     }
 
     @Test

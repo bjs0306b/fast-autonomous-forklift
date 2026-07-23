@@ -60,8 +60,16 @@ public class VehicleService {
         vehicle.setUpdatedAt(now);
         vehicleMapper.insert(vehicle);
 
+        VehicleCurrentStatus initialStatus = new VehicleCurrentStatus();
+        initialStatus.setVehicleId(vehicle.getVehicleId());
+        initialStatus.setStatus(VehicleStatus.UNKNOWN);
+        initialStatus.setMessageAt(null);
+        initialStatus.setReceivedAt(now);
+        initialStatus.setUpdatedAt(now);
+        vehicleCurrentStatusMapper.upsert(initialStatus);
+
         log.info("Vehicle registered: vehicleId={}, source={}", vehicle.getVehicleId(), vehicle.getSource());
-        return toDetailResponse(vehicle, VehicleStatusResponse.unknown());
+        return toDetailResponse(vehicle, toStatusResponse(initialStatus));
     }
 
     @Transactional(readOnly = true)
@@ -85,6 +93,22 @@ public class VehicleService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.VEHICLE_NOT_FOUND,
                         "등록되지 않은 차량입니다: " + vehicleId));
         VehicleCurrentStatus status = vehicleCurrentStatusMapper.findByVehicleId(vehicleId).orElse(null);
+        return toDetailResponse(vehicle, toStatusResponse(status));
+    }
+
+    @Transactional
+    public VehicleDetailResponse updateActive(String vehicleId, boolean active) {
+        Vehicle vehicle = vehicleMapper.findByVehicleId(vehicleId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VEHICLE_NOT_FOUND,
+                        "등록되지 않은 차량입니다: " + vehicleId));
+
+        LocalDateTime now = LocalDateTime.now();
+        vehicleMapper.updateActive(vehicleId, active, now);
+        vehicle.setActive(active);
+        vehicle.setUpdatedAt(now);
+
+        VehicleCurrentStatus status = vehicleCurrentStatusMapper.findByVehicleId(vehicleId).orElse(null);
+        log.info("Vehicle active state updated: vehicleId={}, active={}", vehicleId, active);
         return toDetailResponse(vehicle, toStatusResponse(status));
     }
 

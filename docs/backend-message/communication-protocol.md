@@ -400,6 +400,7 @@ REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandR
 |---|---|---|---|
 | GET | `/api/health` | 헬스체크 | 항상 |
 | POST | `/api/vehicles` | 차량 등록 | 항상 |
+| PATCH | `/api/vehicles/{vehicleId}/active` | 차량 활성·비활성 변경 | 항상 |
 | GET | `/api/vehicles` | 활성 차량 목록 | 항상 |
 | GET | `/api/vehicles/status-counts` | 상태별 집계 | 항상 |
 | GET | `/api/vehicles/{vehicleId}` | 차량 상세 | 항상 |
