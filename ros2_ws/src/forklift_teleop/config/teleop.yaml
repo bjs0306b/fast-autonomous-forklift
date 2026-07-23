@@ -1,0 +1,15 @@
+uart_teleop_bridge:
+  ros__parameters:
+    cmd_vel_topic: /cmd_vel
+    serial_port: /dev/ttyTHS1
+    baud_rate: 115200
+    command_rate_hz: 20.0
+    command_timeout_sec: 0.5
+    max_linear_mps: 0.20
+    max_angular_rps: 0.35
+    linear_deadband_mps: 0.01
+    min_drive_percent: 50
+    max_drive_percent: 60
+    steering_center_cdeg: 10000
+    steering_min_cdeg: 8500
+    steering_max_cdeg: 11500
