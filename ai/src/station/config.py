@@ -49,7 +49,7 @@ class StationConfig:
 
     # --- 모델 (ONNX, mmdeploy end2end: dets[x1,y1,x2,y2,score] + labels) ---
     model_path: Path = Path("models/end2end.onnx")
-    input_size: int = 640
+    input_size: int = 800   # 실험5(-m@800+SCD, 0.753) end2end.onnx는 800 입력으로 export
     score_threshold: float = 0.5
     # 학습 클래스 순서 (configs/datasets.yaml: box=1, pallet=2 → 라벨 0, 1)
     class_names: tuple[str, ...] = ("box", "pallet")
