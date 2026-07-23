@@ -9,7 +9,8 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @MapperScan(basePackages = {
-        "com.fast.backend.vehicle.mapper", "com.fast.backend.ai.mapper", "com.fast.backend.embedded.mapper"
+        "com.fast.backend.vehicle.mapper", "com.fast.backend.ai.mapper", "com.fast.backend.embedded.mapper",
+        "com.fast.backend.station.mapper"
 })
 public class MyBatisConfig {
 }

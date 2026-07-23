@@ -29,7 +29,17 @@ public enum ErrorCode {
     EMBEDDED_COMMAND_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 존재하는 commandId입니다."),
     EMBEDDED_COMMAND_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 명령입니다."),
     EMBEDDED_COMMAND_LIMIT_INVALID(HttpStatus.BAD_REQUEST, "limit은 1~200 범위여야 합니다."),
-    EMBEDDED_FORK_STATUS_NOT_FOUND(HttpStatus.NOT_FOUND, "포크 상태 정보가 없습니다.");
+    EMBEDDED_FORK_STATUS_NOT_FOUND(HttpStatus.NOT_FOUND, "포크 상태 정보가 없습니다."),
+
+    STATION_MEASUREMENT_SCHEMA_VERSION_UNSUPPORTED(HttpStatus.BAD_REQUEST, "지원하지 않는 schema_version입니다."),
+    STATION_MEASUREMENT_INVALID(HttpStatus.BAD_REQUEST, "측정 결과 필수값이 올바르지 않습니다."),
+    STATION_MEASUREMENT_STATUS_INVALID(HttpStatus.BAD_REQUEST, "status 값이 올바르지 않거나 상태별 필드 조합이 유효하지 않습니다."),
+    STATION_MEASUREMENT_DETECTION_INVALID(HttpStatus.BAD_REQUEST, "detection 값이 올바르지 않습니다."),
+    STATION_MEASUREMENT_DISTANCE_INVALID(HttpStatus.BAD_REQUEST, "distance 값이 올바르지 않습니다."),
+    STATION_MEASUREMENT_DIMENSIONS_INVALID(HttpStatus.BAD_REQUEST, "dimensions 값이 올바르지 않습니다."),
+    STATION_MEASUREMENT_LOAD_BALANCE_INVALID(HttpStatus.BAD_REQUEST, "load_balance 값이 올바르지 않습니다."),
+    STATION_MEASUREMENT_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 저장된 measurement_id입니다."),
+    STATION_MEASUREMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 측정 결과입니다.");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;
