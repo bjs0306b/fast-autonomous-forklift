@@ -1,53 +1,65 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-H21 | ESP32-H4 | ESP32-P4 | ESP32-S2 | ESP32-S3 | Linux |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | --------- | -------- | -------- | -------- | -------- | ----- |
+# ESP32 Forklift Motor Controller
 
-# Hello World Example
+ESP32-S3에서 지게차의 DC 구동 모터와 서보 조향 모터를 제어하는 ESP-IDF 프로젝트입니다.
 
-Starts a FreeRTOS task to print "Hello World".
+## 하드웨어 구성
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+- MCU: ESP32-S3
+- 구동 모터: DC 모터
+- 조향 모터: MG996R 서보 모터
+- 모터 드라이버: Waveshare Motor Driver HAT
+- PWM 제어: PCA9685
+- 구동 방식: 전륜 구동
+- 조향 방식: 후륜 조향
 
-## How to use example
+## 현재 제어 동작
 
-Follow detailed instructions provided specifically for this example.
+1. 후륜 조향을 중앙 100도로 설정
+2. 지게차 기준 전진 방향으로 80% 주행
+3. 60%까지 단계적으로 감속
+4. 후륜 서보를 이용해 우회전
+5. 중앙 복귀 후 다시 가속
+6. 감속 후 좌회전
+7. 조향 중앙 복귀 및 DC 모터 정지
 
-Select the instructions depending on Espressif chip installed on your development board:
+지게차의 새로운 전진 방향은 기존 차량 기준 후진 방향이므로
+DC 모터의 `DC_MOTOR_DIRECTION_REVERSE`를 전진으로 사용합니다.
 
-- [ESP32 Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/stable/get-started/index.html)
-- [ESP32-S2 Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/get-started/index.html)
+## 주요 설정
 
+주행 속도, 조향각, PCA9685 주소 및 채널은 다음 파일에서 설정합니다.
 
-## Example folder contents
-
-The project **hello_world** contains one source file in C language [hello_world_main.c](main/hello_world_main.c). The file is located in folder [main](main).
-
-ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt` files that provide set of directives and instructions describing the project's source files and targets (executable, library, or both).
-
-Below is short explanation of remaining files in the project folder.
-
+```text
+main/config.h
 ```
-├── CMakeLists.txt
-├── pytest_hello_world.py      Python script used for automated testing
-├── main
-│   ├── CMakeLists.txt
-│   └── hello_world_main.c
-└── README.md                  This is the file you are currently reading
+
+기본 설정:
+
+- 서보 중앙: 100도
+- 차량 우회전: 70도
+- 차량 좌회전: 130도
+- 직진 속도: 80%
+- 회전 속도: 60%
+
+## 빌드
+
+ESP-IDF 환경에서 다음 명령을 실행합니다.
+
+```bash
+idf.py set-target esp32s3
+idf.py build
 ```
 
-For more information on structure and contents of ESP-IDF projects, please refer to Section [Build System](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/build-system.html) of the ESP-IDF Programming Guide.
+## 플래시 및 모니터
 
-## Troubleshooting
+포트 이름은 실제 ESP32 연결 포트로 변경합니다.
 
-* Program upload failure
+```bash
+idf.py -p COM3 flash monitor
+```
 
-    * Hardware connection is not correct: run `idf.py -p PORT monitor`, and reboot your board to see if there are any output logs.
-    * The baud rate for downloading is too high: lower your baud rate in the `menuconfig` menu, and try again.
+## 안전 사항
 
-## Technical support and feedback
-
-Please use the following feedback channels:
-
-* For technical queries, go to the [esp32.com](https://esp32.com/) forum
-* For a feature request or bug report, create a [GitHub issue](https://github.com/espressif/esp-idf/issues)
-
-We will get back to you as soon as possible.
+- 최초 시험은 구동 바퀴를 지면에서 띄우고 진행합니다.
+- 조향 방향이 반대라면 좌·우 조향각 설정을 교환합니다.
+- 모터 드라이버 발열과 전원 전압 강하를 확인합니다.
