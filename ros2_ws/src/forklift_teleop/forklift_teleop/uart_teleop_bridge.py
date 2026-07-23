@@ -1,0 +1,203 @@
+"""ROS2 /cmd_vel to ESP32 UART bridge."""
+
+import time
+from typing import Optional
+
+import rclpy
+from geometry_msgs.msg import Twist
+from rclpy.node import Node
+import serial
+
+from forklift_teleop.mapping import TeleopLimits, map_twist, select_command
+from forklift_teleop.protocol import encode_command, next_sequence, parse_ack
+
+
+class UartTeleopBridge(Node):
+    def __init__(self) -> None:
+        super().__init__("uart_teleop_bridge")
+
+        self.declare_parameter("cmd_vel_topic", "/cmd_vel")
+        self.declare_parameter("serial_port", "/dev/ttyTHS1")
+        self.declare_parameter("baud_rate", 115200)
+        self.declare_parameter("command_rate_hz", 20.0)
+        self.declare_parameter("command_timeout_sec", 0.5)
+        self.declare_parameter("max_linear_mps", 0.20)
+        self.declare_parameter("max_angular_rps", 0.35)
+        self.declare_parameter("linear_deadband_mps", 0.01)
+        self.declare_parameter("min_drive_percent", 50)
+        self.declare_parameter("max_drive_percent", 60)
+        self.declare_parameter("steering_center_cdeg", 10000)
+        self.declare_parameter("steering_min_cdeg", 8500)
+        self.declare_parameter("steering_max_cdeg", 11500)
+
+        self._serial_port = str(self.get_parameter("serial_port").value)
+        self._baud_rate = int(self.get_parameter("baud_rate").value)
+        command_rate_hz = float(self.get_parameter("command_rate_hz").value)
+        self._command_timeout_sec = float(
+            self.get_parameter("command_timeout_sec").value
+        )
+        if command_rate_hz <= 0.0 or self._command_timeout_sec <= 0.0:
+            raise ValueError("command rate and timeout must be positive")
+
+        self._limits = TeleopLimits(
+            max_linear_mps=float(self.get_parameter("max_linear_mps").value),
+            max_angular_rps=float(self.get_parameter("max_angular_rps").value),
+            linear_deadband_mps=float(
+                self.get_parameter("linear_deadband_mps").value
+            ),
+            min_drive_percent=int(
+                self.get_parameter("min_drive_percent").value
+            ),
+            max_drive_percent=int(
+                self.get_parameter("max_drive_percent").value
+            ),
+            steering_center_cdeg=int(
+                self.get_parameter("steering_center_cdeg").value
+            ),
+            steering_min_cdeg=int(
+                self.get_parameter("steering_min_cdeg").value
+            ),
+            steering_max_cdeg=int(
+                self.get_parameter("steering_max_cdeg").value
+            ),
+        )
+        self._limits.validate()
+
+        self._serial: Optional[serial.Serial] = None
+        self._next_reconnect_time = 0.0
+        self._rx_buffer = bytearray()
+        self._sequence = 0
+        self._last_twist: Optional[Twist] = None
+        self._last_twist_time: Optional[float] = None
+
+        cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
+        self._subscription = self.create_subscription(
+            Twist,
+            cmd_vel_topic,
+            self._on_twist,
+            1,
+        )
+        self._timer = self.create_timer(1.0 / command_rate_hz, self._on_timer)
+        self.get_logger().info(
+            f"UART teleop ready: topic={cmd_vel_topic}, "
+            f"port={self._serial_port}, baud={self._baud_rate}"
+        )
+
+    def _on_twist(self, message: Twist) -> None:
+        self._last_twist = message
+        self._last_twist_time = time.monotonic()
+
+    def _ensure_serial(self, now: float) -> bool:
+        if self._serial is not None and self._serial.is_open:
+            return True
+        if now < self._next_reconnect_time:
+            return False
+
+        try:
+            self._serial = serial.Serial(
+                port=self._serial_port,
+                baudrate=self._baud_rate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0,
+                write_timeout=0.1,
+            )
+            self.get_logger().info(f"Opened UART {self._serial_port}")
+            return True
+        except serial.SerialException as error:
+            self._serial = None
+            self._next_reconnect_time = now + 1.0
+            self.get_logger().warning(f"UART open failed: {error}")
+            return False
+
+    def _close_serial(self) -> None:
+        if self._serial is not None:
+            try:
+                self._serial.close()
+            except serial.SerialException:
+                pass
+        self._serial = None
+
+    def _current_command(self, now: float):
+        if (
+            self._last_twist is None
+            or self._last_twist_time is None
+        ):
+            return map_twist(0.0, 0.0, self._limits)
+        return select_command(
+            self._last_twist.linear.x,
+            self._last_twist.angular.z,
+            now - self._last_twist_time,
+            self._command_timeout_sec,
+            self._limits,
+        )
+
+    def _read_acks(self) -> None:
+        if self._serial is None:
+            return
+        waiting = self._serial.in_waiting
+        if waiting > 0:
+            self._rx_buffer.extend(self._serial.read(waiting))
+
+        while b"\n" in self._rx_buffer:
+            line, _, remainder = self._rx_buffer.partition(b"\n")
+            self._rx_buffer = bytearray(remainder)
+            try:
+                ack = parse_ack(line + b"\n")
+                self.get_logger().debug(f"ACK sequence={ack.sequence}")
+            except ValueError as error:
+                self.get_logger().warning(f"Invalid UART ACK: {error}")
+
+    def _on_timer(self) -> None:
+        now = time.monotonic()
+        if not self._ensure_serial(now):
+            return
+
+        command = self._current_command(now)
+        frame = encode_command(
+            self._sequence,
+            command.drive_percent,
+            command.steering_cdeg,
+        )
+
+        try:
+            assert self._serial is not None
+            self._serial.write(frame)
+            self._read_acks()
+            self._sequence = next_sequence(self._sequence)
+        except (serial.SerialException, OSError) as error:
+            self.get_logger().error(f"UART communication failed: {error}")
+            self._close_serial()
+            self._next_reconnect_time = now + 1.0
+
+    def destroy_node(self) -> bool:
+        if self._serial is not None and self._serial.is_open:
+            try:
+                stop = encode_command(
+                    self._sequence,
+                    0,
+                    self._limits.steering_center_cdeg,
+                )
+                self._serial.write(stop)
+                self._serial.flush()
+            except (serial.SerialException, OSError):
+                pass
+        self._close_serial()
+        return super().destroy_node()
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = UartTeleopBridge()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
