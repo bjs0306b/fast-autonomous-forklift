@@ -16,6 +16,8 @@ import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -87,6 +89,26 @@ class VehicleStatusServiceTest {
         order.verify(vehicleCurrentStatusMapper).upsert(any());
         order.verify(vehicleStatusHistoryMapper).insert(any());
         order.verify(broadcaster).broadcastStatus(any(), any(), any());
+    }
+
+    @Test
+    void updateCurrentStatus_activeTransaction_broadcastsOnlyAfterCommit() {
+        when(vehicleMapper.findByVehicleId("SIM-F01"))
+                .thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.updateCurrentStatus("SIM-F01", command("ACTIVE", 82, null));
+
+            verify(broadcaster, never()).broadcastStatus(any(), any(), any());
+            for (TransactionSynchronization synchronization
+                    : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+            verify(broadcaster).broadcastStatus(eq("SIM-F01"), any(VehicleStatusResponse.class), any());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test

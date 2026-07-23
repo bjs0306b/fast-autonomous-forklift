@@ -118,8 +118,10 @@ JSON 키 = record 컴포넌트 이름(카멜케이스). 아래 타입/필수여�
 | battery | int(primitive) | 필수 | 이 키의 존재가 ROS2 판별 근거. Service에서 0~100 검증 |
 | timestamp | LocalDateTime | 필수 | messageAt으로 사용 |
 
-처리: `VehicleStatusService.updateCurrentStatus`로 위임 → current_status upsert + status_history insert +
-`broadcastStatus`. 미등록 차량이면 `VEHICLE_NOT_FOUND`를 잡아 경고 로그로 다운그레이드.
+처리: `VehicleStatusService.updateCurrentStatus`로 위임 → current_status upsert + status_history insert →
+트랜잭션 커밋 성공 후 `broadcastStatus`. 롤백 시에는 WebSocket을 발행하지 않으며, WebSocket 전송
+실패는 Broadcaster가 흡수해 이미 커밋된 DB 결과에 영향을 주지 않는다. 미등록 차량이면
+`VEHICLE_NOT_FOUND`를 잡아 경고 로그로 다운그레이드.
 
 ### 3.2 ROS2 위치 — `forklift/+/location` → `ForkliftLocationMessage`
 
@@ -305,8 +307,18 @@ REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandR
 ```
 
 - `command`는 `EmbeddedCommandType.fromRaw`로 검증, 미지원 값이면 `EMBEDDED_COMMAND_TYPE_INVALID`.
+- 지원 명령: `STOP`, `FORK_UP`, `FORK_DOWN`, `LOAD`, `UNLOAD`, `EMERGENCY_STOP`, `RESET_ESTOP`.
 - 저장: `embedded_vehicle_command` insert(PENDING) → 발행 성공 시 PUBLISHED, 실패 시 PUBLISH_FAILED(롤백 안 함).
 - QoS = `default-qos`(1), retained = `false`.
+- `active=false`는 목록·집계 제외 정책일 뿐 명령 차단 정책은 합의되지 않아, 현재 명령 발행은 차량
+  존재 여부만 확인한다.
+
+#### EMERGENCY_STOP 백엔드 보장 범위
+
+`EMERGENCY_STOP`도 위 공통 임베디드 명령 흐름을 사용한다. 백엔드는 UUID `commandId` 생성, 명령
+저장, `forklift/{id}/command` publish 시도, `PUBLISHED`/`PUBLISH_FAILED` 상태 기록까지만 보장한다.
+`PUBLISHED`는 브로커 발행 호출 성공이며 ROS2 수신, 모터 정지, 하드웨어 안전 또는 정지 완료를 뜻하지
+않는다. 실제 정지·해제·fail-safe와 중복 명령 정책은 ROS2·임베디드 담당자와 장비 검증이 필요하다.
 
 ### 4.2 `forklift/{id}/command` — Isaac 명령 `IsaacForkliftCommandMessage`
 
@@ -328,7 +340,8 @@ REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandR
 - **엔드포인트**: `/ws` (SockJS). 프론트는 `new SockJS("http(s)://<host>/ws")`로 연결(순수 WebSocket URL 아님).
 - **브로커 prefix**: `/topic` (SimpleBroker). **앱 prefix**: `/app`.
 - 모든 이벤트는 "전체 destination"과 "차량별 destination(`/{id}`)" **두 곳에 동시 전송**된다.
-- 전송 실패는 Broadcaster가 흡수(로그만) — DB 트랜잭션 결과에 영향 없음.
+- 상태 이벤트는 상태 DB 트랜잭션 커밋 후 전송한다. 전송 실패는 Broadcaster가 흡수(로그만)하므로
+  커밋된 DB 결과에 영향이 없다.
 
 ### 5.1 차량 이벤트 봉투(envelope) — `VehicleWebSocketEvent<T>`
 
@@ -435,6 +448,8 @@ REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandR
 - 실제 Mosquitto Broker 송수신·자동 재연결, 로컬/EC2 포트 연결.
 - 실제 ROS2/Isaac Sim의 발행 JSON이 위 DTO와 정확히 일치하는지.
 - 임베디드(REAL) 펌웨어가 `forklift/{id}/command` 임베디드 스키마를 수신·해석하는지.
+- `EMERGENCY_STOP` 수신 즉시 ROS2·모터 드라이버가 실제 정지하는지와 해제 승인·네트워크 단절
+  fail-safe·중복 명령 정책.
 - 프론트엔드(React, 현재 저장소에 없음)의 STOMP 구독·수신.
 
 ---

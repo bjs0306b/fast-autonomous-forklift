@@ -42,7 +42,7 @@
 
 ### WebSocket 전달
 
-`WebSocketConfig`의 STOMP endpoint를 통해 Broadcaster가 `SimpMessagingTemplate.convertAndSend`를 호출한다. 차량 이벤트는 전체/차량별 토픽, AI는 전체/화물별 토픽, 스테이션은 전체/스테이션별 토픽에 각각 전송한다. Broadcaster가 전송 예외를 내부에서 로깅하고 흡수하므로 DB 작업을 WebSocket 실패로 롤백하지 않는다.
+`WebSocketConfig`의 STOMP endpoint를 통해 Broadcaster가 `SimpMessagingTemplate.convertAndSend`를 호출한다. 차량 이벤트는 전체/차량별 토픽, AI는 전체/화물별 토픽, 스테이션은 전체/스테이션별 토픽에 각각 전송한다. 차량 상태 이벤트는 current/history 트랜잭션 커밋 후 발행한다. Broadcaster가 전송 예외를 내부에서 로깅하고 흡수하므로 커밋된 DB 결과에 영향을 주지 않는다.
 
 ## 4. 전체 테이블 요약
 
@@ -589,7 +589,7 @@ XML `resultMap`의 snake_case 컬럼과 Java camelCase 필드는 위 테이블 �
 
 ### 차량 상태 저장
 
-`VehicleStatusService.updateCurrentStatus`가 `@Transactional`이다. 차량 존재 확인 → 기존 최신 상태 조회 → current upsert → history insert 순이며 history insert 실패 시 RuntimeException이 전파되어 upsert도 롤백된다. `VehicleStatusServiceRollbackIntegrationTest`가 이를 검증한다. 기존 `message_at`보다 늦지 않은(동일 포함) 입력은 stale로 판단하여 upsert, history, WebSocket을 모두 건너뛴다. 입력 timestamp가 null이면 서버 수신 시각을 사용한다.
+`VehicleStatusService.updateCurrentStatus`가 `@Transactional`이다. 차량 존재 확인 → 기존 최신 상태 조회 → current upsert → history insert 순이며 history insert 실패 시 RuntimeException이 전파되어 upsert도 롤백된다. `VehicleStatusServiceRollbackIntegrationTest`가 이를 검증한다. 상태 WebSocket은 `TransactionSynchronization.afterCommit`으로 커밋 후 발행하므로 롤백된 상태는 전송하지 않는다. 기존 `message_at`보다 늦지 않은(동일 포함) 입력은 stale로 판단하여 upsert, history, WebSocket을 모두 건너뛴다. 입력 timestamp가 null이면 서버 수신 시각을 사용한다.
 
 ### AI 분석 저장
 
