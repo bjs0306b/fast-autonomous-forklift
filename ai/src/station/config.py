@@ -44,7 +44,7 @@ class StationConfig:
 
     # --- TF-Nova ---
     tfnova_port: str = "COM3"
-    tfnova_offset_cm: float = -2.0   # 탁상 캘리브레이션(FR-103-1). 리그 장착 후 재확인
+    tfnova_scale: float = 1.033       # 비율 보정 계수(FR-103-1, 5점 재캘리 2026-07-23). --calibrate로 재확인
     tfnova_seconds: float = 0.5
 
     # --- 모델 (ONNX, mmdeploy end2end: dets[x1,y1,x2,y2,score] + labels) ---

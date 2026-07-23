@@ -123,9 +123,9 @@ def test_유효_프레임이_모자라면_거부한다() -> None:
         aggregate(_frames(150, 151), min_frames=10)
 
 
-def test_캘리브레이션_오프셋을_뺀다() -> None:
-    """센서가 3cm 멀게 재는 계통 오차가 있으면 offset=3으로 보정한다."""
-    m = aggregate(_frames(*([153] * 15)), min_frames=10, offset_cm=3.0)
+def test_캘리브레이션_스케일을_곱한다() -> None:
+    """센서가 거리에 비례해 과소하게 읽으면 scale로 보정한다 (원값×scale)."""
+    m = aggregate(_frames(*([100] * 15)), min_frames=10, scale=1.5)
 
     assert m.distance_cm == 150.0
 

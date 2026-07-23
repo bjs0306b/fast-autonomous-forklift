@@ -53,7 +53,7 @@ def capture(cfg: StationConfig) -> "cv2.typing.MatLike":
 def read_distance(cfg: StationConfig) -> Measurement | None:
     try:
         with TfNova(cfg.tfnova_port) as sensor:
-            return sensor.measure(cfg.tfnova_seconds, offset_cm=cfg.tfnova_offset_cm)
+            return sensor.measure(cfg.tfnova_seconds, scale=cfg.tfnova_scale)
     except MeasurementUnreliable as e:
         print(f"[거리 측정 불가] {e}", file=sys.stderr)
         return None
