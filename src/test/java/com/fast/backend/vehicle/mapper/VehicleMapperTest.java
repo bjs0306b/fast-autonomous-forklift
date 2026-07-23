@@ -80,6 +80,20 @@ class VehicleMapperTest {
         assertThat(result).extracting(Vehicle::getVehicleId).doesNotContain("TEST-INACTIVE");
     }
 
+    @Test
+    void updateActive_changesValueAndUpdatedAt() {
+        Vehicle vehicle = newVehicle("TEST-UPDATE-ACTIVE", "활성 변경 차량", VehicleSource.REAL);
+        vehicleMapper.insert(vehicle);
+        LocalDateTime changedAt = vehicle.getUpdatedAt().plusSeconds(1).withNano(0);
+
+        int affected = vehicleMapper.updateActive(vehicle.getVehicleId(), false, changedAt);
+
+        Vehicle found = vehicleMapper.findByVehicleId(vehicle.getVehicleId()).orElseThrow();
+        assertThat(affected).isEqualTo(1);
+        assertThat(found.isActive()).isFalse();
+        assertThat(found.getUpdatedAt()).isEqualTo(changedAt);
+    }
+
     private Vehicle newVehicle(String vehicleId, String name, VehicleSource source) {
         LocalDateTime now = LocalDateTime.now();
         Vehicle vehicle = new Vehicle();

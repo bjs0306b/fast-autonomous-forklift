@@ -3,6 +3,7 @@ package com.fast.backend.vehicle.controller;
 import com.fast.backend.common.api.ApiResponse;
 import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
+import com.fast.backend.vehicle.dto.VehicleActiveUpdateRequest;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.dto.VehicleDetailResponse;
 import com.fast.backend.vehicle.dto.VehicleResponse;
@@ -73,6 +74,18 @@ class VehicleControllerTest {
         when(vehicleService.getDetail("SIM-F01")).thenReturn(expected);
 
         ApiResponse<VehicleDetailResponse> response = controller.detail("SIM-F01");
+
+        assertThat(response.getData()).isEqualTo(expected);
+    }
+
+    @Test
+    void updateActive_returnsServiceResultWrapped() {
+        VehicleActiveUpdateRequest request = new VehicleActiveUpdateRequest(false);
+        VehicleDetailResponse expected = new VehicleDetailResponse(
+                "SIM-F01", "1호", VehicleSource.SIMULATION, false, null, null, VehicleStatusResponse.unknown());
+        when(vehicleService.updateActive("SIM-F01", false)).thenReturn(expected);
+
+        ApiResponse<VehicleDetailResponse> response = controller.updateActive("SIM-F01", request);
 
         assertThat(response.getData()).isEqualTo(expected);
     }

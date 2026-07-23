@@ -1,9 +1,14 @@
 package com.fast.backend.vehicle.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.domain.VehicleStatus;
+import com.fast.backend.vehicle.dto.VehicleActiveUpdateRequest;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
 import com.fast.backend.vehicle.domain.VehicleSource;
+import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
+import com.fast.backend.vehicle.mapper.VehicleStatusHistoryMapper;
 import com.fast.backend.vehicle.service.VehicleStatusService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -44,6 +50,12 @@ class VehicleControllerIntegrationTest {
     @Autowired
     private VehicleStatusService vehicleStatusService;
 
+    @Autowired
+    private VehicleCurrentStatusMapper vehicleCurrentStatusMapper;
+
+    @Autowired
+    private VehicleStatusHistoryMapper vehicleStatusHistoryMapper;
+
     @Test
     void register_thenListAndDetail_reflectRegisteredVehicle() throws Exception {
         VehicleCreateRequest request = new VehicleCreateRequest("IT-F01", "통합테스트 차량", VehicleSource.SIMULATION);
@@ -54,7 +66,20 @@ class VehicleControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.vehicleId").value("IT-F01"))
-                .andExpect(jsonPath("$.data.status.status").value("UNKNOWN"));
+                .andExpect(jsonPath("$.data.active").value(true))
+                .andExpect(jsonPath("$.data.status.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.data.status.receivedAt").isNotEmpty());
+
+        VehicleCurrentStatus initial = vehicleCurrentStatusMapper.findByVehicleId("IT-F01").orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(initial.getStatus()).isEqualTo(VehicleStatus.UNKNOWN);
+        org.assertj.core.api.Assertions.assertThat(initial.getBattery()).isNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getPositionX()).isNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getPositionY()).isNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getHeading()).isNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getSpeed()).isNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getMessageAt()).isNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getReceivedAt()).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(initial.getUpdatedAt()).isNotNull();
 
         mockMvc.perform(get("/api/vehicles"))
                 .andExpect(status().isOk())
@@ -80,6 +105,140 @@ class VehicleControllerIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("VEHICLE_ID_DUPLICATED"));
+
+        org.assertj.core.api.Assertions.assertThat(
+                vehicleCurrentStatusMapper.findAllByVehicleIds(java.util.List.of("IT-F02"))).hasSize(1);
+    }
+
+    @Test
+    void register_thenNewerStatus_upsertsInitialRowAndAppendsHistory() throws Exception {
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F10", "초기 상태 갱신 차량", VehicleSource.REAL);
+        mockMvc.perform(post("/api/vehicles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        vehicleStatusService.updateCurrentStatus("IT-F10",
+                new VehicleStatusUpdateCommand("ACTIVE", 91, 1.0, 2.0, 45.0, 0.5,
+                        java.time.LocalDateTime.now().withNano(0)));
+
+        VehicleCurrentStatus current = vehicleCurrentStatusMapper.findByVehicleId("IT-F10").orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(current.getStatus()).isEqualTo(VehicleStatus.ACTIVE);
+        org.assertj.core.api.Assertions.assertThat(current.getBattery()).isEqualTo(91);
+        org.assertj.core.api.Assertions.assertThat(
+                vehicleStatusHistoryMapper.findRecentByVehicleId("IT-F10", 10)).hasSize(1);
+    }
+
+    @Test
+    void updateActive_falseThenTrue_filtersAndPreservesStatusAndHistory() throws Exception {
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F11", "활성 변경 차량", VehicleSource.SIMULATION);
+        mockMvc.perform(post("/api/vehicles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+        vehicleStatusService.updateCurrentStatus("IT-F11",
+                new VehicleStatusUpdateCommand("ACTIVE", 80, null, null, null, null,
+                        java.time.LocalDateTime.now().withNano(0)));
+
+        mockMvc.perform(patch("/api/vehicles/IT-F11/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VehicleActiveUpdateRequest(false))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vehicleId").value("IT-F11"))
+                .andExpect(jsonPath("$.data.active").value(false))
+                .andExpect(jsonPath("$.data.status.status").value("ACTIVE"));
+
+        mockMvc.perform(get("/api/vehicles"))
+                .andExpect(jsonPath("$.data[?(@.vehicleId == 'IT-F11')]").doesNotExist());
+        mockMvc.perform(get("/api/vehicles/status-counts"))
+                .andExpect(jsonPath("$.data.total").value(0));
+        org.assertj.core.api.Assertions.assertThat(vehicleCurrentStatusMapper.findByVehicleId("IT-F11")).isPresent();
+        org.assertj.core.api.Assertions.assertThat(
+                vehicleStatusHistoryMapper.findRecentByVehicleId("IT-F11", 10)).hasSize(1);
+
+        mockMvc.perform(patch("/api/vehicles/IT-F11/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VehicleActiveUpdateRequest(true))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.active").value(true));
+        mockMvc.perform(get("/api/vehicles"))
+                .andExpect(jsonPath("$.data[?(@.vehicleId == 'IT-F11')]").exists());
+        mockMvc.perform(get("/api/vehicles/status-counts"))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[?(@.status == 'ACTIVE')].count").value(1));
+    }
+
+    @Test
+    void updateActive_unknownVehicle_returns404() throws Exception {
+        mockMvc.perform(patch("/api/vehicles/NO-SUCH-VEHICLE/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("VEHICLE_NOT_FOUND"));
+    }
+
+    @Test
+    void updateActive_missingOrNullValue_returns400() throws Exception {
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F12", "active 검증 차량", VehicleSource.REAL);
+        mockMvc.perform(post("/api/vehicles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(patch("/api/vehicles/IT-F12/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(patch("/api/vehicles/IT-F12/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void updateActive_wrongJsonType_returns400() throws Exception {
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F13", "active 타입 차량", VehicleSource.REAL);
+        mockMvc.perform(post("/api/vehicles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(patch("/api/vehicles/IT-F13/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":\"not-boolean\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("JSON_PARSE_ERROR"));
+    }
+
+    @Test
+    void statusCounts_multipleVehicles_excludesInactiveAndKeepsEachActiveStatus() throws Exception {
+        for (VehicleCreateRequest request : java.util.List.of(
+                new VehicleCreateRequest("IT-F14", "집계 ACTIVE 차량", VehicleSource.REAL),
+                new VehicleCreateRequest("IT-F15", "집계 IDLE 차량", VehicleSource.SIMULATION),
+                new VehicleCreateRequest("IT-F16", "집계 UNKNOWN 차량", VehicleSource.REAL))) {
+            mockMvc.perform(post("/api/vehicles")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isCreated());
+        }
+        java.time.LocalDateTime messageAt = java.time.LocalDateTime.now().withNano(0);
+        vehicleStatusService.updateCurrentStatus("IT-F14",
+                new VehicleStatusUpdateCommand("ACTIVE", 80, null, null, null, null, messageAt));
+        vehicleStatusService.updateCurrentStatus("IT-F15",
+                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, messageAt));
+        mockMvc.perform(patch("/api/vehicles/IT-F15/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/vehicles/status-counts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.items[?(@.status == 'ACTIVE')].count").value(1))
+                .andExpect(jsonPath("$.data.items[?(@.status == 'UNKNOWN')].count").value(1))
+                .andExpect(jsonPath("$.data.items[?(@.status == 'IDLE')].count").value(0));
     }
 
     @Test

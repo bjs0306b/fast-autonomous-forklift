@@ -31,6 +31,13 @@
         WHERE vehicle_id = #{vehicleId}
     </select>
 
+    <update id="updateActive">
+        UPDATE vehicle
+        SET active = #{active},
+            updated_at = #{updatedAt}
+        WHERE vehicle_id = #{vehicleId}
+    </update>
+
     <select id="findAllActive" resultMap="vehicleResultMap">
         SELECT id, vehicle_id, name, source, vehicle_type, active, created_at, updated_at
         FROM vehicle

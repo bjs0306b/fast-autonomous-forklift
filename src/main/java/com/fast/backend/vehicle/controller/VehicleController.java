@@ -1,6 +1,7 @@
 package com.fast.backend.vehicle.controller;
 
 import com.fast.backend.common.api.ApiResponse;
+import com.fast.backend.vehicle.dto.VehicleActiveUpdateRequest;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.dto.VehicleDetailResponse;
 import com.fast.backend.vehicle.dto.VehicleResponse;
@@ -13,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -63,6 +65,13 @@ public class VehicleController {
     @GetMapping("/{vehicleId}")
     public ApiResponse<VehicleDetailResponse> detail(@PathVariable String vehicleId) {
         return ApiResponse.success(vehicleService.getDetail(vehicleId));
+    }
+
+    @PatchMapping("/{vehicleId}/active")
+    public ApiResponse<VehicleDetailResponse> updateActive(
+            @PathVariable String vehicleId,
+            @Valid @RequestBody VehicleActiveUpdateRequest request) {
+        return ApiResponse.success(vehicleService.updateActive(vehicleId, request.active()));
     }
 
     /**

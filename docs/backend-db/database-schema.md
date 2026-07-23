@@ -119,7 +119,7 @@ PK와 UNIQUE 인덱스 외 명시 인덱스 없음.
 
 #### 연결 API 또는 MQTT 흐름
 
-`POST /api/vehicles`, `GET /api/vehicles`, `GET /api/vehicles/{vehicleId}`. 여러 MQTT 흐름에서 등록 여부 기준으로 사용.
+`POST /api/vehicles`, `PATCH /api/vehicles/{vehicleId}/active`, `GET /api/vehicles`, `GET /api/vehicles/{vehicleId}`. 여러 MQTT 흐름에서 등록 여부 기준으로 사용. `active=false` 차량은 활성 차량 목록과 상태 집계에서 제외하지만 현재 상태와 상태 이력은 삭제하지 않는다.
 
 #### 테스트
 
@@ -164,7 +164,7 @@ PK 인덱스. 상태 집계용 `status` 단독 인덱스는 없다.
 
 #### 연결 API 또는 MQTT 흐름
 
-차량 상태 MQTT/테스트 상태 REST → upsert; 차량 목록·상세·상태 집계 API → 조회; 상태 WebSocket.
+차량 등록 → `UNKNOWN` 초기 행 upsert; 차량 상태 MQTT/테스트 상태 REST → upsert; 차량 목록·상세·상태 집계 API → 조회; 상태 WebSocket.
 
 #### 테스트
 
@@ -583,6 +583,10 @@ XML `resultMap`의 snake_case 컬럼과 Java camelCase 필드는 위 테이블 �
 
 ## 8. 트랜잭션 정책
 
+### 차량 등록
+
+`VehicleService.register`가 `@Transactional`이다. 차량 insert 후 같은 트랜잭션에서 `vehicle_current_status`에 `UNKNOWN` 초기 행을 upsert하며, 초기 상태 저장 실패가 전파되면 차량 insert도 롤백된다. `VehicleRegistrationRollbackIntegrationTest`가 이를 검증한다.
+
 ### 차량 상태 저장
 
 `VehicleStatusService.updateCurrentStatus`가 `@Transactional`이다. 차량 존재 확인 → 기존 최신 상태 조회 → current upsert → history insert 순이며 history insert 실패 시 RuntimeException이 전파되어 upsert도 롤백된다. `VehicleStatusServiceRollbackIntegrationTest`가 이를 검증한다. 기존 `message_at`보다 늦지 않은(동일 포함) 입력은 stale로 판단하여 upsert, history, WebSocket을 모두 건너뛴다. 입력 timestamp가 null이면 서버 수신 시각을 사용한다.
@@ -605,7 +609,8 @@ XML `resultMap`의 snake_case 컬럼과 Java camelCase 필드는 위 테이블 �
 
 | 입력 | Controller 또는 Router | Service | Mapper | 테이블 | 출력 |
 |---|---|---|---|---|---|
-| 차량 등록 | `VehicleController` | `VehicleService` | `VehicleMapper` | vehicle | REST 차량 응답 |
+| 차량 등록 | `VehicleController` | `VehicleService` | `VehicleMapper`, `VehicleCurrentStatusMapper` | vehicle, vehicle_current_status | REST 차량 응답 |
+| 차량 활성 변경 | `VehicleController` | `VehicleService` | `VehicleMapper`, `VehicleCurrentStatusMapper` | vehicle, vehicle_current_status | REST 차량 상세 응답 |
 | 차량 상태 MQTT | `MqttMessageRouter` | `ForkliftStatusService`/`IsaacForkliftStatusService` → `VehicleStatusService` | Vehicle, CurrentStatus, History Mapper | vehicle, vehicle_current_status, vehicle_status_history | 상태 WebSocket |
 | 차량 상태 이력 조회 | `VehicleController` | `VehicleStatusHistoryService` | `VehicleMapper`, `VehicleStatusHistoryMapper` | vehicle, vehicle_status_history | REST 이력 목록 |
 | AI 분석 MQTT | `MqttMessageRouter` | `AiCargoAnalysisService` | AI Mapper 2개 | ai_cargo_analysis, ai_cargo_detection_box | AI WebSocket |
