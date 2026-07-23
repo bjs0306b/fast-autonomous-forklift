@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="b4ab2210-ffd8-410b-aab1-5791d1cb059d" name="변경" comment="">
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer22.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer24.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer25.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer26.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer27.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer28.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/answer/answer29.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt22.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt23.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt24.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt25.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt26.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt27.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt28.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/prompt/prompt/prompt29.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/controller/AiCargoAnalysisController.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/domain/AiAnalysisStatus.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/domain/AiCargoAnalysis.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/domain/AiCargoDetectionBox.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/domain/DimensionScale.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/domain/LoadBalanceDirection.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/dto/AiCargoAnalysisMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/dto/AiCargoAnalysisResponse.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/mapper/AiCargoAnalysisMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/mapper/AiCargoDetectionBoxMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/service/AiCargoAnalysisService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/websocket/AiCargoAnalysisBroadcaster.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/ai/websocket/AiCargoAnalysisTopics.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/MyBatisConfig.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/websocket/WebSocketConfig.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/websocket/WebSocketProperties.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedCommandStatus.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedCommandType.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedErrorHistory.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedErrorSeverity.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedErrorSource.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedForkState.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedStoppedAction.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/EmbeddedVehicleCommand.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/domain/VehicleForkCurrentStatus.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/dto/EmbeddedCommandResultMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/dto/EmbeddedErrorMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/dto/EmbeddedForkStatusMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/dto/EmbeddedForkliftCommandMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/mapper/EmbeddedErrorHistoryMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/mapper/EmbeddedVehicleCommandMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/embedded/mapper/VehicleForkCurrentStatusMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/domain/IsaacForkliftStatus.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/dto/IsaacForkliftCommandMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/dto/IsaacForkliftLocationMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/dto/IsaacForkliftPathMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/dto/IsaacForkliftStatusMessage.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/service/IsaacForkliftCommandPublisher.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/service/IsaacForkliftLocationService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/service/IsaacForkliftPathService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/isaac/service/IsaacForkliftStatusService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/config/VehicleConfig.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/config/VehicleProperties.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/controller/VehicleController.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/controller/VehicleStatusTestController.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/domain/Vehicle.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/domain/VehicleCurrentStatus.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/domain/VehicleSource.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/domain/VehicleStatus.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/domain/VehicleStatusHistory.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleCreateRequest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleDetailResponse.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleResponse.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleStatusCountResponse.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleStatusHistoryResponse.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleStatusResponse.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleStatusUpdateCommand.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/dto/VehicleStatusUpdateRequest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/mapper/VehicleCurrentStatusMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/mapper/VehicleMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/mapper/VehicleStatusCountRow.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/mapper/VehicleStatusHistoryMapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/mqtt/VehicleStatusAdapter.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/service/VehicleService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/service/VehicleStatusHistoryService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/service/VehicleStatusService.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/IsaacVehicleLocationEventData.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/IsaacVehicleStatusEventData.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehicleCommandResultEventData.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehicleLocationEventData.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehiclePathEventData.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehicleWebSocketBroadcaster.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehicleWebSocketEvent.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehicleWebSocketEventType.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/vehicle/websocket/VehicleWebSocketTopics.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/db/data-local.sql" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/db/schema.sql" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/AiCargoAnalysisMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/AiCargoDetectionBoxMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/EmbeddedErrorHistoryMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/EmbeddedVehicleCommandMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/VehicleCurrentStatusMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/VehicleForkCurrentStatusMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/VehicleMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/mapper/VehicleStatusHistoryMapper.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/controller/AiCargoAnalysisControllerTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/controller/AiCargoAnalysisIntegrationTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/domain/AiAnalysisStatusTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/domain/DimensionScaleTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/domain/LoadBalanceDirectionTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/dto/AiCargoAnalysisMessageTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/mapper/AiCargoAnalysisMapperTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/mapper/AiCargoDetectionBoxMapperTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/service/AiCargoAnalysisServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/ai/websocket/AiCargoAnalysisBroadcasterTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/config/websocket/WebSocketConfigTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/forklift/dto/ForkliftLocationMessageTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/forklift/service/ForkliftLocationServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/forklift/service/ForkliftStatusServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/domain/IsaacForkliftStatusTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/dto/IsaacForkliftCommandMessageTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/dto/IsaacForkliftLocationMessageTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/dto/IsaacForkliftPathMessageTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/dto/IsaacForkliftStatusMessageTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/service/IsaacForkliftCommandPublisherTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/service/IsaacForkliftLocationServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/service/IsaacForkliftPathServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/isaac/service/IsaacForkliftStatusServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/controller/VehicleControllerIntegrationTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/controller/VehicleControllerTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/controller/VehicleStatusTestControllerTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/domain/VehicleStatusTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/mapper/VehicleCurrentStatusMapperTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/mapper/VehicleMapperTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/mapper/VehicleStatusHistoryMapperTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/service/VehicleServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/service/VehicleStatusHistoryServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/service/VehicleStatusServiceTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/websocket/VehicleLocationEventDataTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/vehicle/websocket/VehicleWebSocketBroadcasterTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/common/exception/ErrorCode.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/common/exception/ErrorCode.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/mqtt/MqttConfig.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/mqtt/MqttConfig.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/mqtt/MqttProperties.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/mqtt/MqttProperties.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/mqtt/MqttTopics.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/config/mqtt/MqttTopics.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/forklift/dto/ForkliftLocationMessage.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/forklift/dto/ForkliftLocationMessage.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/forklift/service/ForkliftLocationService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/forklift/service/ForkliftLocationService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/forklift/service/ForkliftStatusService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/forklift/service/ForkliftStatusService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/fast/backend/mqtt/inbound/MqttMessageRouter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/fast/backend/mqtt/inbound/MqttMessageRouter.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/resources/application-local.yml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/application-local.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test/java/com/fast/backend/config/mqtt/MqttTopicsTest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/config/mqtt/MqttTopicsTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test/java/com/fast/backend/mqtt/inbound/MqttMessageRouterTest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/test/java/com/fast/backend/mqtt/inbound/MqttMessageRouterTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test/resources/application-test.yml" beforeDir="false" afterPath="$PROJECT_DIR$/src/test/resources/application-test.yml" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="EmbeddingIndexingInfo">
+    <option name="cachedIndexableFilesCount" value="113" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.4121723030137021" />
+      <entry key="MS500" value="4.294244922218912" />
+      <entry key="S2" value="9.136458294657292" />
+      <entry key="S5" value="12.003828447901373" />
+      <entry key="S10" value="13.359033958678534" />
+      <entry key="S30" value="14.41711649820507" />
+      <entry key="S60" value="14.705119615458004" />
+      <entry key="M2" value="15.107081831675142" />
+      <entry key="M5" value="22.84748475501204" />
+      <entry key="M10" value="41.1624272691661" />
+      <entry key="M15" value="54.25022324944649" />
+      <entry key="M30" value="74.03431693592732" />
+      <entry key="H1" value="88.3895406841018" />
+      <entry key="H2" value="110.80888992130372" />
+      <entry key="H4" value="169.80381622934786" />
+      <entry key="D1" value="398.855703171284" />
+      <entry key="W1" value="494.7319788921104" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="1.9574018330870934E-126" />
+      <entry key="S5" value="5.208012240325462E-51" />
+      <entry key="S10" value="7.216655902005937E-26" />
+      <entry key="S30" value="4.164855579099746E-9" />
+      <entry key="S60" value="6.574177322339867E-5" />
+      <entry key="M2" value="0.009136130503173596" />
+      <entry key="M5" value="0.2108220449035648" />
+      <entry key="M10" value="0.6372239012343857" />
+      <entry key="M15" value="0.928957545147417" />
+      <entry key="M30" value="1.360092493495854" />
+      <entry key="H1" value="1.652167453920254" />
+      <entry key="H2" value="1.9346537994363204" />
+      <entry key="H4" value="2.6356135318943914" />
+      <entry key="D1" value="5.577784842380572" />
+      <entry key="W1" value="6.766102706699325" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="1.3556703663621879" />
+      <entry key="MS500" value="4.212671454849246" />
+      <entry key="S2" value="9.062564720146112" />
+      <entry key="S5" value="11.954033454870848" />
+      <entry key="S10" value="13.328652673373549" />
+      <entry key="S30" value="14.405477841213958" />
+      <entry key="S60" value="14.699153293632405" />
+      <entry key="M2" value="15.112990235991784" />
+      <entry key="M5" value="23.05555943571017" />
+      <entry key="M10" value="41.79673252032378" />
+      <entry key="M15" value="55.176528341886" />
+      <entry key="M30" value="75.39256020950548" />
+      <entry key="H1" value="90.04059025169029" />
+      <entry key="H2" value="112.74270362359768" />
+      <entry key="H4" value="172.43848074211667" />
+      <entry key="D1" value="404.4329964861972" />
+      <entry key="W1" value="501.4979937843005" />
+    </decayedShown>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 8,
+  &quot;fromUser&quot;: false
+}</component>
+  <component name="ProjectId" id="3GZ0EEXftS4L1kQEnuueDgaTIDW" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RequestMappingsPanelOrder0&quot;: &quot;0&quot;,
+    &quot;RequestMappingsPanelOrder1&quot;: &quot;1&quot;,
+    &quot;RequestMappingsPanelWidth0&quot;: &quot;75&quot;,
+    &quot;RequestMappingsPanelWidth1&quot;: &quot;75&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;Spring Boot.FastBackendApplication.executor&quot;: &quot;Run&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;feature/communication-protocol&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/SSAFY/fast-backend&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;onboarding.tips.debug.path&quot;: &quot;C:/SSAFY/fast-backend/src/main/java/org/example/Main.java&quot;,
+    &quot;project.structure.last.edited&quot;: &quot;모듈&quot;,
+    &quot;project.structure.proportion&quot;: &quot;0.0&quot;,
+    &quot;project.structure.side.proportion&quot;: &quot;0.0&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.lookFeel&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  },
+  &quot;keyToStringList&quot;: {
+    &quot;DatabaseDriversLRU&quot;: [
+      &quot;mysql&quot;
+    ]
+  }
+}</component>
+  <component name="RunManager">
+    <configuration name="FastBackendApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" nameIsGenerated="true">
+      <envs>
+        <env name="DB_URL" value="jdbc:mysql://localhost:3306/fast?serverTimezone=Asia/Seoul&amp;characterEncoding=UTF-8" />
+        <env name="DB_USERNAME" value="ssafy" />
+        <env name="DB_PASSWORD" value="1234" />
+      </envs>
+      <module name="backend" />
+      <option name="SPRING_BOOT_MAIN_CLASS" value="com.fast.backend.FastBackendApplication" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-30f59d01ecdd-37e91769500f-intellij.indexing.shared.core-IU-261.26222.65" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-IU-261.26222.65" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="디폴트 작업">
+      <changelist id="b4ab2210-ffd8-410b-aab1-5791d1cb059d" name="변경" comment="" />
+      <created>1784163671744</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1784163671744</updated>
+      <workItem from="1784163673869" duration="3515000" />
+      <workItem from="1784171141432" duration="37000" />
+      <workItem from="1784505894251" duration="26698000" />
+      <workItem from="1784592796333" duration="17900000" />
+      <workItem from="1784678106891" duration="27270000" />
+      <workItem from="1784767001434" duration="65000" />
+      <workItem from="1784767267274" duration="4617000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="OPEN_GENERIC_TABS">
+      <map>
+        <entry key="963101e1-d94d-430f-a981-ac0a1f487d5e" value="TOOL_WINDOW" />
+      </map>
+    </option>
+    <option name="TAB_STATES">
+      <map>
+        <entry key="963101e1-d94d-430f-a981-ac0a1f487d5e">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" type="java-line">
+          <url>file://$PROJECT_DIR$/src/main/java/org/example/Main.java</url>
+          <line>13</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+</project>

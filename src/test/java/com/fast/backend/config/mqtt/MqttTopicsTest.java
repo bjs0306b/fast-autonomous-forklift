@@ -15,6 +15,10 @@ class MqttTopicsTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status",
                 "forklift/+/location",
+                "forklift/+/path",
+                "forklift/+/command-result",
+                "forklift/+/fork-status",
+                "forklift/+/error",
                 "cargo/detected",
                 "forklift/%s/command",
                 "forklift/%s/emergency");
@@ -52,6 +56,43 @@ class MqttTopicsTest {
     void extractForkliftId_extractsFromStatusOrLocationTopic() {
         assertThat(mqttTopics.extractForkliftId("forklift/F01/status")).isEqualTo("F01");
         assertThat(mqttTopics.extractForkliftId("forklift/F02/location")).isEqualTo("F02");
+    }
+
+    @Test
+    void isForkliftPathTopic_matchesOnlyPathTopic() {
+        assertThat(mqttTopics.isForkliftPathTopic("forklift/SIM01/path")).isTrue();
+        assertThat(mqttTopics.isForkliftPathTopic("forklift/SIM01/location")).isFalse();
+    }
+
+    @Test
+    void extractForkliftId_extractsFromPathTopic() {
+        assertThat(mqttTopics.extractForkliftId("forklift/SIM01/path")).isEqualTo("SIM01");
+    }
+
+    @Test
+    void isForkliftCommandResultTopic_matchesOnlyCommandResultTopic() {
+        assertThat(mqttTopics.isForkliftCommandResultTopic("forklift/REAL01/command-result")).isTrue();
+        assertThat(mqttTopics.isForkliftCommandResultTopic("forklift/REAL01/command")).isFalse();
+        assertThat(mqttTopics.isForkliftCommandResultTopic("forklift/REAL01/status")).isFalse();
+    }
+
+    @Test
+    void isForkliftForkStatusTopic_matchesOnlyForkStatusTopic() {
+        assertThat(mqttTopics.isForkliftForkStatusTopic("forklift/REAL01/fork-status")).isTrue();
+        assertThat(mqttTopics.isForkliftForkStatusTopic("forklift/REAL01/status")).isFalse();
+    }
+
+    @Test
+    void isForkliftErrorTopic_matchesOnlyErrorTopic() {
+        assertThat(mqttTopics.isForkliftErrorTopic("forklift/REAL01/error")).isTrue();
+        assertThat(mqttTopics.isForkliftErrorTopic("forklift/REAL01/status")).isFalse();
+    }
+
+    @Test
+    void extractForkliftId_extractsFromCommandResultForkStatusAndErrorTopics() {
+        assertThat(mqttTopics.extractForkliftId("forklift/REAL01/command-result")).isEqualTo("REAL01");
+        assertThat(mqttTopics.extractForkliftId("forklift/REAL01/fork-status")).isEqualTo("REAL01");
+        assertThat(mqttTopics.extractForkliftId("forklift/REAL01/error")).isEqualTo("REAL01");
     }
 
     @Test

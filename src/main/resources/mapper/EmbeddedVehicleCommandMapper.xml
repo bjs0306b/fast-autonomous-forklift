@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fast.backend.embedded.mapper.EmbeddedVehicleCommandMapper">
+
+    <resultMap id="embeddedVehicleCommandResultMap" type="com.fast.backend.embedded.domain.EmbeddedVehicleCommand">
+        <id property="id" column="id"/>
+        <result property="commandId" column="command_id"/>
+        <result property="forkliftId" column="forklift_id"/>
+        <result property="command" column="command"/>
+        <result property="reason" column="reason"/>
+        <result property="status" column="status"/>
+        <result property="issuedAt" column="issued_at"/>
+        <result property="publishedAt" column="published_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="errorCode" column="error_code"/>
+        <result property="resultMessage" column="result_message"/>
+        <result property="stoppedActions" column="stopped_actions"/>
+        <result property="emergencyStopApplied" column="emergency_stop_applied"/>
+        <result property="requiresReset" column="requires_reset"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fast.backend.embedded.domain.EmbeddedVehicleCommand"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO embedded_vehicle_command (
+            command_id, forklift_id, command, reason, status, issued_at, created_at, updated_at
+        )
+        VALUES (
+            #{commandId}, #{forkliftId}, #{command}, #{reason}, #{status}, #{issuedAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update" parameterType="com.fast.backend.embedded.domain.EmbeddedVehicleCommand">
+        UPDATE embedded_vehicle_command
+        SET status = #{status},
+            published_at = #{publishedAt},
+            completed_at = #{completedAt},
+            error_code = #{errorCode},
+            result_message = #{resultMessage},
+            stopped_actions = #{stoppedActions},
+            emergency_stop_applied = #{emergencyStopApplied},
+            requires_reset = #{requiresReset},
+            updated_at = #{updatedAt}
+        WHERE command_id = #{commandId}
+    </update>
+
+    <select id="existsByCommandId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM embedded_vehicle_command
+        WHERE command_id = #{commandId}
+    </select>
+
+    <select id="findByCommandId" resultMap="embeddedVehicleCommandResultMap">
+        SELECT *
+        FROM embedded_vehicle_command
+        WHERE command_id = #{commandId}
+    </select>
+
+    <select id="findRecentByForkliftId" resultMap="embeddedVehicleCommandResultMap">
+        SELECT *
+        FROM embedded_vehicle_command
+        WHERE forklift_id = #{forkliftId}
+        ORDER BY issued_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>
