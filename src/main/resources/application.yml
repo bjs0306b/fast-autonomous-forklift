@@ -5,6 +5,11 @@ spring:
     active: local
   jackson:
     default-property-inclusion: always
+    deserialization:
+      # OffsetDateTime의 원본 오프셋을 UTC로 변환하지 않고 그대로 보존한다 — 측정 스테이션
+      # measured_at의 +09:00 오프셋을 손실 없이 수신하기 위함(prompt16.md 정책 9번). LocalDateTime을
+      # 쓰는 기존 도메인(차량/포크리프트/AI 등)은 오프셋 자체가 없어 이 설정의 영향을 받지 않는다.
+      adjust-dates-to-context-time-zone: false
 
 server:
   port: 8080
