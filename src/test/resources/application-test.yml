@@ -37,6 +37,7 @@ mqtt:
     cargo-detected: cargo/detected
     forklift-command: forklift/%s/command
     forklift-emergency: forklift/%s/emergency
+    station-measurement: fast/station/+/measurement
 
 # FR-501-1: 실제 MySQL 대신 임베디드 H2(MySQL 호환 모드)를 사용한다. mvnw test가 외부 인프라(EC2/로컬
 # MySQL) 없이도 완전히 자체 완결적으로 동작해야 하고, db/schema.sql이 실제로 실행 가능한지도 매 테스트

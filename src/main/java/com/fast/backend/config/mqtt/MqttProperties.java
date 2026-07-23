@@ -28,7 +28,8 @@ public record MqttProperties(
             String forkliftError,
             String cargoDetected,
             String forkliftCommand,
-            String forkliftEmergency
+            String forkliftEmergency,
+            String stationMeasurement
     ) {
     }
 }

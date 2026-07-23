@@ -120,6 +120,67 @@ CREATE TABLE IF NOT EXISTS ai_cargo_detection_box (
         FOREIGN KEY (analysis_id) REFERENCES ai_cargo_analysis (id)
 );
 
+-- 측정 스테이션 측정 결과 v1.0 (prompt16.md, MR !36, FR-101-5). 스테이션 PC가 추론·판정을 마친 결과를
+-- fast/station/{station_id}/measurement 토픽으로 발행하고 EC2 백엔드는 결과만 저장한다. 기존
+-- ai_cargo_analysis(cargo/detected)와 규격(snake_case 키, OffsetDateTime, pallet 별도 의미, miniature/
+-- eccentric/magnitude/threshold 등)이 달라 무리하게 확장하지 않고 별도 도메인 테이블로 분리했다.
+--
+-- measured_at 오프셋 보존: MySQL/H2 공용 DATETIME은 타임존을 담지 못하므로, UTC 변환 시각
+-- (measured_at_utc)과 오프셋 분(measured_at_offset_minutes, 예: +09:00 → 540)을 분리 저장해 응답 시
+-- 원래 OffsetDateTime을 손실 없이 복원한다. depth_cm은 정책상 항상 null이지만(정면 단일 카메라) 컬럼은
+-- 유지한다. pallet은 detection box와 의미가 달라(적재 파렛트) 부모의 단일 컬럼 세트로 보존한다.
+CREATE TABLE IF NOT EXISTS station_measurement (
+    id                         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    measurement_id             VARCHAR(100) NOT NULL,
+    station_id                 VARCHAR(50)  NOT NULL,
+    schema_version             VARCHAR(20)  NOT NULL,
+    measured_at_utc            DATETIME     NOT NULL,
+    measured_at_offset_minutes INT          NOT NULL,
+    status                     VARCHAR(20)  NOT NULL,
+    box_count                  INT          NULL,
+    pallet_bbox_x              INT          NULL,
+    pallet_bbox_y              INT          NULL,
+    pallet_bbox_width          INT          NULL,
+    pallet_bbox_height         INT          NULL,
+    pallet_score               DOUBLE       NULL,
+    front_cm                   DOUBLE       NULL,
+    distance_std_cm            DOUBLE       NULL,
+    frames_used                INT          NULL,
+    height_cm                  DOUBLE       NULL,
+    width_cm                   DOUBLE       NULL,
+    depth_cm                   DOUBLE       NULL,
+    miniature_scale            INT          NULL,
+    miniature_height_mm        DOUBLE       NULL,
+    miniature_width_mm         DOUBLE       NULL,
+    eccentric                  BOOLEAN      NULL,
+    load_direction             VARCHAR(50)  NULL,
+    ratio_x                    DOUBLE       NULL,
+    ratio_y                    DOUBLE       NULL,
+    magnitude                  DOUBLE       NULL,
+    threshold                  DOUBLE       NULL,
+    load_message               VARCHAR(500) NULL,
+    received_at                DATETIME     NOT NULL,
+    created_at                 DATETIME     NOT NULL,
+    CONSTRAINT uk_station_measurement_measurement_id UNIQUE (measurement_id),
+    INDEX idx_station_measurement_station_measured (station_id, measured_at_utc DESC)
+);
+
+-- 다중 detection box(1:N). box_order로 payload 배열 순서를 보존한다. bbox 좌표는 nullable(관제 오버레이
+-- 미사용 시 bbox_px 생략 가능, 정책 7번). pallet은 부모 테이블에 별도 보관하므로 이 테이블에는 넣지 않는다.
+CREATE TABLE IF NOT EXISTS station_measurement_box (
+    id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+    station_measurement_id BIGINT NOT NULL,
+    box_order              INT    NOT NULL,
+    bbox_x                 INT    NULL,
+    bbox_y                 INT    NULL,
+    bbox_width             INT    NULL,
+    bbox_height            INT    NULL,
+    score                  DOUBLE NULL,
+    created_at             DATETIME NOT NULL,
+    CONSTRAINT fk_station_measurement_box_measurement
+        FOREIGN KEY (station_measurement_id) REFERENCES station_measurement (id)
+);
+
 -- 실물 지게차(REAL01) 임베디드 제어 명령(prompt29.md 17장). command_id는 REST 응답·MQTT 결과 연결의
 -- 유일한 키라 UNIQUE로 이중 방어한다(애플리케이션 사전 확인 + DB 제약, prompt27.md에서 검증한 패턴과
 -- 동일). stopped_actions는 loadBalance.direction(prompt26.md)과 동일하게 쉼표 구분 문자열로 저장한다

@@ -7,6 +7,7 @@ import com.fast.backend.config.mqtt.MqttProperties;
 import com.fast.backend.config.mqtt.MqttTopics;
 import com.fast.backend.embedded.service.EmbeddedCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedErrorService;
+import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
 import com.fast.backend.forklift.service.ForkliftLocationService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
@@ -38,6 +39,7 @@ class MqttMessageRouterTest {
     private EmbeddedCommandResultService embeddedCommandResultService;
     private EmbeddedForkStatusService embeddedForkStatusService;
     private EmbeddedErrorService embeddedErrorService;
+    private StationMeasurementService stationMeasurementService;
 
     @BeforeEach
     void setUp() {
@@ -45,7 +47,8 @@ class MqttMessageRouterTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "forklift/%s/emergency");
+                "cargo/detected", "forklift/%s/command", "forklift/%s/emergency",
+                "fast/station/+/measurement");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
                 "fast-backend-inbound", "fast-backend-outbound",
@@ -61,10 +64,12 @@ class MqttMessageRouterTest {
         embeddedCommandResultService = mock(EmbeddedCommandResultService.class);
         embeddedForkStatusService = mock(EmbeddedForkStatusService.class);
         embeddedErrorService = mock(EmbeddedErrorService.class);
+        stationMeasurementService = mock(StationMeasurementService.class);
         router = new MqttMessageRouter(
                 objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService, aiCargoAnalysisService,
                 isaacForkliftLocationService, isaacForkliftStatusService, isaacForkliftPathService,
-                embeddedCommandResultService, embeddedForkStatusService, embeddedErrorService);
+                embeddedCommandResultService, embeddedForkStatusService, embeddedErrorService,
+                stationMeasurementService);
     }
 
     @Test

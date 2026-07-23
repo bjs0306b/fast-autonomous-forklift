@@ -19,6 +19,7 @@ public class MqttTopics {
     private final Pattern commandResultTopicPattern;
     private final Pattern forkStatusTopicPattern;
     private final Pattern errorTopicPattern;
+    private final Pattern stationMeasurementTopicPattern;
 
     public MqttTopics(MqttProperties mqttProperties) {
         this.topics = mqttProperties.topics();
@@ -28,6 +29,7 @@ public class MqttTopics {
         this.commandResultTopicPattern = toSubscribePattern(topics.forkliftCommandResult());
         this.forkStatusTopicPattern = toSubscribePattern(topics.forkliftForkStatus());
         this.errorTopicPattern = toSubscribePattern(topics.forkliftError());
+        this.stationMeasurementTopicPattern = toSubscribePattern(topics.stationMeasurement());
     }
 
     public String forkliftStatusSubscribeTopic() {
@@ -56,6 +58,10 @@ public class MqttTopics {
 
     public String cargoDetectedTopic() {
         return topics.cargoDetected();
+    }
+
+    public String stationMeasurementSubscribeTopic() {
+        return topics.stationMeasurement();
     }
 
     public String forkliftCommand(String forkliftId) {
@@ -92,6 +98,25 @@ public class MqttTopics {
 
     public boolean isCargoDetectedTopic(String topic) {
         return topics.cargoDetected().equals(topic);
+    }
+
+    public boolean isStationMeasurementTopic(String topic) {
+        return topic != null && stationMeasurementTopicPattern.matcher(topic).matches();
+    }
+
+    /**
+     * {@code fast/station/{station_id}/measurement}에서 station_id를 추출한다. isStationMeasurementTopic이
+     * 이미 true로 확인된 토픽에서만 호출되므로 매칭은 항상 성공한다.
+     */
+    public String extractStationId(String topic) {
+        if (topic == null) {
+            throw new IllegalArgumentException("topic must not be null");
+        }
+        Matcher matcher = stationMeasurementTopicPattern.matcher(topic);
+        if (matcher.matches()) {
+            return matcher.group(1);
+        }
+        throw new IllegalArgumentException("Cannot extract stationId from topic: " + topic);
     }
 
     public String extractForkliftId(String topic) {

@@ -36,6 +36,8 @@ mqtt:
     cargo-detected: cargo/detected
     forklift-command: forklift/%s/command
     forklift-emergency: forklift/%s/emergency
+    # 측정 스테이션 측정 결과 v1.0 (FR-101-5, MR !36) — 스테이션 PC가 추론·판정 후 결과만 발행
+    station-measurement: fast/station/+/measurement
 
 # ---------------------------------------------------------------
 # FR-501-1: 차량 등록·상태 집계 (prompt16.md, answer15.md)
