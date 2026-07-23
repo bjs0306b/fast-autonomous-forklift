@@ -9,7 +9,22 @@
 
 #define COMM_TASK_STACK_SIZE            3072
 #define COMM_TASK_PRIORITY              4
-#define COMM_TASK_PERIOD_MS             1500
+
+/* Jetson UART */
+#define JETSON_UART_PORT                UART_NUM_1
+#define JETSON_UART_TX_GPIO             GPIO_NUM_17
+#define JETSON_UART_RX_GPIO             GPIO_NUM_18
+#define JETSON_UART_BAUD_RATE           115200
+#define JETSON_UART_RX_BUFFER_SIZE      256
+#define JETSON_UART_TX_BUFFER_SIZE      256
+#define JETSON_UART_FRAME_MAX_LENGTH    96
+
+/* Tele-operation safety limits */
+#define TELEOP_WATCHDOG_TIMEOUT_MS      500U
+#define TELEOP_MAX_DRIVE_PERCENT        60
+#define TELEOP_STEERING_CENTER_CDEG     10000U
+#define TELEOP_STEERING_MIN_CDEG        8500U
+#define TELEOP_STEERING_MAX_CDEG        11500U
 
 /* I2C */
 #define I2C_SDA_GPIO                    GPIO_NUM_8
@@ -38,17 +53,9 @@
 #define MOTOR_B_BIN1_CHANNEL            3
 #define MOTOR_B_BIN2_CHANNEL            4
 
-/* Driving test */
+/* Mechanical steering limits */
 #define DRIVE_REAR_STEER_CENTER_ANGLE_DEG       100.0f
 #define DRIVE_REAR_STEER_RIGHT_TURN_ANGLE_DEG   70.0f
 #define DRIVE_REAR_STEER_LEFT_TURN_ANGLE_DEG    130.0f
-
-#define DRIVE_STRAIGHT_SPEED_PERCENT    80U
-#define DRIVE_TURN_SPEED_PERCENT        60U
-#define DRIVE_SPEED_STEP_PERCENT        5U
-#define DRIVE_SPEED_STEP_DELAY_MS       100U
-
-#define DRIVE_PHASE_DURATION_MS         2000U
-#define DRIVE_LOOP_PAUSE_MS             2000U
 
 #endif
