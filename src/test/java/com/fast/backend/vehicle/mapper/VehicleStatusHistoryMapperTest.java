@@ -89,6 +89,24 @@ class VehicleStatusHistoryMapperTest {
     }
 
     @Test
+    void findRecentByVehicleId_sameMessageAt_ordersByIdDescending() {
+        insertVehicle("HIST-05-TIE");
+        LocalDateTime sameMessageAt = LocalDateTime.now().withNano(0);
+        VehicleStatusHistory first = newHistory(
+                "HIST-05-TIE", VehicleStatus.IDLE, null, sameMessageAt);
+        VehicleStatusHistory second = newHistory(
+                "HIST-05-TIE", VehicleStatus.ACTIVE, null, sameMessageAt);
+        historyMapper.insert(first);
+        historyMapper.insert(second);
+
+        List<VehicleStatusHistory> rows =
+                historyMapper.findRecentByVehicleId("HIST-05-TIE", 10);
+
+        assertThat(rows).extracting(VehicleStatusHistory::getId)
+                .containsExactly(second.getId(), first.getId());
+    }
+
+    @Test
     void findRecentByVehicleId_appliesLimit() {
         insertVehicle("HIST-06");
         for (int i = 0; i < 5; i++) {
