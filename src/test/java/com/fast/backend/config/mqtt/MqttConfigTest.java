@@ -1,7 +1,9 @@
 package com.fast.backend.config.mqtt;
 
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.integration.mqtt.core.DefaultMqttPahoClientFactory;
 import org.springframework.integration.mqtt.inbound.MqttPahoMessageDrivenChannelAdapter;
 
 import java.util.HashMap;
@@ -105,6 +107,20 @@ class MqttConfigTest {
         MqttConfig configWithQos2 = new MqttConfig(changed, new MqttTopics(changed));
 
         assertThat(topicToQos(configWithQos2.mqttInboundAdapter()).values()).allMatch(qos -> qos == 2);
+    }
+
+    @Test
+    void clientFactory_appliesConnectionAndReconnectProperties() {
+        DefaultMqttPahoClientFactory factory =
+                (DefaultMqttPahoClientFactory) mqttConfig.mqttClientFactory();
+        MqttConnectOptions options = factory.getConnectionOptions();
+
+        assertThat(options.getServerURIs()).containsExactly("tcp://localhost:1883");
+        assertThat(options.isAutomaticReconnect()).isTrue();
+        assertThat(options.isCleanSession()).isTrue();
+        assertThat(options.getConnectionTimeout()).isEqualTo(10);
+        assertThat(options.getKeepAliveInterval()).isEqualTo(30);
+        assertThat(options.getMaxReconnectDelay()).isEqualTo(5000);
     }
 
     private Map<String, Integer> topicToQos(MqttPahoMessageDrivenChannelAdapter adapter) {

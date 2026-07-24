@@ -82,25 +82,60 @@ public class MqttMessageRouter {
     }
 
     public void route(String topic, String payload) {
-        if (mqttTopics.isForkliftStatusTopic(topic)) {
-            routeStatus(topic, payload);
-        } else if (mqttTopics.isForkliftLocationTopic(topic)) {
-            routeLocation(topic, payload);
-        } else if (mqttTopics.isForkliftPathTopic(topic)) {
-            routePath(topic, payload);
-        } else if (mqttTopics.isForkliftCommandResultTopic(topic)) {
-            routeCommandResult(topic, payload);
-        } else if (mqttTopics.isForkliftForkStatusTopic(topic)) {
-            routeForkStatus(topic, payload);
-        } else if (mqttTopics.isForkliftErrorTopic(topic)) {
-            routeEmbeddedError(topic, payload);
-        } else if (mqttTopics.isCargoDetectedTopic(topic)) {
-            routeCargoDetected(payload);
-        } else if (mqttTopics.isStationMeasurementTopic(topic)) {
-            routeStationMeasurement(topic, payload);
-        } else {
-            log.warn("Unknown MQTT topic received: topic={}", topic);
+        if (topic == null || topic.isBlank()) {
+            log.warn("MQTT message discarded: topic is null or blank");
+            return;
         }
+        if (!isSupportedTopic(topic)) {
+            log.warn("Unknown MQTT topic received: topic={}", topic);
+            return;
+        }
+        if (payload == null || payload.isBlank()) {
+            log.warn("MQTT message discarded: topic={}, reason=payload is null or blank", topic);
+            return;
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            if (root == null || !root.isObject()) {
+                log.warn("MQTT message discarded: topic={}, reason=payload must be a JSON object", topic);
+                return;
+            }
+
+            if (mqttTopics.isForkliftStatusTopic(topic)) {
+                routeStatus(topic, payload);
+            } else if (mqttTopics.isForkliftLocationTopic(topic)) {
+                routeLocation(topic, payload);
+            } else if (mqttTopics.isForkliftPathTopic(topic)) {
+                routePath(topic, payload);
+            } else if (mqttTopics.isForkliftCommandResultTopic(topic)) {
+                routeCommandResult(topic, payload);
+            } else if (mqttTopics.isForkliftForkStatusTopic(topic)) {
+                routeForkStatus(topic, payload);
+            } else if (mqttTopics.isForkliftErrorTopic(topic)) {
+                routeEmbeddedError(topic, payload);
+            } else if (mqttTopics.isCargoDetectedTopic(topic)) {
+                routeCargoDetected(payload);
+            } else if (mqttTopics.isStationMeasurementTopic(topic)) {
+                routeStationMeasurement(topic, payload);
+            }
+        } catch (JsonProcessingException e) {
+            log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("MQTT message processing failed unexpectedly and was isolated: topic={}, error={}",
+                    topic, e.getMessage());
+        }
+    }
+
+    private boolean isSupportedTopic(String topic) {
+        return mqttTopics.isForkliftStatusTopic(topic)
+                || mqttTopics.isForkliftLocationTopic(topic)
+                || mqttTopics.isForkliftPathTopic(topic)
+                || mqttTopics.isForkliftCommandResultTopic(topic)
+                || mqttTopics.isForkliftForkStatusTopic(topic)
+                || mqttTopics.isForkliftErrorTopic(topic)
+                || mqttTopics.isCargoDetectedTopic(topic)
+                || mqttTopics.isStationMeasurementTopic(topic);
     }
 
     /**

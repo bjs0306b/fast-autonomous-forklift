@@ -2,9 +2,9 @@
 
 F.A.S.T. — AIoT 기반 무인 지게차 물류 자동화 시스템의 Spring Boot 백엔드입니다.
 
-이 저장소의 현재 단계 목표는 Jira 이슈 **S15P11A304-88 (Spring Boot 프로젝트 골격 구성)** 범위에 한정됩니다.
-실제 비즈니스 기능(MQTT, MySQL, MyBatis, WebSocket, ROS2/Isaac Sim/React 연동, 차량 제어 등)은 아직 구현하지 않으며,
-향후 이러한 기능을 추가하기 쉬운 패키지 구조와 공통 기반(공통 응답, 예외 처리, 설정, 로깅)만 제공합니다.
+현재 저장소에는 Spring Boot 공통 기반뿐 아니라 MQTT 수신·명령 발행, MySQL/MyBatis 차량 상태·명령 저장,
+WebSocket 이벤트 중계가 구현되어 있습니다. 실제 Mosquitto/ROS2/임베디드와의 end-to-end 연동 완료 여부는
+코드 구현·자동 테스트와 구분해 각 문서의 `외부 연동 확인 필요` 항목으로 관리합니다.
 
 ## 시스템 구성 (최종 목표)
 
@@ -80,7 +80,15 @@ Spring Integration MQTT + Eclipse Paho MQTT v3로 MQTT Broker(Eclipse Mosquitto)
 - 접속 설정은 `application-local.yml`의 `mqtt.*`를 `MqttProperties`(`@ConfigurationProperties`)로 바인딩해서 사용하며, 코드에 하드코딩하지 않는다. 주요 접속 값(`enabled`, `test-api.enabled`, `broker-url`, `username`, `password`, `inbound-client-id`, `outbound-client-id`, `default-qos`)은 `${ENV_VAR:기본값}` 형태로 환경변수 오버라이드가 가능하다(아래 "EC2 Mosquitto Broker 연동" 참고).
 - Inbound(`fast-backend-inbound`)와 Outbound(`fast-backend-outbound`) Client ID는 분리되어 있고, `MqttPahoClientFactory` 하나를 공유한다.
 - 검증용 임시 API: `POST /api/mqtt/test` (`{"topic":"...","payload":"...","qos":1,"retained":false}`) — 실제 지게차 제어 API가 아니며, 이번 Jira 이슈 검증 목적으로만 존재한다. `mqtt.test-api.enabled` 프로퍼티로 켜고 끄며, **기본값은 `false`(비활성화)**다(prompt9.md 기준 변경 — 값을 명시하지 않은 환경에서는 노출되지 않는 것이 더 안전하다는 판단). 로컬 개발 환경(`application-local.yml`)에서는 이 값을 `true`로 명시적으로 켜뒀다(`@Profile`이 아니라 `@ConditionalOnProperty`를 쓰는 이유는 `answer7.md` 8장 참고).
-- MQTT 인프라(Client Factory/Channel/Adapter/Handler) 전체도 `mqtt.enabled`(기본값 `true`)로 켜고 끌 수 있다. `src/test/resources/application-test.yml`에서 이 값을 `false`로 둬서, `@SpringBootTest`가 여러 개 뜰 때 같은 Client ID로 실제 Broker에 동시 접속하며 발생하던 `Lost connection` 로그를 없앴다(`answer7.md` 참고).
+- MQTT의 broker 연결 Bean(Client Factory/Inbound Adapter/Outbound Handler)은 `mqtt.enabled`(기본값
+  `true`)로 켜고 끌 수 있다. `src/test/resources/application-test.yml`에서는 `false`로 두므로 실제
+  Broker에 접속하지 않는다. `@ServiceActivator`가 참조하는 내부 channel은 Spring Integration이 자동
+  생성할 수 있지만 Paho 연결 Bean이 없어 외부 접속은 발생하지 않는다.
+- 수신 경계는 전체 payload 대신 byte 길이만 로그에 남긴다. null/blank/non-object/잘못된 JSON은
+  Router가 해당 메시지만 폐기하고, 예상하지 못한 Service 예외도 Router와 Receiver의 이중 경계에서
+  consumer thread 밖으로 전파되지 않는다.
+- gateway 발행 실패는 `MqttPublishException`으로 변환된다. `VehicleCommandService`는 이를 받아 DB
+  상태를 `PUBLISH_FAILED`로 저장하며, gateway 호출 성공은 broker/차량 수신 성공과 구분한다.
 - 통신 규격(JSON 필드)은 2026-07-24 팀 확정 규격으로 갱신됐다(아래 "확정 통신 규격 요약" 참고).
 - 실제 로컬 Mosquitto(winget으로 설치, Windows 서비스로 상시 구동)를 대상으로 구독 성공, 상태/위치/cargo 메시지 수신, 잘못된 JSON 무시, `POST /api/mqtt/test` → `mosquitto_sub` 수신, Broker 재기동 후 자동 재연결까지 실제로 검증했다(`prompt/answer/answer5.md` 참고).
 

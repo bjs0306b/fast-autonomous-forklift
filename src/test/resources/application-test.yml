@@ -1,8 +1,10 @@
 # 테스트 전용 프로필.
 # 기본 mvn test가 실제 MQTT Broker에 연결하지 않도록 mqtt.enabled를 false로 둔다.
-# MqttConfig의 Client Factory/Channel/Adapter/Handler Bean이 아예 생성되지 않아,
+# MqttConfig의 broker 연결 Bean(Client Factory/Inbound Adapter/Outbound Handler)이 생성되지 않아,
 # @SpringBootTest 컨텍스트가 여러 개 뜰 때 같은 MQTT Client ID로 실제 Broker에
 # 동시 접속하면서 발생하던 "Lost connection" 로그(answer5.md/answer7.md 참고)를 없앤다.
+# @ServiceActivator가 참조하는 이름의 내부 channel은 Spring Integration이 자동 생성할 수 있지만,
+# Paho 연결 Bean이 없으므로 외부 broker 접속은 발생하지 않는다.
 #
 # MQTT 관련 순수 단위 테스트(MqttTopicsTest, MqttMessageRouterTest, MqttPublisherTest)는
 # @SpringBootTest를 쓰지 않아 이 프로필과 무관하게 항상 동작한다.
