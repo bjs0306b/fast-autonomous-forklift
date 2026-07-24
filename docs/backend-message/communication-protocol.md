@@ -40,6 +40,12 @@ Frontend/REST → VehicleCommandController → VehicleCommandService → Vehicle
 - **명령·명령 결과 QoS = 1, retained = false** (확정). 명령 QoS/retained는 안전 관련 계약이라
   설정값이 아니라 `VehicleCommandPublisher`의 상수(`COMMAND_QOS`, `COMMAND_RETAINED`)로 고정했다.
 - **상태·위치·오류 등 인바운드 구독 QoS = 1** (`mqtt.default-qos`, 로컬 기본 1).
+- `MqttMessageReceiver`는 전체 payload를 로그에 남기지 않고 topic/QoS/retained/byte 길이만 기록한다.
+  `MqttMessageRouter`는 null·blank·JSON object가 아닌 payload와 잘못된 JSON을 해당 메시지 단위로
+  폐기하며, 예상하지 못한 RuntimeException도 Receiver까지 이중으로 격리한다.
+- 명령 gateway 호출 실패는 `MqttPublishException`으로 변환되어 `VehicleCommandService`가
+  `PUBLISH_FAILED`로 기록한다. gateway 호출 성공(`PUBLISHED`)은 broker delivery 또는 차량 실행 성공을
+  의미하지 않는다.
 - STOMP: endpoint `/ws`(SockJS), 브로커 prefix `/topic`, 앱 prefix `/app`, 허용 Origin
   `websocket.allowed-origin-patterns`(로컬 기본 `*`, 운영은 반드시 좁혀야 함).
 

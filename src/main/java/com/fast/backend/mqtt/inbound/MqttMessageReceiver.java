@@ -7,6 +7,7 @@ import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 /**
@@ -31,9 +32,19 @@ public class MqttMessageReceiver {
         Object retained = message.getHeaders().get(MqttHeaders.RECEIVED_RETAINED);
         String payload = message.getPayload();
 
-        log.info("MQTT message received: topic={}, qos={}, retained={}, payload={}, receivedAt={}",
-                topic, qos, retained, payload, Instant.now());
+        int payloadBytes = payload == null ? 0 : payload.getBytes(StandardCharsets.UTF_8).length;
+        log.info("MQTT message received: topic={}, qos={}, retained={}, payloadBytes={}, receivedAt={}",
+                topic, qos, retained, payloadBytes, Instant.now());
 
-        mqttMessageRouter.route(topic, payload);
+        try {
+            mqttMessageRouter.route(topic, payload);
+            log.debug("MQTT message routed: topic={}", topic);
+        } catch (RuntimeException e) {
+            // Router와 각 Service가 일차적으로 오류를 격리하지만, 새 메시지 유형이나 예상하지 못한
+            // 런타임 오류가 MQTT consumer thread까지 전파되지 않도록 수신 경계에서 마지막으로 막는다.
+            // 전체 payload는 민감정보 노출 가능성이 있어 로그에 남기지 않는다.
+            log.error("MQTT message discarded after unexpected routing failure: topic={}, error={}",
+                    topic, e.getMessage());
+        }
     }
 }

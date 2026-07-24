@@ -202,6 +202,39 @@ class MqttMessageRouterTest {
     }
 
     @Test
+    void route_blankPayload_discardsWithoutCallingServices() {
+        router.route("forklift/F01/status", " ");
+
+        verifyNoInteractions(forkliftStatusService, forkliftLocationService, isaacForkliftStatusService,
+                isaacForkliftLocationService, isaacForkliftPathService, vehicleCommandResultService,
+                embeddedForkStatusService, embeddedErrorService);
+    }
+
+    @Test
+    void route_nonObjectJson_discardsWithoutCallingServices() {
+        router.route("forklift/F01/status", "[]");
+
+        verifyNoInteractions(forkliftStatusService, forkliftLocationService, isaacForkliftStatusService,
+                isaacForkliftLocationService, isaacForkliftPathService, vehicleCommandResultService,
+                embeddedForkStatusService, embeddedErrorService);
+    }
+
+    @Test
+    void route_statusServiceThrowsRuntimeException_doesNotPropagateAndNextMessageContinues() {
+        String payload = "{\"forkliftId\":\"F01\",\"status\":\"MOVING\",\"battery\":82,"
+                + "\"timestamp\":\"2026-07-20T09:20:00+09:00\"}";
+        doThrow(new IllegalStateException("temporary service failure"))
+                .doNothing()
+                .when(forkliftStatusService)
+                .handleStatus(any());
+
+        router.route("forklift/F01/status", payload);
+        router.route("forklift/F01/status", payload);
+
+        verify(forkliftStatusService, times(2)).handleStatus(any());
+    }
+
+    @Test
     void route_cargoDetectedTopic_doesNotThrow() {
         // "any"는 AiCargoAnalysisMessage에 없는 필드라 Jackson이 알 수 없는 속성으로 역직렬화 자체를
         // 실패시킨다(JsonProcessingException) — 다른 라우팅 메서드와 동일하게 여기서 잡아 폐기하므로

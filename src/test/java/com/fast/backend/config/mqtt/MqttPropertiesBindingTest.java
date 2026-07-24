@@ -56,6 +56,14 @@ class MqttPropertiesBindingTest {
                     MqttProperties properties = context.getBean(MqttProperties.class);
                     assertThat(properties.defaultQos()).isEqualTo(1);
                     assertThat(properties.brokerUrl()).isEqualTo("tcp://localhost:1883");
+                    assertThat(properties.inboundClientId()).isEqualTo("test-inbound");
+                    assertThat(properties.outboundClientId()).isEqualTo("test-outbound");
+                    assertThat(properties.connectionTimeout()).isEqualTo(10);
+                    assertThat(properties.keepAliveInterval()).isEqualTo(30);
+                    assertThat(properties.automaticReconnect()).isTrue();
+                    assertThat(properties.cleanSession()).isTrue();
+                    assertThat(properties.completionTimeout()).isEqualTo(5000);
+                    assertThat(properties.recoveryInterval()).isEqualTo(5000);
                     assertThat(properties.topics().forkliftStatus()).isEqualTo("forklift/+/status");
                     assertThat(properties.topics().forkliftLocation()).isEqualTo("forklift/+/location");
                     assertThat(properties.topics().forkliftPath()).isEqualTo("forklift/+/path");

@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -58,5 +61,17 @@ class MqttPublisherTest {
         private TestJsonProcessingException(String message) {
             super(message);
         }
+    }
+
+    @Test
+    void publish_gatewayFailure_wrapsAsMqttPublishException() {
+        doThrow(new IllegalStateException("broker disconnected"))
+                .when(mqttGateway)
+                .publish(any(), any(), anyInt(), anyBoolean());
+
+        assertThatThrownBy(() -> mqttPublisher.publishRaw("{}", "forklift/F01/command", 1, false))
+                .isInstanceOf(MqttPublishException.class)
+                .hasMessageContaining("forklift/F01/command")
+                .hasCauseInstanceOf(IllegalStateException.class);
     }
 }
