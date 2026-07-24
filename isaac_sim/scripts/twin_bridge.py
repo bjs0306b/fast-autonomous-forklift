@@ -1,15 +1,22 @@
 """
-Isaac Sim <-> MQTT 트윈 브리지 (Sprint 1 초안)
+Isaac Sim <-> MQTT twin bridge (Sprint 1 draft).
 
-하는 일 두 가지:
-  1) 시뮬 지게차(SIM01)의 위치를 읽어 forklift/SIM01/location 으로 발행
-  2) 실물 지게차(REAL01)의 위치를 구독해 씬 안의 트윈 인형 위치를 갱신
+Two jobs:
+  1) Read the simulated forklift pose and publish it to forklift/SIM_F01/location
+  2) Subscribe to forklift/REAL_F01/location and drive the twin stand-in prim
+     that mirrors the real miniature forklift
 
-실행: Isaac Sim의 Script Editor에 붙여넣고 실행하거나, 확장(extension)에서 import 한다.
+This does NOT go through ROS. Isaac runs Python in-process, so talking to the
+broker directly is the shortest path. The ROS side (mqtt_client) lives on the
+Orin and is owned by C/D.
 
-사전 준비:
-    Isaac Sim 내장 파이썬에 paho-mqtt 설치
-    (Windows 예시) <ISAAC_ROOT>\python.bat -m pip install paho-mqtt
+Usage
+    Paste into the Isaac Sim Script Editor and run. Stop with bridge.stop().
+
+Prerequisite
+    Install paho-mqtt into the Isaac Sim python:
+    (Windows) <ISAAC_ROOT>\\python.bat -m pip install paho-mqtt
+    (Linux)   <ISAAC_ROOT>/python.sh  -m pip install paho-mqtt
 """
 
 import json
@@ -19,63 +26,88 @@ from datetime import datetime
 
 import paho.mqtt.client as mqtt
 
-# Isaac Sim 버전에 따라 import 경로가 다르다.
-#   4.0 이하 : from omni.isaac.core.prims import XFormPrim
-#   4.5 이상 : from isaacsim.core.prims import SingleXFormPrim as XFormPrim
-# 아래가 실패하면 위 두 줄 중 맞는 쪽으로 바꾼다.
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist, PoseStamped
+
+# The import path depends on the Isaac Sim version.
+#   <= 4.0 : from omni.isaac.core.prims import XFormPrim
+#   >= 4.5 : from isaacsim.core.prims import SingleXFormPrim as XFormPrim
 from omni.isaac.core.prims import XFormPrim
 import omni.kit.app
 
 # ---------------------------------------------------------------------------
-# 설정 — 팀 규격에 맞춰 여기만 고치면 된다
+# Config - this block is the only part that should need editing
 # ---------------------------------------------------------------------------
-BROKER_HOST = "localhost"   # EC2 브로커 붙일 땐 여기 주소 교체
+BROKER_HOST = "localhost"   # replace with the EC2 broker address
 BROKER_PORT = 1883
 
 SIM_ID = "SIM_F01"
 REAL_ID = "REAL_F01"
 
-SIM_PRIM_PATH = "/World/Forklift_SIM_F01"    # 물리 O — Nav2가 굴리는 차량
-REAL_PRIM_PATH = "/World/Forklift_REAL_F01"  # 물리 X — 실물 따라하는 인형
+SIM_PRIM_PATH = "/World/Forklift_SIM_F01"    # self-driving simulated vehicle
+REAL_PRIM_PATH = "/World/Forklift_REAL_F01"  # stand-in that mirrors the real one
 
-PUBLISH_HZ = 10.0     # 위치 발행 주기. 씬은 60fps로 돌지만 10Hz면 충분하다
+PUBLISH_HZ = 10.0     # the scene runs at 60fps but 10Hz is plenty for the HMI
 STATUS_HZ = 1.0
 
-# 트윈 씬을 미니어처 축척(실물 SLAM 맵과 1:1)으로 지었다면 1.0.
-# 실물 크기로 지었다면 10.0 으로 바꾼다. (명세서 축척비 k=10)
+# The twin scene is built at miniature 1:1 scale (same as D's SLAM map), so
+# coordinates pass through untouched. Set to 10.0 only if the scene is ever
+# rebuilt at full size.
 SCALE = 1.0
 
 
 # ---------------------------------------------------------------------------
-# 유틸
+# Helpers
 # ---------------------------------------------------------------------------
 def quat_to_yaw(q):
-    """USD 쿼터니언(w, x, y, z) -> Z축 회전각(rad). 바닥을 도는 차량이라 yaw만 쓴다."""
+    """USD quaternion (w, x, y, z) -> rotation about Z (rad).
+
+    Ground vehicles only rotate about Z, so yaw is all we need.
+    """
     w, x, y, z = q[0], q[1], q[2], q[3]
     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 def yaw_to_quat(yaw):
-    """yaw(rad) -> USD 쿼터니언(w, x, y, z)"""
+    """yaw (rad) -> USD quaternion (w, x, y, z)."""
     half = yaw * 0.5
     return (math.cos(half), 0.0, 0.0, math.sin(half))
 
 
 def now_iso():
-    """백엔드 DTO가 java.time.LocalDateTime 이라 타임존 표기(Z, +09:00)를 붙이면 안 된다."""
+    """The backend DTO is java.time.LocalDateTime, which rejects any timezone
+    suffix. '2026-07-22T10:30:00.123' parses; adding 'Z' or '+09:00' does not.
+    """
     return datetime.now().isoformat(timespec="milliseconds")
 
 
 # ---------------------------------------------------------------------------
-# 브리지
+# Bridge
 # ---------------------------------------------------------------------------
 class TwinBridge:
+
     def __init__(self):
         self.sim_prim = XFormPrim(SIM_PRIM_PATH)
         self.real_prim = XFormPrim(REAL_PRIM_PATH)
 
-        # MQTT 콜백은 별도 스레드에서 돈다. 거기서 USD를 직접 건드리면 크래시하거나
-        # 조용히 깨진다. 그래서 값만 여기 넣어두고, 실제 적용은 update 콜백(메인 스레드)에서 한다.
+        # ROS side. Commands arriving over MQTT are forwarded onto the standard
+        # ROS topics so the vehicle is driven exactly the way Nav2 would drive
+        # it - the backend never talks to the simulator directly.
+        if not rclpy.ok():
+            rclpy.init()
+        self.ros = Node("twin_bridge")
+        ns = SIM_ID.lower()
+        self.goal_pub = self.ros.create_publisher(
+            PoseStamped, f"/{ns}/goal_pose", 10)
+        self.cmd_pub = self.ros.create_publisher(Twist, f"/{ns}/cmd_vel", 10)
+        # cmd_vel has a 0.5s watchdog on the vehicle side, so a one-shot command
+        # would stop almost immediately. Repeat the last one until it changes.
+        self._manual_cmd = None
+
+        # MQTT callbacks run on their own thread. Touching USD from there
+        # crashes Isaac or corrupts state silently, so the callback only stores
+        # the value and the main-thread update applies it.
         self._pending_real_pose = None
         self._lock = threading.Lock()
 
@@ -87,8 +119,15 @@ class TwinBridge:
         self.client = mqtt.Client(client_id=f"isaac-{SIM_ID}")
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
+        # Last Will: if this process dies the broker publishes OFFLINE for us,
+        # otherwise a dead vehicle sits on the HMI looking perfectly healthy.
+        self.client.will_set(
+            f"forklift/{SIM_ID}/status",
+            json.dumps({"forkliftId": SIM_ID, "status": "OFFLINE",
+                        "timestamp": None}),
+            qos=1, retain=True)
         self.client.connect(BROKER_HOST, BROKER_PORT, keepalive=30)
-        self.client.loop_start()   # 수신 전용 스레드 시작
+        self.client.loop_start()   # receive thread
 
         self._sub = (
             omni.kit.app.get_app()
@@ -97,10 +136,12 @@ class TwinBridge:
         )
         print("[twin_bridge] started")
 
-    # --- MQTT 쪽 (별도 스레드) ------------------------------------------------
+    # --- MQTT side (separate thread) ---------------------------------------
     def _on_connect(self, client, userdata, flags, rc):
         print(f"[twin_bridge] connected rc={rc}")
         client.subscribe(f"forklift/{REAL_ID}/location", qos=1)
+        client.subscribe(f"forklift/{SIM_ID}/command", qos=1)
+        client.subscribe(f"forklift/{SIM_ID}/emergency", qos=1)
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -109,19 +150,69 @@ class TwinBridge:
             print(f"[twin_bridge] bad payload: {e}")
             return
 
-        with self._lock:
-            self._pending_real_pose = (
-                float(data["x"]) * SCALE,
-                float(data["y"]) * SCALE,
-                float(data["direction"]),
-            )
+        if msg.topic.endswith("/command"):
+            self._on_command(data)
+        elif msg.topic.endswith("/emergency"):
+            self._on_emergency()
+        else:
+            with self._lock:
+                self._pending_real_pose = (
+                    float(data["x"]) * SCALE,
+                    float(data["y"]) * SCALE,
+                    float(data["direction"]),
+                )
 
-    # --- Isaac 쪽 (메인 스레드) -----------------------------------------------
+    def _on_command(self, data):
+        """forklift/{id}/command -> ROS.
+
+        Two shapes are accepted:
+          {"destination": {"x":.., "y":.., "direction":..}}  -> goal_pose (Nav2)
+          {"linear": 0.15, "angular": 0.3}                   -> cmd_vel (manual)
+
+        The destination form is the real contract; the velocity form exists so
+        the pipeline can be exercised before Nav2 is running.
+        """
+        if data.get("command") == "STOP":
+            self._on_emergency()
+            return
+
+        dest = data.get("destination")
+        if isinstance(dest, dict):
+            with self._lock:
+                self._manual_cmd = None
+            goal = PoseStamped()
+            goal.header.stamp = self.ros.get_clock().now().to_msg()
+            goal.header.frame_id = "map"
+            goal.pose.position.x = float(dest["x"]) * SCALE
+            goal.pose.position.y = float(dest["y"]) * SCALE
+            qw, qx, qy, qz = yaw_to_quat(float(dest.get("direction", 0.0)))
+            goal.pose.orientation.x = qx
+            goal.pose.orientation.y = qy
+            goal.pose.orientation.z = qz
+            goal.pose.orientation.w = qw
+            self.goal_pub.publish(goal)
+            print(f"[twin_bridge] goal -> {dest}")
+            return
+
+        if "linear" in data or "angular" in data:
+            with self._lock:
+                self._manual_cmd = (float(data.get("linear", 0.0)),
+                                    float(data.get("angular", 0.0)))
+
+    def _on_emergency(self):
+        with self._lock:
+            self._manual_cmd = (0.0, 0.0)
+        self.cmd_pub.publish(Twist())
+        print("[twin_bridge] emergency stop")
+
+    # --- Isaac side (main thread) ------------------------------------------
     def _on_update(self, event):
         dt = event.payload["dt"]
         self._elapsed += dt
 
+        rclpy.spin_once(self.ros, timeout_sec=0.0)
         self._apply_real_pose()
+        self._republish_manual_cmd()
 
         if self._elapsed - self._last_pub >= 1.0 / PUBLISH_HZ:
             self._publish_location(self._elapsed - self._last_pub)
@@ -131,8 +222,23 @@ class TwinBridge:
             self._publish_status()
             self._last_status_pub = self._elapsed
 
+    def _republish_manual_cmd(self):
+        """Keep feeding cmd_vel so the vehicle watchdog does not cut in."""
+        with self._lock:
+            cmd = self._manual_cmd
+        if cmd is None:
+            return
+        t = Twist()
+        t.linear.x, t.angular.z = cmd
+        self.cmd_pub.publish(t)
+
     def _apply_real_pose(self):
-        """MQTT로 받은 실물 좌표를 인형에 대입한다. 물리가 꺼져 있어야 튀지 않는다."""
+        """Copy the real forklift pose onto the stand-in prim.
+
+        The twin never computes anything of its own. If it ran its own motion
+        model it would drift from the real vehicle within seconds and stop
+        being a twin.
+        """
         with self._lock:
             pose = self._pending_real_pose
             self._pending_real_pose = None
@@ -140,7 +246,7 @@ class TwinBridge:
             return
 
         x, y, yaw = pose
-        _, _, z = self.real_prim.get_world_pose()[0]   # 높이는 원래 값 유지
+        _, _, z = self.real_prim.get_world_pose()[0]   # keep authored height
         self.real_prim.set_world_pose(
             position=(x, y, z),
             orientation=yaw_to_quat(yaw),
@@ -150,7 +256,8 @@ class TwinBridge:
         pos, quat = self.sim_prim.get_world_pose()
         x, y = float(pos[0]) / SCALE, float(pos[1]) / SCALE
 
-        # 속도는 위치 변화량으로 근사한다. 나중에 Nav2 odom을 쓰면 더 정확하다.
+        # Speed from position delta. Once Nav2 is wired up, reading odom
+        # directly would be more accurate.
         speed = 0.0
         if self._last_xy is not None and dt > 0:
             dx, dy = x - self._last_xy[0], y - self._last_xy[1]
@@ -164,27 +271,29 @@ class TwinBridge:
             "direction": round(quat_to_yaw(quat), 4),
             "speed": round(speed, 4),
             "timestamp": now_iso(),
-        })
+        }, qos=0)
 
     def _publish_status(self):
-        # TODO: 실제 상태로 교체. status 어휘는 E와 합의 필요
-        #       (IDLE / MOVING / LIFTING / LOADING / ERROR / ESTOP)
+        # TODO: report the real state. Vocabulary to agree with E:
+        #       IDLE / MOVING / LIFTING / LOADING / ERROR / ESTOP / OFFLINE
+        # TODO: add forkHeight and hasCargo once E extends the DTO.
         self._publish(f"forklift/{SIM_ID}/status", {
             "forkliftId": SIM_ID,
             "status": "IDLE",
             "battery": 100,
             "timestamp": now_iso(),
-        })
+        }, qos=1, retain=True)
 
-    def _publish(self, topic, payload):
-        self.client.publish(topic, json.dumps(payload), qos=1)
+    def _publish(self, topic, payload, qos=1, retain=False):
+        self.client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
 
     def stop(self):
         self._sub.unsubscribe()
         self.client.loop_stop()
         self.client.disconnect()
+        self.ros.destroy_node()
         print("[twin_bridge] stopped")
 
 
 bridge = TwinBridge()
-# 중지하려면 Script Editor에서: bridge.stop()
+# Stop with: bridge.stop()
