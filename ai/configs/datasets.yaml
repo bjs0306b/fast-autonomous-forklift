@@ -122,6 +122,27 @@ sources:
       box: ["cardboard box"]
       pallet: ["wood pallet"]
 
+  # 리그 촬영본 (2026-07-24, 자체 촬영 301장) — 검은 플라스틱 파렛트 도메인.
+  # 공개 데이터셋은 목재 파렛트 위주라 우리 리그의 검은 파렛트를 전혀 못 잡는다
+  # (실측: 임계 0.02에서도 후보 0건). 이 소스가 그 갭을 메운다.
+  #
+  # 라벨 출처: 박스 = 현 모델 프리라벨(dataset.prelabel), 파렛트 = 고전 CV 자동
+  # 라벨(dataset.pallet_autolabel) + 사람 보정. 미처리분은 data/processed/rig_review.md.
+  #
+  # ⚠️ 파렛트가 없는 네거티브 16장(0121~0136)은 convert가 '어노테이션 없는 이미지'로
+  # 버린다. 살리려면 --keep-empty가 필요한데 그건 전 소스에 걸리므로, 네거티브는
+  # 학습 직전에 서버에서 따로 합친다 (runbook 참고).
+  - name: rig_20260724
+    group: rig
+    type: coco
+    enabled: true
+    prefix: rig
+    annotations: data/processed/rig_labeled.json
+    images_root: data/raw/rig/20260724
+    class_map:
+      box: [box]
+      pallet: [pallet]
+
   # SKU-110K — 밀집 적재 장면. 학술·비영리 라이선스라 기본 비활성.
   # 사용 여부는 팀 합의 후 결정한다 (README 라이선스 항목 참고).
   - name: sku110k
