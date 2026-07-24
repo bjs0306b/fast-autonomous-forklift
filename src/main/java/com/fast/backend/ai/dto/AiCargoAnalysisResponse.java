@@ -8,11 +8,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * AI 화물 분석 결과 조회 API 응답이자 WebSocket {@code /topic/ai/cargo-analysis} 이벤트 payload
- * 그 자체다(prompt26.md 13장·14장). 별도 envelope(eventType 등)로 감싸지 않고 이 구조를 그대로
- * 브로드캐스트한다 — 이 기능에는 이벤트 종류가 하나뿐이라 {@code VehicleWebSocketEvent} 같은 다중
- * 이벤트 envelope이 필요하지 않다(prompt26.md 14장 "구조를 억지로 분리하지 마" 대신 "필요 없으면
- * 만들지 마"의 반대쪽 판단 — 여기서는 만들 필요가 없어서 안 만들었다).
+ * AI 화물 분석 결과 조회 API 응답이자 WebSocket {@code /topic/ai/cargo-analysis} 이벤트의
+ * {@code data} payload다(prompt26.md 13장·14장).
+ *
+ * <p><b>WebSocket 전송 시에는 공통 envelope로 감싸진다(prompt32.md 1장 13번 확정)</b>. 이전에는 이
+ * 구조를 봉투 없이 그대로 브로드캐스트해서 프론트가 차량 이벤트와 AI 이벤트를 서로 다른 규격으로
+ * 구독해야 했다. 이제 {@link com.fast.backend.common.websocket.RealtimeEvent}가 이 객체를
+ * {@code data}에 담아 보낸다 — {@code AiCargoAnalysisBroadcaster} 참고. REST 조회 응답은 봉투 없이
+ * 이 구조 그대로다.
+ *
+ * <p>{@code vehicleId}는 envelope의 최상위 {@code vehicleId}로도 함께 올라간다(차량과 연결되지 않은
+ * 분석이면 null). {@code analysisId}/{@code cargoId} 같은 AI 도메인 고유 식별자는 최상위로 올리지 않고
+ * 이 {@code data} 안에 그대로 유지한다.
  *
  * <p>{@code distance}/{@code dimensions}/{@code loadBalance}/{@code ratios}는 관련 원본 필드가 전부
  * null이면(예: {@code no_detection}) 객체 자체를 null로 내려준다 — prompt26.md 4장 예시(감지 실패 시

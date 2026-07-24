@@ -61,7 +61,7 @@ class VehicleStatusServiceIntegrationTest {
         LocalDateTime t1 = LocalDateTime.now().withNano(0);
 
         vehicleStatusService.updateCurrentStatus("ISVC-01",
-                new VehicleStatusUpdateCommand("ACTIVE", 88, 1.5, 2.5, 90.0, 0.7, t1));
+                new VehicleStatusUpdateCommand("ACTIVE", 88, 1.5, 2.5, 90.0, 0.7, t1.atOffset(java.time.ZoneOffset.ofHours(9))));
 
         Optional<VehicleCurrentStatus> current = vehicleCurrentStatusMapper.findByVehicleId("ISVC-01");
         assertThat(current).isPresent();
@@ -97,9 +97,9 @@ class VehicleStatusServiceIntegrationTest {
         LocalDateTime t2 = LocalDateTime.now().withNano(0);
 
         vehicleStatusService.updateCurrentStatus("ISVC-02",
-                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, t1));
+                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, t1.atOffset(java.time.ZoneOffset.ofHours(9))));
         vehicleStatusService.updateCurrentStatus("ISVC-02",
-                new VehicleStatusUpdateCommand("ACTIVE", 65, 1.0, 2.0, 45.0, 0.3, t2));
+                new VehicleStatusUpdateCommand("ACTIVE", 65, 1.0, 2.0, 45.0, 0.3, t2.atOffset(java.time.ZoneOffset.ofHours(9))));
 
         VehicleCurrentStatus cur = vehicleCurrentStatusMapper.findByVehicleId("ISVC-02").orElseThrow();
         assertThat(cur.getStatus()).isEqualTo(VehicleStatus.ACTIVE);
@@ -126,10 +126,10 @@ class VehicleStatusServiceIntegrationTest {
         LocalDateTime t2 = LocalDateTime.now().withNano(0);
 
         vehicleStatusService.updateCurrentStatus("ISVC-03",
-                new VehicleStatusUpdateCommand("ACTIVE", 60, null, null, null, null, t2));
+                new VehicleStatusUpdateCommand("ACTIVE", 60, null, null, null, null, t2.atOffset(java.time.ZoneOffset.ofHours(9))));
         // 더 이른 T1 메시지(과거) — 무시되어야 함
         vehicleStatusService.updateCurrentStatus("ISVC-03",
-                new VehicleStatusUpdateCommand("IDLE", 10, 9.0, 9.0, 9.0, 9.0, t1));
+                new VehicleStatusUpdateCommand("IDLE", 10, 9.0, 9.0, 9.0, 9.0, t1.atOffset(java.time.ZoneOffset.ofHours(9))));
 
         VehicleCurrentStatus cur = vehicleCurrentStatusMapper.findByVehicleId("ISVC-03").orElseThrow();
         assertThat(cur.getStatus()).isEqualTo(VehicleStatus.ACTIVE);
@@ -151,10 +151,10 @@ class VehicleStatusServiceIntegrationTest {
         LocalDateTime t1 = LocalDateTime.now().withNano(0);
 
         vehicleStatusService.updateCurrentStatus("ISVC-04",
-                new VehicleStatusUpdateCommand("ACTIVE", 50, null, null, null, null, t1));
+                new VehicleStatusUpdateCommand("ACTIVE", 50, null, null, null, null, t1.atOffset(java.time.ZoneOffset.ofHours(9))));
         // 같은 messageAt, 다른 값 — 무시되어야 함
         vehicleStatusService.updateCurrentStatus("ISVC-04",
-                new VehicleStatusUpdateCommand("IDLE", 99, 5.0, 5.0, 5.0, 5.0, t1));
+                new VehicleStatusUpdateCommand("IDLE", 99, 5.0, 5.0, 5.0, 5.0, t1.atOffset(java.time.ZoneOffset.ofHours(9))));
 
         VehicleCurrentStatus cur = vehicleCurrentStatusMapper.findByVehicleId("ISVC-04").orElseThrow();
         assertThat(cur.getStatus()).isEqualTo(VehicleStatus.ACTIVE);

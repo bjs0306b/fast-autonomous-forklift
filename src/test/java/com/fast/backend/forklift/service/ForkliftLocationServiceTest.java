@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.when;
  */
 class ForkliftLocationServiceTest {
 
-    private static final LocalDateTime MESSAGE_AT = LocalDateTime.of(2026, 7, 22, 13, 30, 0);
+    private static final OffsetDateTime MESSAGE_AT = LocalDateTime.of(2026, 7, 22, 13, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9));
 
     private VehicleMapper vehicleMapper;
     private VehicleWebSocketBroadcaster broadcaster;
@@ -53,7 +54,7 @@ class ForkliftLocationServiceTest {
         verify(broadcaster).broadcastLocation(eq("FORKLIFT-01"), captor.capture(), eq(MESSAGE_AT));
         VehicleLocationEventData data = captor.getValue();
         assertThat(data.vehicleId()).isEqualTo("FORKLIFT-01");
-        assertThat(data.status()).isEqualTo(VehicleStatus.ACTIVE); // MOVING → ACTIVE 정규화(prompt25.md 1.1장)
+        assertThat(data.status()).isEqualTo(VehicleStatus.MOVING); // MOVING 보존(prompt32.md 1장 3번)
         assertThat(data.position().x()).isEqualTo(2.5);
         assertThat(data.position().y()).isEqualTo(4.1);
         assertThat(data.position().frameId()).isEqualTo("map");
@@ -342,7 +343,7 @@ class ForkliftLocationServiceTest {
     }
 
     @Test
-    void handleLocation_movingStatus_isNormalizedToActive() {
+    void handleLocation_movingStatus_isPreservedAsMoving() {
         when(vehicleMapper.existsByVehicleId("FORKLIFT-01")).thenReturn(true);
         ForkliftLocationMessage message = new ForkliftLocationMessage(
                 "FORKLIFT-01", "MOVING", position(1.0, 1.0), null, null, null, MESSAGE_AT);
@@ -351,7 +352,7 @@ class ForkliftLocationServiceTest {
 
         ArgumentCaptor<VehicleLocationEventData> captor = ArgumentCaptor.forClass(VehicleLocationEventData.class);
         verify(broadcaster).broadcastLocation(eq("FORKLIFT-01"), captor.capture(), any());
-        assertThat(captor.getValue().status()).isEqualTo(VehicleStatus.ACTIVE);
+        assertThat(captor.getValue().status()).isEqualTo(VehicleStatus.MOVING);
     }
 
     /**
@@ -362,12 +363,12 @@ class ForkliftLocationServiceTest {
     @Test
     void handleLocation_fiveConsecutiveMessages_allBroadcastWithActiveStatusAndOwnMessageAt() {
         when(vehicleMapper.existsByVehicleId("FORKLIFT-01")).thenReturn(true);
-        LocalDateTime[] messageAts = new LocalDateTime[]{
+        OffsetDateTime[] messageAts = new OffsetDateTime[]{
                 MESSAGE_AT, MESSAGE_AT.plusNanos(200_000_000), MESSAGE_AT.plusNanos(400_000_000),
                 MESSAGE_AT.plusNanos(600_000_000), MESSAGE_AT.plusNanos(800_000_000)
         };
 
-        for (LocalDateTime messageAt : messageAts) {
+        for (OffsetDateTime messageAt : messageAts) {
             ForkliftLocationMessage message = new ForkliftLocationMessage(
                     "FORKLIFT-01", "ACTIVE", position(2.5, 4.1), 90.0, null, 0.4, messageAt);
             forkliftLocationService.handleLocation(message);

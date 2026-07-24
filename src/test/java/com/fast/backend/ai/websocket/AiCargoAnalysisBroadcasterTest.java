@@ -2,6 +2,7 @@ package com.fast.backend.ai.websocket;
 
 import com.fast.backend.ai.domain.AiAnalysisStatus;
 import com.fast.backend.ai.dto.AiCargoAnalysisResponse;
+import com.fast.backend.common.websocket.RealtimeEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
@@ -10,6 +11,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -30,8 +32,8 @@ class AiCargoAnalysisBroadcasterTest {
 
         broadcaster.broadcast(response);
 
-        verify(template).convertAndSend("/topic/ai/cargo-analysis", response);
-        verify(template).convertAndSend("/topic/ai/cargo-analysis/CARGO-001", response);
+        verify(template).convertAndSend(eq("/topic/ai/cargo-analysis"), any(RealtimeEvent.class));
+        verify(template).convertAndSend(eq("/topic/ai/cargo-analysis/CARGO-001"), any(RealtimeEvent.class));
     }
 
     @Test
@@ -43,7 +45,7 @@ class AiCargoAnalysisBroadcasterTest {
         broadcaster.broadcast(response);
 
         verify(template, times(1)).convertAndSend(anyString(), any(Object.class));
-        verify(template).convertAndSend("/topic/ai/cargo-analysis", response);
+        verify(template).convertAndSend(eq("/topic/ai/cargo-analysis"), any(RealtimeEvent.class));
     }
 
     @Test

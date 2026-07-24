@@ -64,12 +64,18 @@ public class MqttTopics {
         return topics.stationMeasurement();
     }
 
-    public String forkliftCommand(String forkliftId) {
-        return String.format(topics.forkliftCommand(), requireForkliftId(forkliftId));
-    }
-
-    public String forkliftEmergency(String forkliftId) {
-        return String.format(topics.forkliftEmergency(), requireForkliftId(forkliftId));
+    /**
+     * 차량 명령 발행 토픽 {@code forklift/{vehicleId}/command}를 만든다.
+     *
+     * <p>이동(ROS2)·포크/적재(임베디드)·비상정지(ALL) <b>모든 명령이 이 토픽 하나</b>를 쓴다
+     * (prompt32.md 1장 7번 확정). 수신 측은 payload의 {@code targetSystem}/{@code commandCategory}로
+     * 자기 명령인지 판별한다.
+     *
+     * <p>구 {@code forkliftEmergency(...)}(= {@code forklift/{id}/emergency})는 제거됐다 —
+     * 근거는 {@link MqttProperties.Topics} Javadoc 참고.
+     */
+    public String vehicleCommand(String vehicleId) {
+        return String.format(topics.forkliftCommand(), requireForkliftId(vehicleId));
     }
 
     public boolean isForkliftStatusTopic(String topic) {

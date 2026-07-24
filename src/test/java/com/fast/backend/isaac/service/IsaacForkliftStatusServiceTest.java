@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,7 +33,7 @@ import static org.mockito.Mockito.when;
  */
 class IsaacForkliftStatusServiceTest {
 
-    private static final LocalDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000);
+    private static final OffsetDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000).atOffset(java.time.ZoneOffset.ofHours(9));
 
     private VehicleStatusService vehicleStatusService;
     private VehicleWebSocketBroadcaster broadcaster;
@@ -44,11 +45,11 @@ class IsaacForkliftStatusServiceTest {
         broadcaster = mock(VehicleWebSocketBroadcaster.class);
         service = new IsaacForkliftStatusService(vehicleStatusService, broadcaster);
         when(vehicleStatusService.updateCurrentStatus(anyString(), any()))
-                .thenReturn(new VehicleStatusResponse(VehicleStatus.ACTIVE, 87, null, null, null, null, null, null));
+                .thenReturn(new VehicleStatusResponse(VehicleStatus.ACTIVE, 87, null, null, null, null, null, null, null, null, null, null, null));
     }
 
     @Test
-    void handleStatus_movingStatus_updatesCommonStatusAsActiveAndBroadcastsRawIsaacStatus() {
+    void handleStatus_movingStatus_preservesMovingAndBroadcastsRawIsaacStatus() {
         IsaacForkliftStatusMessage message = fullMessage("SIM01", "MOVING");
 
         service.handleStatus(message);
@@ -56,8 +57,8 @@ class IsaacForkliftStatusServiceTest {
         ArgumentCaptor<VehicleStatusUpdateCommand> commandCaptor =
                 ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
         verify(vehicleStatusService).updateCurrentStatus(eq("SIM01"), commandCaptor.capture());
-        // MOVING → ACTIVE로 매핑돼 기존 VehicleStatus.fromRaw()가 그대로 받을 수 있는 값이 전달된다.
-        assertThat(commandCaptor.getValue().status()).isEqualTo("ACTIVE");
+        // 확정 enum 10종(prompt32.md 1장 3번)이라 MOVING이 ACTIVE로 흡수되지 않고 그대로 전달된다.
+        assertThat(commandCaptor.getValue().status()).isEqualTo("MOVING");
         assertThat(commandCaptor.getValue().battery()).isEqualTo(87);
 
         ArgumentCaptor<IsaacVehicleStatusEventData> eventCaptor =
@@ -72,23 +73,23 @@ class IsaacForkliftStatusServiceTest {
     }
 
     @Test
-    void handleStatus_liftingAndLoading_mapToActive() {
+    void handleStatus_liftingAndLoading_arePreservedAsDistinctStatuses() {
         service.handleStatus(fullMessage("SIM01", "LIFTING"));
         service.handleStatus(fullMessage("SIM01", "LOADING"));
 
         ArgumentCaptor<VehicleStatusUpdateCommand> captor = ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
         verify(vehicleStatusService, org.mockito.Mockito.times(2)).updateCurrentStatus(eq("SIM01"), captor.capture());
         assertThat(captor.getAllValues()).extracting(VehicleStatusUpdateCommand::status)
-                .containsExactly("ACTIVE", "ACTIVE");
+                .containsExactly("LIFTING", "LOADING");
     }
 
     @Test
-    void handleStatus_estop_mapsToError() {
+    void handleStatus_estop_isPreservedAsEstop() {
         service.handleStatus(fullMessage("SIM01", "ESTOP"));
 
         ArgumentCaptor<VehicleStatusUpdateCommand> captor = ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
         verify(vehicleStatusService).updateCurrentStatus(eq("SIM01"), captor.capture());
-        assertThat(captor.getValue().status()).isEqualTo("ERROR");
+        assertThat(captor.getValue().status()).isEqualTo("ESTOP");
     }
 
     @Test

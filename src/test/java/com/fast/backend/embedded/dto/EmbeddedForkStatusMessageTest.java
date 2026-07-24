@@ -21,7 +21,7 @@ class EmbeddedForkStatusMessageTest {
     @Test
     void deserialize_mapsAllFields() throws Exception {
         String json = "{\"forkliftId\":\"REAL01\",\"forkState\":\"BOTTOM\",\"limitBottom\":true,"
-                + "\"errorCode\":null,\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"errorCode\":null,\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         EmbeddedForkStatusMessage message = objectMapper.readValue(json, EmbeddedForkStatusMessage.class);
 
@@ -36,7 +36,7 @@ class EmbeddedForkStatusMessageTest {
         // 작업 원칙 12·13번 "포크 높이·limitTop을 절대 사용하지 않는다" — 만약 이런 필드가 오면
         // Jackson의 알 수 없는 속성 거부로 자연스럽게 역직렬화가 실패해야 한다.
         String json = "{\"forkliftId\":\"REAL01\",\"forkState\":\"STOPPED\",\"limitBottom\":false,"
-                + "\"forkHeight\":0.5,\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"forkHeight\":0.5,\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         assertThatThrownBy(() -> objectMapper.readValue(json, EmbeddedForkStatusMessage.class))
                 .isInstanceOf(com.fasterxml.jackson.core.JsonProcessingException.class);

@@ -1,6 +1,7 @@
 package com.fast.backend.isaac.service;
 
 import com.fast.backend.common.exception.BusinessException;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.isaac.domain.IsaacForkliftStatus;
 import com.fast.backend.isaac.dto.IsaacForkliftStatusMessage;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
@@ -11,23 +12,28 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * Isaac Sim 상태 메시지(LWT OFFLINE 포함)를 처리한다(prompt28.md 4장·5장).
  *
  * <p>DB 반영은 {@code forkliftId}가 곧 차량 도메인의 {@code vehicleId}라는 전제로
  * {@link VehicleStatusService#updateCurrentStatus}에 위임한다 — 기존 {@code ForkliftStatusService}와
- * 동일한 패턴이며, {@code VehicleStatusUpdateCommand} Javadoc이 애초에 "IsaacSimVehicleStatusAdapter가
- * 이 메서드를 호출하게 될 것"이라고 예고해 둔 지점이다(prompt16.md 18장). 즉 상태 현재값 갱신·이력
- * insert·기존 형태 WebSocket 브로드캐스트(prompt22.md)를 전부 그대로 재사용한다(요구사항 2장 4번
- * "수신 데이터를 기존 차량 관제 기능과 연결").
+ * 동일한 패턴이며, 상태 현재값 갱신·이력 insert·WebSocket 브로드캐스트를 전부 재사용한다.
  *
- * <p>다만 {@code VehicleStatusUpdateCommand}에는 forkHeight/hasCargo/cargoId/footprint를 담을 자리가
- * 없고, {@code vehicle_current_status}도 공통 {@link com.fast.backend.vehicle.domain.VehicleStatus}
- * (5종)만 저장할 수 있어 Isaac 원본 상태(7종)의 세부 정보가 손실된다({@link IsaacForkliftStatus}
- * Javadoc 참고). 그래서 이 클래스는 DB 갱신과 별개로 {@link IsaacVehicleStatusEventData}(원본 상태 +
- * forkHeight/hasCargo/cargoId/footprint 전부 포함)를 추가로 브로드캐스트해 정보를 보존한다.
+ * <p><b>정보 손실이 해소됐다(prompt32.md 1장 3번·4번 확정)</b>
+ * <ul>
+ *   <li>상태 어휘: {@link IsaacForkliftStatus} 7종이 확장된 공통 {@code VehicleStatus} 10종에 1:1로
+ *       대응한다 — 더 이상 {@code LIFTING}/{@code LOADING}이 {@code ACTIVE}로, {@code ESTOP}이
+ *       {@code ERROR}로 뭉뚱그려지지 않는다.</li>
+ *   <li>확장 필드: {@code forkHeight}/{@code hasCargo}/{@code cargoId}/{@code footprint}를
+ *       {@link VehicleStatusUpdateCommand.IsaacExtras}에 담아 넘겨 <b>DB에도 저장</b>한다. 이 값이
+ *       담긴 커맨드는 Isaac 경로에서만 만들어지므로, ROS2 상태 메시지는 이 컬럼들을 건드리지 않는다
+ *       ({@code VehicleStatusService}의 병합 정책).</li>
+ * </ul>
+ * WebSocket 이벤트({@link IsaacVehicleStatusEventData})는 Isaac <b>원본</b> 상태 문자열과 확장 필드를
+ * 그대로 실어 계속 보낸다 — DB에는 공통 상태로 정규화된 값이 저장되므로, 원본 어휘를 그대로 보고 싶은
+ * 프론트를 위한 통로로 유지한다.
  */
 @Service
 public class IsaacForkliftStatusService {
@@ -51,15 +57,16 @@ public class IsaacForkliftStatusService {
                 return;
             }
 
-            LocalDateTime receivedAt = LocalDateTime.now();
+            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
             // LWT의 timestamp는 null일 수 있다 — 이 경우 백엔드 수신 시각을 대신 기록한다(5장 4번).
-            LocalDateTime effectiveTimestamp = message.timestamp() != null ? message.timestamp() : receivedAt;
+            OffsetDateTime effectiveTimestamp = message.timestamp() != null ? message.timestamp() : receivedAt;
 
             String commonStatusRaw = IsaacForkliftStatus.fromRaw(message.status())
                     .map(IsaacForkliftStatus::toCommonVehicleStatusRaw)
                     .orElse(message.status());
             VehicleStatusUpdateCommand command = new VehicleStatusUpdateCommand(
-                    commonStatusRaw, message.battery(), null, null, null, null, effectiveTimestamp);
+                    commonStatusRaw, message.battery(), null, null, null, null, effectiveTimestamp,
+                    toIsaacExtras(message));
 
             try {
                 vehicleStatusService.updateCurrentStatus(message.forkliftId(), command);
@@ -76,6 +83,22 @@ public class IsaacForkliftStatusService {
             log.error("Isaac status processing failed unexpectedly: forkliftId={}, error={}",
                     message.forkliftId(), e.getMessage());
         }
+    }
+
+    /**
+     * Isaac 확장 필드를 DB 저장용 커맨드에 담는다. LWT OFFLINE 메시지처럼 값이 전부 없더라도
+     * <b>null이 아닌 {@code IsaacExtras} 객체를 반환</b>한다 — "Isaac 경로에서 온 메시지"라는 사실
+     * 자체가 갱신 신호이기 때문이다. 차량이 오프라인이 되어 화물 정보가 사라진 것을 그대로 반영해야
+     * 하므로, 여기서 기존 값을 보존하지 않는다({@code VehicleStatusService} 병합 정책 참고).
+     */
+    private VehicleStatusUpdateCommand.IsaacExtras toIsaacExtras(IsaacForkliftStatusMessage message) {
+        IsaacForkliftStatusMessage.Footprint footprint = message.footprint();
+        return new VehicleStatusUpdateCommand.IsaacExtras(
+                message.forkHeight(),
+                message.hasCargo(),
+                message.cargoId(),
+                footprint != null ? footprint.length() : null,
+                footprint != null ? footprint.width() : null);
     }
 
     /**
@@ -138,7 +161,7 @@ public class IsaacForkliftStatusService {
         return !Double.isNaN(value) && !Double.isInfinite(value);
     }
 
-    private IsaacVehicleStatusEventData toEventData(IsaacForkliftStatusMessage message, LocalDateTime receivedAt) {
+    private IsaacVehicleStatusEventData toEventData(IsaacForkliftStatusMessage message, OffsetDateTime receivedAt) {
         IsaacVehicleStatusEventData.Footprint footprint = message.footprint() != null
                 ? new IsaacVehicleStatusEventData.Footprint(message.footprint().length(), message.footprint().width())
                 : null;

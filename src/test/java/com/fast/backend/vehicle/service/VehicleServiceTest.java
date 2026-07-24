@@ -183,7 +183,8 @@ class VehicleServiceTest {
         assertThat(response.total()).isEqualTo(3);
         assertThat(response.items()).hasSize(VehicleStatus.values().length);
         assertThat(response.items()).extracting(VehicleStatusCountResponse.StatusCount::status)
-                .containsExactlyInAnyOrder("UNKNOWN", "IDLE", "ACTIVE", "ERROR", "OFFLINE");
+                .containsExactlyInAnyOrder("UNKNOWN", "IDLE", "ACTIVE", "MOVING", "LIFTING",
+                        "LOADING", "UNLOADING", "ESTOP", "ERROR", "OFFLINE");
         long idleCount = response.items().stream()
                 .filter(i -> i.status().equals("IDLE")).findFirst().orElseThrow().count();
         long offlineCount = response.items().stream()

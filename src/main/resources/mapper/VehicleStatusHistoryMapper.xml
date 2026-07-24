@@ -11,6 +11,11 @@
         <result property="positionY" column="position_y"/>
         <result property="heading" column="heading"/>
         <result property="speed" column="speed"/>
+        <result property="forkHeight" column="fork_height"/>
+        <result property="hasCargo" column="has_cargo"/>
+        <result property="cargoId" column="cargo_id"/>
+        <result property="footprintLength" column="footprint_length"/>
+        <result property="footprintWidth" column="footprint_width"/>
         <result property="messageAt" column="message_at"/>
         <result property="receivedAt" column="received_at"/>
         <result property="createdAt" column="created_at"/>
@@ -20,16 +25,19 @@
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO vehicle_status_history (
             vehicle_id, status, battery, position_x, position_y, heading, speed,
+            fork_height, has_cargo, cargo_id, footprint_length, footprint_width,
             message_at, received_at, created_at
         )
         VALUES (
             #{vehicleId}, #{status}, #{battery}, #{positionX}, #{positionY}, #{heading}, #{speed},
+            #{forkHeight}, #{hasCargo}, #{cargoId}, #{footprintLength}, #{footprintWidth},
             #{messageAt}, #{receivedAt}, #{createdAt}
         )
     </insert>
 
     <select id="findRecentByVehicleId" resultMap="vehicleStatusHistoryResultMap">
         SELECT id, vehicle_id, status, battery, position_x, position_y, heading, speed,
+               fork_height, has_cargo, cargo_id, footprint_length, footprint_width,
                message_at, received_at, created_at
         FROM vehicle_status_history
         WHERE vehicle_id = #{vehicleId}

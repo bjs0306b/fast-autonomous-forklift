@@ -20,6 +20,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -168,26 +170,24 @@ class VehicleStatusServiceTest {
         when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
-        // "LOADING"은 prompt16.md 5장에서 후보로만 거론됐을 뿐 enum에 추가되지 않은 값이다 — 여전히
-        // UNKNOWN으로 흡수돼야 한다. "MOVING"은 prompt25.md 1.1장에서 ACTIVE로 정규화하기로 확정돼
-        // 더 이상 "인식 불가" 예시로 쓸 수 없다(아래 별도 테스트로 이동).
-        VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01", command("LOADING", null, null));
+        // "LOADING"은 prompt32.md 1장 3번 확정으로 정식 enum 값이 됐다 — 더 이상 "인식 불가" 예시가
+        // 아니다. 정말로 정의되지 않은 값("PARKED")으로 바꿔 UNKNOWN 흡수 규칙을 검증한다.
+        VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01", command("PARKED", null, null));
 
         assertThat(response.status()).isEqualTo(VehicleStatus.UNKNOWN);
         verify(vehicleCurrentStatusMapper).upsert(any());
     }
 
     @Test
-    void updateCurrentStatus_movingStatusString_normalizesToActiveAndStillUpserts() {
-        // prompt25.md 1.1장: VehicleStatus.fromRaw()가 MOVING을 ACTIVE로 정규화하도록 확정됐다. 이
-        // 매핑은 상태 토픽 경로(ForkliftStatusService → 이 메서드)에도 그대로 적용된다 — fromRaw()가
-        // 호출자를 구분하지 않는 공용 메서드이기 때문이다.
+    void updateCurrentStatus_movingStatusString_isPreservedAsMovingAndStillUpserts() {
+        // prompt32.md 1장 3번 확정: MOVING은 더 이상 ACTIVE로 변환되지 않고 독립 상태로 보존된다.
+        // fromRaw()는 호출자를 구분하지 않는 공용 메서드라 MQTT/REST 어느 경로든 동일하게 적용된다.
         when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01", command("MOVING", null, null));
 
-        assertThat(response.status()).isEqualTo(VehicleStatus.ACTIVE);
+        assertThat(response.status()).isEqualTo(VehicleStatus.MOVING);
         verify(vehicleCurrentStatusMapper).upsert(any());
     }
 
@@ -241,7 +241,7 @@ class VehicleStatusServiceTest {
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(existing));
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01",
-                command("ERROR", null, existingMessageAt.minusMinutes(1)));
+                command("ERROR", null, existingMessageAt.minusMinutes(1).atOffset(ZoneOffset.ofHours(9))));
 
         // 오래된 메시지는 무시되고 기존 상태(ACTIVE)가 그대로 반환돼야 한다.
         assertThat(response.status()).isEqualTo(VehicleStatus.ACTIVE);
@@ -263,7 +263,7 @@ class VehicleStatusServiceTest {
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(existing));
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01",
-                command("ACTIVE", null, existingMessageAt.plusMinutes(1)));
+                command("ACTIVE", null, existingMessageAt.plusMinutes(1).atOffset(ZoneOffset.ofHours(9))));
 
         assertThat(response.status()).isEqualTo(VehicleStatus.ACTIVE);
         verify(vehicleCurrentStatusMapper).upsert(any());
@@ -280,7 +280,7 @@ class VehicleStatusServiceTest {
         return vehicle;
     }
 
-    private VehicleStatusUpdateCommand command(String status, Integer battery, LocalDateTime messageAt) {
+    private VehicleStatusUpdateCommand command(String status, Integer battery, OffsetDateTime messageAt) {
         return new VehicleStatusUpdateCommand(status, battery, null, null, null, null, messageAt);
     }
 }

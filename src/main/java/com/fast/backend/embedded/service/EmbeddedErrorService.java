@@ -2,6 +2,7 @@ package com.fast.backend.embedded.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.embedded.domain.EmbeddedErrorHistory;
 import com.fast.backend.embedded.domain.EmbeddedErrorSeverity;
 import com.fast.backend.embedded.domain.EmbeddedErrorSource;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -68,16 +70,17 @@ public class EmbeddedErrorService {
                 return;
             }
 
-            LocalDateTime receivedAt = LocalDateTime.now();
+            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
+            LocalDateTime receivedAtLocal = CommunicationTime.toLocal(receivedAt);
             EmbeddedErrorHistory entity = new EmbeddedErrorHistory();
             entity.setForkliftId(message.forkliftId());
             entity.setErrorCode(message.errorCode());
             entity.setErrorSource(source);
             entity.setSeverity(severity);
             entity.setMessage(message.message());
-            entity.setOccurredAt(message.timestamp());
-            entity.setReceivedAt(receivedAt);
-            entity.setCreatedAt(receivedAt);
+            entity.setOccurredAt(CommunicationTime.toLocal(message.timestamp()));
+            entity.setReceivedAt(receivedAtLocal);
+            entity.setCreatedAt(receivedAtLocal);
             errorHistoryMapper.insert(entity);
 
             EmbeddedErrorEventData data = new EmbeddedErrorEventData(
@@ -93,7 +96,7 @@ public class EmbeddedErrorService {
     @Transactional(readOnly = true)
     public List<EmbeddedErrorResponse> findRecentByForkliftId(String forkliftId, int limit) {
         if (limit < 1 || limit > 200) {
-            throw new BusinessException(ErrorCode.EMBEDDED_COMMAND_LIMIT_INVALID,
+            throw new BusinessException(ErrorCode.COMMAND_LIMIT_INVALID,
                     "limit은 1~200 범위여야 합니다: " + limit);
         }
         vehicleMapper.findByVehicleId(forkliftId)
@@ -112,8 +115,8 @@ public class EmbeddedErrorService {
                 history.getErrorSource() != null ? history.getErrorSource().name() : null,
                 history.getSeverity() != null ? history.getSeverity().name() : null,
                 history.getMessage(),
-                history.getOccurredAt(),
-                history.getReceivedAt());
+                CommunicationTime.toOffset(history.getOccurredAt()),
+                CommunicationTime.toOffset(history.getReceivedAt()));
     }
 
     private boolean isValid(EmbeddedErrorMessage message) {

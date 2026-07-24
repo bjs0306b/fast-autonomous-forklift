@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fast.backend.common.websocket.RealtimeEvent;
+import com.fast.backend.common.websocket.RealtimeEventType;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,8 +43,8 @@ class VehicleLocationEventDataTest {
                 90.0,
                 new VehicleLocationEventData.Quaternion(0.0, 0.0, 0.7071, 0.7071),
                 0.4,
-                LocalDateTime.of(2026, 7, 22, 13, 30, 0),
-                LocalDateTime.of(2026, 7, 22, 13, 30, 0, 120_000_000));
+                LocalDateTime.of(2026, 7, 22, 13, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9)),
+                LocalDateTime.of(2026, 7, 22, 13, 30, 0, 120_000_000).atOffset(java.time.ZoneOffset.ofHours(9)));
 
         JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(data));
 
@@ -67,8 +70,8 @@ class VehicleLocationEventDataTest {
                 null,
                 null,
                 null,
-                LocalDateTime.of(2026, 7, 22, 13, 30, 0),
-                LocalDateTime.of(2026, 7, 22, 13, 30, 0));
+                LocalDateTime.of(2026, 7, 22, 13, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9)),
+                LocalDateTime.of(2026, 7, 22, 13, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9)));
 
         JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(data));
 
@@ -86,9 +89,9 @@ class VehicleLocationEventDataTest {
         VehicleLocationEventData data = new VehicleLocationEventData(
                 "FORKLIFT-01", VehicleStatus.ACTIVE,
                 new VehicleLocationEventData.Position(1.0, 1.0, "map"), 0.0, null, 0.0,
-                LocalDateTime.now(), LocalDateTime.now());
-        VehicleWebSocketEvent<VehicleLocationEventData> event = VehicleWebSocketEvent.of(
-                VehicleWebSocketEventType.VEHICLE_LOCATION_UPDATED, "FORKLIFT-01", LocalDateTime.now(), data);
+                java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)), java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)));
+        RealtimeEvent<VehicleLocationEventData> event = RealtimeEvent.of(
+                RealtimeEventType.VEHICLE_LOCATION_UPDATED, "FORKLIFT-01", java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)), data);
 
         JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(event));
 

@@ -6,16 +6,28 @@
 
 ## 2. 분석 기준
 
-- 기준일: 2026-07-23
+- 기준일: **2026-07-24** (prompt32.md 확정 통신 규격 반영 후 갱신)
 - 빌드: Java 21, Spring Boot 3.3.4, MyBatis Spring Boot Starter 3.0.3
 - 운영/로컬 DB: MySQL Connector/J, `application-local.yml`
 - 테스트 DB: H2 in-memory, MySQL 호환 모드, `application-test.yml`
 - DDL: `src/main/resources/db/schema.sql`
 - SQL: `src/main/resources/mapper/*.xml` 10개
+- 운영 DB 마이그레이션: `src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql`
 - 코드: `src/main/java`, 테스트 근거: `src/test/java`, `src/test/resources`
-- 운영 코드와 SQL은 변경하지 않고 문서만 작성했다.
+- 이 문서는 코드 변경 후 그 결과를 반영해 갱신했다(코드가 기준).
 
-주요 구현 도메인은 차량 등록·현재 상태·상태 이력, AI 화물 분석, 측정 스테이션 결과, 임베디드 명령·포크 상태·오류 이력이다. Isaac/ROS2 위치·경로 메시지는 DB에 저장하지 않고 WebSocket으로 전달한다.
+주요 구현 도메인은 차량 등록·현재 상태·상태 이력, AI 화물 분석, 측정 스테이션 결과, 통합 차량 명령·포크 상태·오류 이력이다. Isaac/ROS2 위치·경로 메시지는 DB에 저장하지 않고 WebSocket으로 전달한다.
+
+### 2026-07-24 스키마 변경 요약 (prompt32.md 확정 규격)
+
+| 테이블 | 변경 | 근거 |
+|---|---|---|
+| `vehicle_current_status` | `fork_height`, `has_cargo`, `cargo_id`, `footprint_length`, `footprint_width` 5개 컬럼 추가 | 확정 1장 4번 — Isaac 상태 확장 필드를 WebSocket 중계뿐 아니라 DB에도 저장 |
+| `vehicle_status_history` | 동일 5개 컬럼 추가 | 동일 |
+| `embedded_vehicle_command` | `target_system`, `command_category`, `payload_json` 추가 | 확정 1장 8번 — 명령 공통 envelope |
+| `status` 컬럼 값 | `VehicleStatus` 10종으로 확장(DDL 변경 없음, VARCHAR 유지) | 확정 1장 3번 |
+
+테이블·컬럼 이름은 `embedded_vehicle_command`와 `forklift_id`를 그대로 유지했다(확정 3장 3번이 허용한 "기존 forklift_id 유지 정책"). 이 테이블은 이제 임베디드 명령만이 아니라 ROS2 이동 명령까지 저장하므로 이름이 도메인과 어긋나지만, 이름 변경은 운영 DB 데이터 이관 위험을 만드는 데 비해 얻는 게 이름 일관성뿐이다. 애플리케이션 계층(Domain/DTO/JSON)은 확정 규격대로 `vehicleId`를 쓰고 Mapper XML이 `forklift_id` 컬럼과 매핑한다.
 
 ## 3. 프로젝트 데이터 흐름
 
@@ -25,7 +37,7 @@
 - 상태 이력 조회: `VehicleController` → `VehicleStatusHistoryService` → `VehicleStatusHistoryMapper` → `vehicle_status_history`
 - AI 조회: `AiCargoAnalysisController` → `AiCargoAnalysisService` → AI Mapper 2개 → AI 테이블 2개
 - 스테이션 조회: `StationMeasurementController` → `StationMeasurementService` → 스테이션 Mapper 2개 → 스테이션 테이블 2개
-- 임베디드 명령: `EmbeddedCommandController` → `EmbeddedCommandService` → `EmbeddedVehicleCommandMapper` → `embedded_vehicle_command` → MQTT publish
+- 통합 차량 명령: `VehicleCommandController` → `VehicleCommandService` → `VehicleCommandMapper` → `embedded_vehicle_command` → MQTT publish(`forklift/{vehicleId}/command`)
 
 ### MQTT → Router → Service → DB/WebSocket
 
@@ -36,13 +48,19 @@
 - `forklift/+/path` → `IsaacForkliftPathService` → 등록 여부 조회 → 경로 WebSocket(DB 저장 없음)
 - `cargo/detected` → `AiCargoAnalysisService` → 분석/박스 insert → AI WebSocket
 - `fast/station/+/measurement` → `StationMeasurementService` → 측정/박스 insert → 스테이션 WebSocket
-- `forklift/+/command-result` → `EmbeddedCommandResultService` → 명령 update → 결과 WebSocket
+- `forklift/+/command-result` → `VehicleCommandResultService` → 명령 update → 결과 WebSocket
 - `forklift/+/fork-status` → `EmbeddedForkStatusService` → 포크 현재 상태 upsert → 포크 WebSocket
 - `forklift/+/error` → `EmbeddedErrorService` → 오류 이력 insert → 오류 WebSocket
 
 ### WebSocket 전달
 
 `WebSocketConfig`의 STOMP endpoint를 통해 Broadcaster가 `SimpMessagingTemplate.convertAndSend`를 호출한다. 차량 이벤트는 전체/차량별 토픽, AI는 전체/화물별 토픽, 스테이션은 전체/스테이션별 토픽에 각각 전송한다. 차량 상태 이벤트는 current/history 트랜잭션 커밋 후 발행한다. Broadcaster가 전송 예외를 내부에서 로깅하고 흡수하므로 커밋된 DB 결과에 영향을 주지 않는다.
+
+## 3.5 시각 저장 정책 (2026-07-24 확정)
+
+통신 계층(MQTT payload, WebSocket envelope, REST 응답)의 모든 시각은 **Asia/Seoul(+09:00) ISO-8601 `OffsetDateTime`** 이다. DB의 `DATETIME` 컬럼은 타임존을 담지 못하므로, **Asia/Seoul 기준 벽시계 시각**을 `LocalDateTime`으로 저장하고 읽을 때 `+09:00`을 다시 붙여 복원한다. 변환은 `CommunicationTime` 유틸이 전담한다.
+
+스테이션 도메인(`station_measurement`)만 예외로 기존의 **UTC 변환 시각 + 오프셋 분 분리 저장** 방식을 유지한다 — 외부 스테이션 PC가 임의의 오프셋을 보낼 수 있다는 전제에서 설계됐고, 이번 확정은 오프셋을 `+09:00` 하나로 고정했으므로 차량/명령 도메인에는 분리 저장이 추가 정보를 주지 못한다. 컬럼 10개 이상을 2컬럼으로 쪼개는 변경 위험 대비 이득이 없어 확대 적용하지 않았다.
 
 ## 4. 전체 테이블 요약
 
@@ -55,7 +73,7 @@
 | `ai_cargo_detection_box` | AI 감지 박스 | `id` | `ai_cargo_analysis.id` | FK 인덱스는 DB 구현 의존 |
 | `station_measurement` | 스테이션 측정 부모 | `id` | 없음 | UQ `measurement_id`, `(station_id, measured_at_utc DESC)` |
 | `station_measurement_box` | 스테이션 감지 박스 | `id` | `station_measurement.id` | FK 인덱스는 DB 구현 의존 |
-| `embedded_vehicle_command` | 임베디드 명령/결과 | `id` | 없음 | UQ `command_id`, `(forklift_id, issued_at DESC)` |
+| `embedded_vehicle_command` | **통합 차량 명령/결과**(ROS2 이동 + 임베디드 + 비상정지) | `id` | 없음 | UQ `command_id`, `(forklift_id, issued_at DESC)` |
 | `vehicle_fork_current_status` | 차량별 포크 최신 상태 | `forklift_id` | 없음 | PK 자체 |
 | `embedded_error_history` | 임베디드 오류 이력 | `id` | 없음 | `(forklift_id, occurred_at DESC)` |
 
@@ -140,9 +158,14 @@ PK와 UNIQUE 인덱스 외 명시 인덱스 없음.
 | battery | INT | Y | NULL | N | - | N | N | `battery` | 0~100 애플리케이션 검증 |
 | position_x | DOUBLE | Y | NULL | N | - | N | N | `positionX` | X 좌표 |
 | position_y | DOUBLE | Y | NULL | N | - | N | N | `positionY` | Y 좌표 |
-| heading | DOUBLE | Y | NULL | N | - | N | N | `heading` | 방향 |
-| speed | DOUBLE | Y | NULL | N | - | N | N | `speed` | 속도 |
-| message_at | DATETIME | Y | NULL | N | - | N | N | `messageAt` | 메시지 기준 시각 |
+| heading | DOUBLE | Y | NULL | N | - | N | N | `heading` | 방향 (**degree, [0,360)**) |
+| speed | DOUBLE | Y | NULL | N | - | N | N | `speed` | 속도 (m/s) |
+| fork_height | DOUBLE | Y | NULL | N | - | N | N | `forkHeight` | **Isaac 확장** 포크 높이(m) |
+| has_cargo | BOOLEAN | Y | NULL | N | - | N | N | `hasCargo` | **Isaac 확장** 화물 적재 여부 |
+| cargo_id | VARCHAR(50) | Y | NULL | N | - | N | N | `cargoId` | **Isaac 확장** 적재 화물 식별자 |
+| footprint_length | DOUBLE | Y | NULL | N | - | N | N | `footprintLength` | **Isaac 확장** footprint 길이(m) |
+| footprint_width | DOUBLE | Y | NULL | N | - | N | N | `footprintWidth` | **Isaac 확장** footprint 폭(m) |
+| message_at | DATETIME | Y | NULL | N | - | N | N | `messageAt` | 메시지 기준 시각 (**Asia/Seoul 벽시계**) |
 | received_at | DATETIME | N | - | N | - | N | N | `receivedAt` | 서버 수신 시각 |
 | updated_at | DATETIME | N | - | N | - | N | N | `updatedAt` | 갱신 시각 |
 
@@ -153,6 +176,15 @@ PK `vehicle_id`, FK `fk_vehicle_current_status_vehicle`.
 #### 인덱스
 
 PK 인덱스. 상태 집계용 `status` 단독 인덱스는 없다.
+
+#### Isaac 확장 필드 보존 정책 (중요)
+
+`fork_height`/`has_cargo`/`cargo_id`/`footprint_length`/`footprint_width`는 Isaac 상태 메시지에만 들어온다. ROS2 상태 메시지나 REST 테스트 API가 같은 행을 upsert할 때 이 값들을 null로 덮어쓰면, 관제 화면에서 화물을 싣고 있던 차량이 ROS2 메시지 한 번에 화물 정보를 잃는다. 그래서 **기존 데이터 보존을 우선**한다:
+
+- `VehicleStatusUpdateCommand.isaacExtras == null`(ROS2·REST) → DB에 저장돼 있던 5개 값을 **그대로 유지**
+- `isaacExtras != null`(Isaac) → 메시지 값으로 **덮어쓴다**(내부 필드가 null이면 실제로 null이 된다 — 화물을 내려놓아 cargoId가 사라진 경우를 표현할 수 있어야 하므로)
+
+이 판단은 SQL이 아니라 `VehicleStatusService.applyIsaacExtras`가 한다 — Mapper는 호출자가 ROS2인지 Isaac인지 알 수 없기 때문이다. 덕분에 이력 테이블과 현재 상태 테이블에 저장되는 값이 항상 같은 객체에서 나와 서로 어긋날 수 없다. `VehicleStatusIsaacExtrasIntegrationTest`가 이 정책을 H2로 검증한다.
 
 #### 사용 Mapper
 
@@ -188,7 +220,12 @@ PK 인덱스. 상태 집계용 `status` 단독 인덱스는 없다.
 | position_y | DOUBLE | Y | NULL | N | - | N | N | `positionY` | Y 좌표 |
 | heading | DOUBLE | Y | NULL | N | - | N | N | `heading` | 방향 |
 | speed | DOUBLE | Y | NULL | N | - | N | N | `speed` | 속도 |
-| message_at | DATETIME | Y | NULL | N | - | N | Y | `messageAt` | 메시지 시각 |
+| fork_height | DOUBLE | Y | NULL | N | - | N | N | `forkHeight` | **Isaac 확장** |
+| has_cargo | BOOLEAN | Y | NULL | N | - | N | N | `hasCargo` | **Isaac 확장** |
+| cargo_id | VARCHAR(50) | Y | NULL | N | - | N | N | `cargoId` | **Isaac 확장** |
+| footprint_length | DOUBLE | Y | NULL | N | - | N | N | `footprintLength` | **Isaac 확장** |
+| footprint_width | DOUBLE | Y | NULL | N | - | N | N | `footprintWidth` | **Isaac 확장** |
+| message_at | DATETIME | Y | NULL | N | - | N | Y | `messageAt` | 메시지 시각 (**Asia/Seoul 벽시계**) |
 | received_at | DATETIME | N | - | N | - | N | N | `receivedAt` | 수신 시각 |
 | created_at | DATETIME | N | - | N | - | N | N | `createdAt` | 생성 시각 |
 
@@ -439,10 +476,13 @@ REST 명령 발행 상태와 MQTT 실행 결과를 한 행에 보관한다.
 |---|---|---:|---|---:|---|---:|---:|---|---|
 | id | BIGINT AUTO_INCREMENT | N | 자동 증가 | Y | - | Y | Y | `id` | 내부 ID |
 | command_id | VARCHAR(100) | N | - | N | - | Y | Y | `commandId` | UUID 명령 ID |
-| forklift_id | VARCHAR(50) | N | - | N | - | N | Y | `forkliftId` | 논리 차량 ID |
-| command | VARCHAR(30) | N | - | N | - | N | N | `command` | `EmbeddedCommandType` |
+| forklift_id | VARCHAR(50) | N | - | N | - | N | Y | **`vehicleId`** | 논리 차량 ID (컬럼명만 구 이름 유지) |
+| command | VARCHAR(30) | N | - | N | - | N | N | `command` | `VehicleCommandType` (8종) |
+| target_system | VARCHAR(20) | N | - | N | - | N | N | `targetSystem` | **신규** `VehicleCommandTargetSystem` (ROS2/EMBEDDED/ALL) |
+| command_category | VARCHAR(20) | N | - | N | - | N | N | `commandCategory` | **신규** `VehicleCommandCategory` (MOVE/FORK/LOAD/SAFETY) |
+| payload_json | VARCHAR(1000) | Y | NULL | N | - | N | N | `payloadJson` | **신규** 명령별 payload를 JSON **문자열**로 보관 |
 | reason | VARCHAR(100) | Y | NULL | N | - | N | N | `reason` | 명령 사유 |
-| status | VARCHAR(20) | N | - | N | - | N | N | `status` | `EmbeddedCommandStatus` |
+| status | VARCHAR(20) | N | - | N | - | N | N | `status` | `VehicleCommandStatus` (9종) |
 | issued_at | DATETIME | N | - | N | - | N | Y | `issuedAt` | 발행 요청 시각 |
 | published_at | DATETIME | Y | NULL | N | - | N | N | `publishedAt` | MQTT 발행 성공 시각 |
 | completed_at | DATETIME | Y | NULL | N | - | N | N | `completedAt` | 실행 완료 시각 |
@@ -464,19 +504,25 @@ PK `id`, `uk_embedded_vehicle_command_command_id(command_id)`. `forklift_id` FK 
 
 #### 사용 Mapper
 
-`EmbeddedVehicleCommandMapper`: insert/update, ID 존재/단건 조회, 차량별 최신순 조회.
+`VehicleCommandMapper`: insert/update, ID 존재/단건 조회, 차량별 최신순 조회.
+
+도메인 필드 `vehicleId`가 컬럼 `forklift_id`에 매핑된다는 점에 주의할 것 — `VehicleCommandMapper.xml`의 `resultMap`이 이 연결을 담당하며, `VehicleCommandMapperTest`가 실제 SQL 실행으로 검증한다.
+
+`payload_json`을 MySQL JSON 컬럼 타입이 아니라 VARCHAR로 둔 이유: 이 프로젝트는 한 번도 JSON 컬럼을 쓴 적이 없고(`load_direction`/`stopped_actions` 모두 문자열), 테스트가 도는 H2와의 호환 문제를 새로 만들지 않기 위해서다.
 
 #### 사용 Service
 
-`EmbeddedCommandService`, `EmbeddedCommandResultService`.
+`VehicleCommandService`, `VehicleCommandResultService`.
 
 #### 연결 API 또는 MQTT 흐름
 
-`POST /api/vehicles/{forkliftId}/embedded-commands` → insert(PENDING) → MQTT publish → update(PUBLISHED/PUBLISH_FAILED); `forklift/{id}/command-result` → 종료 상태 update/WebSocket. 단건·목록 조회 API 제공.
+`POST /api/vehicles/{vehicleId}/commands` → 조합 검증 → insert(PENDING) → MQTT publish(`forklift/{vehicleId}/command`, QoS 1, retained false) → update(PUBLISHED/PUBLISH_FAILED); `forklift/+/command-result` → 8단계 검증 후 상태 update + WebSocket. 단건·목록 조회 API 제공.
+
+구 경로 `POST/GET /api/vehicles/{vehicleId}/embedded-commands`는 같은 Service로 위임하는 **deprecated alias**로 남아 있다(하위 호환).
 
 #### 테스트
 
-`EmbeddedVehicleCommandMapperTest`, `EmbeddedCommandServiceTest`, `EmbeddedCommandResultServiceTest`, `EmbeddedCommandIntegrationTest`.
+`VehicleCommandMapperTest`, `VehicleCommandServiceTest`, `VehicleCommandResultServiceTest`, `VehicleCommandIntegrationTest`, `VehicleCommandTypeTest`, `VehicleCommandStatusTest`, `VehicleCommandPublisherTest`.
 
 ### vehicle_fork_current_status
 
@@ -518,7 +564,7 @@ PK 인덱스만 존재.
 
 #### 테스트
 
-`VehicleForkCurrentStatusMapperTest`, `EmbeddedForkStatusServiceTest`, `EmbeddedCommandIntegrationTest`.
+`VehicleForkCurrentStatusMapperTest`, `EmbeddedForkStatusServiceTest`.
 
 ### embedded_error_history
 
@@ -562,7 +608,7 @@ PK `id`; DB FK/UNIQUE 없음.
 
 #### 테스트
 
-`EmbeddedErrorHistoryMapperTest`, `EmbeddedErrorServiceTest`, `EmbeddedCommandIntegrationTest`.
+`EmbeddedErrorHistoryMapperTest`, `EmbeddedErrorServiceTest`.
 
 ## 7. Mapper 및 SQL 연결
 
@@ -575,7 +621,7 @@ PK `id`; DB FK/UNIQUE 없음.
 | `AiCargoDetectionBoxMapper.xml` | ai_cargo_detection_box | insert, analysis_id별 조회 |
 | `StationMeasurementMapper.xml` | station_measurement | insert, measurement_id 중복/단건, station별 최신 |
 | `StationMeasurementBoxMapper.xml` | station_measurement_box | insert, 부모별 순서 조회 |
-| `EmbeddedVehicleCommandMapper.xml` | embedded_vehicle_command | insert, 전체 결과 필드 update, 단건/목록 |
+| `VehicleCommandMapper.xml` | embedded_vehicle_command | insert, 전체 결과 필드 update, 단건/목록. 도메인 `vehicleId` ↔ 컬럼 `forklift_id` 매핑 |
 | `VehicleForkCurrentStatusMapper.xml` | vehicle_fork_current_status | MySQL upsert, 단건 조회 |
 | `EmbeddedErrorHistoryMapper.xml` | embedded_error_history | insert, 차량별 최신순 제한 조회 |
 
@@ -601,9 +647,9 @@ XML `resultMap`의 snake_case 컬럼과 Java camelCase 필드는 위 테이블 �
 
 ### 임베디드 명령
 
-`EmbeddedCommandService.issueCommand`는 한 트랜잭션에서 PENDING insert → MQTT publish 시도 → PUBLISHED 또는 PUBLISH_FAILED update를 수행한다. publish 실패는 의도적으로 잡아 PUBLISH_FAILED를 커밋한다. 결과 MQTT는 `EmbeddedCommandResultService.handleResult`가 command/forklift/type/상태 전이를 검사한 뒤 SUCCESS/FAILED 계열로 update한다. 종료 상태에 대한 중복 결과는 전이 거부로 무시한다.
+`VehicleCommandService.issueCommand`는 한 트랜잭션에서 조합 검증 → PENDING insert → MQTT publish 시도 → PUBLISHED 또는 PUBLISH_FAILED update를 수행한다. publish 실패는 의도적으로 잡아 PUBLISH_FAILED를 커밋한다 — 발행 실패를 실행 성공으로 저장하지 않기 위한 상태 분리다. 결과 MQTT는 `VehicleCommandResultService.handleResult`가 commandId/vehicleId/targetSystem/commandCategory/command/상태 전이를 순서대로 검사한 뒤 update한다. 종료 상태에 대한 중복 결과는 전이 거부로 함께 무시된다.
 
-주의: `EmbeddedCommandResultService`, `EmbeddedForkStatusService`, `EmbeddedErrorService`는 `@Transactional` 메서드 내부에서 넓은 `RuntimeException`을 잡고 반환한다. 단일 DML 위주라 부분 저장 위험은 제한적이지만, DB 예외를 트랜잭션 경계 밖으로 전달하지 않아 명시적 rollback 보장이 차량/AI/스테이션 흐름보다 약하다.
+주의: `VehicleCommandResultService`, `EmbeddedForkStatusService`, `EmbeddedErrorService`는 `@Transactional` 메서드 내부에서 넓은 `RuntimeException`을 잡고 반환한다. 단일 DML 위주라 부분 저장 위험은 제한적이지만, DB 예외를 트랜잭션 경계 밖으로 전달하지 않아 명시적 rollback 보장이 차량/AI/스테이션 흐름보다 약하다.
 
 ## 9. API·MQTT·DB 연결
 
@@ -615,8 +661,8 @@ XML `resultMap`의 snake_case 컬럼과 Java camelCase 필드는 위 테이블 �
 | 차량 상태 이력 조회 | `VehicleController` | `VehicleStatusHistoryService` | `VehicleMapper`, `VehicleStatusHistoryMapper` | vehicle, vehicle_status_history | REST 이력 목록 |
 | AI 분석 MQTT | `MqttMessageRouter` | `AiCargoAnalysisService` | AI Mapper 2개 | ai_cargo_analysis, ai_cargo_detection_box | AI WebSocket |
 | 측정 스테이션 MQTT | `MqttMessageRouter` | `StationMeasurementService` | Station Mapper 2개 | station_measurement, station_measurement_box | 스테이션 WebSocket |
-| 임베디드 명령 REST | `EmbeddedCommandController` | `EmbeddedCommandService` | `VehicleMapper`, `EmbeddedVehicleCommandMapper` | vehicle, embedded_vehicle_command | MQTT command/emergency + REST |
-| 임베디드 결과 MQTT | `MqttMessageRouter` | `EmbeddedCommandResultService` | `EmbeddedVehicleCommandMapper` | embedded_vehicle_command | 결과 WebSocket |
+| 통합 차량 명령 REST | `VehicleCommandController` | `VehicleCommandService` | `VehicleMapper`, `VehicleCommandMapper` | vehicle, embedded_vehicle_command | MQTT `forklift/{id}/command` + REST |
+| 통합 명령 결과 MQTT | `MqttMessageRouter` | `VehicleCommandResultService` | `VehicleCommandMapper` | embedded_vehicle_command | 결과 WebSocket |
 | 포크 상태 MQTT | `MqttMessageRouter` | `EmbeddedForkStatusService` | `VehicleMapper`, `VehicleForkCurrentStatusMapper` | vehicle, vehicle_fork_current_status | 포크 WebSocket |
 | 오류 MQTT | `MqttMessageRouter` | `EmbeddedErrorService` | `VehicleMapper`, `EmbeddedErrorHistoryMapper` | vehicle, embedded_error_history | 오류 WebSocket |
 

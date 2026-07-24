@@ -5,7 +5,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fast.backend.ai.service.AiCargoAnalysisService;
 import com.fast.backend.config.mqtt.MqttProperties;
 import com.fast.backend.config.mqtt.MqttTopics;
-import com.fast.backend.embedded.service.EmbeddedCommandResultService;
+import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedErrorService;
 import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
@@ -36,7 +36,7 @@ class MqttMessageRouterTest {
     private IsaacForkliftLocationService isaacForkliftLocationService;
     private IsaacForkliftStatusService isaacForkliftStatusService;
     private IsaacForkliftPathService isaacForkliftPathService;
-    private EmbeddedCommandResultService embeddedCommandResultService;
+    private VehicleCommandResultService vehicleCommandResultService;
     private EmbeddedForkStatusService embeddedForkStatusService;
     private EmbeddedErrorService embeddedErrorService;
     private StationMeasurementService stationMeasurementService;
@@ -47,8 +47,7 @@ class MqttMessageRouterTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "forklift/%s/emergency",
-                "fast/station/+/measurement");
+                "cargo/detected", "forklift/%s/command",                 "fast/station/+/measurement");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
                 "fast-backend-inbound", "fast-backend-outbound",
@@ -61,21 +60,21 @@ class MqttMessageRouterTest {
         isaacForkliftLocationService = mock(IsaacForkliftLocationService.class);
         isaacForkliftStatusService = mock(IsaacForkliftStatusService.class);
         isaacForkliftPathService = mock(IsaacForkliftPathService.class);
-        embeddedCommandResultService = mock(EmbeddedCommandResultService.class);
+        vehicleCommandResultService = mock(VehicleCommandResultService.class);
         embeddedForkStatusService = mock(EmbeddedForkStatusService.class);
         embeddedErrorService = mock(EmbeddedErrorService.class);
         stationMeasurementService = mock(StationMeasurementService.class);
         router = new MqttMessageRouter(
                 objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService, aiCargoAnalysisService,
                 isaacForkliftLocationService, isaacForkliftStatusService, isaacForkliftPathService,
-                embeddedCommandResultService, embeddedForkStatusService, embeddedErrorService,
+                vehicleCommandResultService, embeddedForkStatusService, embeddedErrorService,
                 stationMeasurementService);
     }
 
     @Test
     void route_statusTopic_convertsToForkliftStatusMessage() {
         String payload = "{\"forkliftId\":\"F01\",\"status\":\"MOVING\",\"battery\":82,"
-                + "\"timestamp\":\"2026-07-20T09:20:00\"}";
+                + "\"timestamp\":\"2026-07-20T09:20:00+09:00\"}";
 
         router.route("forklift/F01/status", payload);
 
@@ -88,7 +87,7 @@ class MqttMessageRouterTest {
         String payload = "{\"vehicleId\":\"F01\",\"status\":\"MOVING\","
                 + "\"position\":{\"x\":120.5,\"y\":84.2,\"frameId\":\"map\"},\"heading\":90.0,"
                 + "\"quaternion\":{\"x\":0.0,\"y\":0.0,\"z\":0.7071,\"w\":0.7071},\"speed\":1.2,"
-                + "\"messageAt\":\"2026-07-20T09:20:00\"}";
+                + "\"messageAt\":\"2026-07-20T09:20:00+09:00\"}";
 
         router.route("forklift/F01/location", payload);
 
@@ -101,7 +100,7 @@ class MqttMessageRouterTest {
     @Test
     void route_locationTopic_isaacForkliftIdPayload_dispatchesToIsaacLocationService() {
         String payload = "{\"forkliftId\":\"SIM01\",\"x\":1.234,\"y\":0.872,\"direction\":1.5708,"
-                + "\"speed\":0.15,\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"speed\":0.15,\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         router.route("forklift/SIM01/location", payload);
 
@@ -112,7 +111,7 @@ class MqttMessageRouterTest {
     @Test
     void route_locationTopic_isaacVehicleIdMismatch_skipsService() {
         String payload = "{\"forkliftId\":\"SIM02\",\"x\":1.0,\"y\":1.0,\"direction\":0.0,"
-                + "\"speed\":0.1,\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"speed\":0.1,\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         router.route("forklift/SIM01/location", payload);
 
@@ -125,7 +124,7 @@ class MqttMessageRouterTest {
     void route_statusTopic_isaacFullStatusPayload_dispatchesToIsaacStatusService() {
         String payload = "{\"forkliftId\":\"SIM01\",\"status\":\"MOVING\",\"battery\":87,"
                 + "\"forkHeight\":0.12,\"hasCargo\":true,\"cargoId\":\"BOX-0042\","
-                + "\"footprint\":{\"length\":0.28,\"width\":0.16},\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"footprint\":{\"length\":0.28,\"width\":0.16},\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         router.route("forklift/SIM01/status", payload);
 
@@ -150,7 +149,7 @@ class MqttMessageRouterTest {
         String payload = "{\"vehicleId\":\"F01\",\"status\":\"ACTIVE\","
                 + "\"position\":{\"x\":2.5,\"y\":4.1,\"frameId\":\"map\"},\"heading\":90.0,"
                 + "\"quaternion\":{\"x\":0.0,\"y\":0.0,\"z\":0.7071,\"w\":0.7071},\"speed\":0.4,"
-                + "\"messageAt\":\"2026-07-22T13:30:00.123\"}";
+                + "\"messageAt\":\"2026-07-22T13:30:00.123+09:00\"}";
 
         router.route("forklift/F01/location", payload);
 
@@ -178,7 +177,7 @@ class MqttMessageRouterTest {
                 + "\"messageAt\":\"not-a-valid-timestamp\"}";
         String validPayload = "{\"vehicleId\":\"F01\","
                 + "\"position\":{\"x\":2.5,\"y\":4.1,\"frameId\":\"map\"},"
-                + "\"messageAt\":\"2026-07-22T13:30:00.123\"}";
+                + "\"messageAt\":\"2026-07-22T13:30:00.123+09:00\"}";
 
         router.route("forklift/F01/location", invalidPayload);
         router.route("forklift/F01/location", validPayload);
@@ -281,7 +280,7 @@ class MqttMessageRouterTest {
     void route_statusTopic_vehicleIdMismatchWithPayload_skipsService() {
         // 토픽은 F01이지만 payload의 forkliftId는 F02 — prompt20.md 11장 "vehicleId 불일치" 시 처리 금지.
         String payload = "{\"forkliftId\":\"F02\",\"status\":\"MOVING\",\"battery\":82,"
-                + "\"timestamp\":\"2026-07-20T09:20:00\"}";
+                + "\"timestamp\":\"2026-07-20T09:20:00+09:00\"}";
 
         router.route("forklift/F01/status", payload);
 
@@ -292,7 +291,7 @@ class MqttMessageRouterTest {
     void route_locationTopic_vehicleIdMismatchWithPayload_skipsService() {
         String payload = "{\"vehicleId\":\"F02\","
                 + "\"position\":{\"x\":120.5,\"y\":84.2,\"frameId\":\"map\"},\"speed\":1.2,"
-                + "\"messageAt\":\"2026-07-20T09:20:00\"}";
+                + "\"messageAt\":\"2026-07-20T09:20:00+09:00\"}";
 
         router.route("forklift/F01/location", payload);
 
@@ -306,7 +305,7 @@ class MqttMessageRouterTest {
         String payload = "{\"forkliftId\":\"SIM01\","
                 + "\"waypoints\":[{\"x\":1.20,\"y\":0.87},{\"x\":2.40,\"y\":0.87}],"
                 + "\"goal\":{\"x\":2.40,\"y\":3.10,\"direction\":0.0},"
-                + "\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         router.route("forklift/SIM01/path", payload);
 
@@ -318,7 +317,7 @@ class MqttMessageRouterTest {
     void route_pathTopic_vehicleIdMismatch_skipsService() {
         String payload = "{\"forkliftId\":\"SIM02\",\"waypoints\":[],"
                 + "\"goal\":{\"x\":1.0,\"y\":1.0,\"direction\":0.0},"
-                + "\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         router.route("forklift/SIM01/path", payload);
 
@@ -335,59 +334,59 @@ class MqttMessageRouterTest {
     // ---------- 실물 임베디드 명령 결과·포크 상태·오류 (prompt29.md) ----------
 
     @Test
-    void route_commandResultTopic_convertsToEmbeddedCommandResultMessage() {
+    void route_commandResultTopic_convertsToVehicleCommandResultMessage() {
         String payload = "{\"commandId\":\"CMD-001\",\"forkliftId\":\"REAL01\",\"command\":\"FORK_UP\","
-                + "\"result\":\"SUCCESS\",\"completedAt\":\"2026-07-22T10:30:00\"}";
+                + "\"result\":\"SUCCESS\",\"completedAt\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/command-result", payload);
 
-        verify(embeddedCommandResultService, times(1)).handleResult(any());
+        verify(vehicleCommandResultService, times(1)).handleResult(any());
         verifyNoInteractions(embeddedForkStatusService, embeddedErrorService);
     }
 
     @Test
     void route_commandResultTopic_vehicleIdMismatch_skipsService() {
         String payload = "{\"commandId\":\"CMD-001\",\"forkliftId\":\"REAL02\",\"command\":\"FORK_UP\","
-                + "\"result\":\"SUCCESS\",\"completedAt\":\"2026-07-22T10:30:00\"}";
+                + "\"result\":\"SUCCESS\",\"completedAt\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/command-result", payload);
 
-        verifyNoInteractions(embeddedCommandResultService);
+        verifyNoInteractions(vehicleCommandResultService);
     }
 
     @Test
     void route_commandResultTopic_invalidJson_doesNotThrow() {
         router.route("forklift/REAL01/command-result", "not-a-json");
 
-        verifyNoInteractions(embeddedCommandResultService);
+        verifyNoInteractions(vehicleCommandResultService);
     }
 
     @Test
     void route_commandResultTopic_serviceThrowsRuntimeException_doesNotPropagate() {
-        doThrow(new RuntimeException("DB down")).when(embeddedCommandResultService).handleResult(any());
+        doThrow(new RuntimeException("DB down")).when(vehicleCommandResultService).handleResult(any());
         String payload = "{\"commandId\":\"CMD-001\",\"forkliftId\":\"REAL01\",\"command\":\"FORK_UP\","
-                + "\"result\":\"SUCCESS\",\"completedAt\":\"2026-07-22T10:30:00\"}";
+                + "\"result\":\"SUCCESS\",\"completedAt\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/command-result", payload);
 
-        verify(embeddedCommandResultService, times(1)).handleResult(any());
+        verify(vehicleCommandResultService, times(1)).handleResult(any());
     }
 
     @Test
     void route_forkStatusTopic_convertsToEmbeddedForkStatusMessage() {
         String payload = "{\"forkliftId\":\"REAL01\",\"forkState\":\"STOPPED\",\"limitBottom\":false,"
-                + "\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/fork-status", payload);
 
         verify(embeddedForkStatusService, times(1)).handleForkStatus(any());
-        verifyNoInteractions(embeddedCommandResultService, embeddedErrorService);
+        verifyNoInteractions(vehicleCommandResultService, embeddedErrorService);
     }
 
     @Test
     void route_forkStatusTopic_vehicleIdMismatch_skipsService() {
         String payload = "{\"forkliftId\":\"REAL02\",\"forkState\":\"STOPPED\",\"limitBottom\":false,"
-                + "\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/fork-status", payload);
 
@@ -404,18 +403,18 @@ class MqttMessageRouterTest {
     @Test
     void route_errorTopic_convertsToEmbeddedErrorMessage() {
         String payload = "{\"forkliftId\":\"REAL01\",\"errorCode\":\"E001\",\"errorSource\":\"DRIVE\","
-                + "\"severity\":\"WARNING\",\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"severity\":\"WARNING\",\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/error", payload);
 
         verify(embeddedErrorService, times(1)).handleError(any());
-        verifyNoInteractions(embeddedCommandResultService, embeddedForkStatusService);
+        verifyNoInteractions(vehicleCommandResultService, embeddedForkStatusService);
     }
 
     @Test
     void route_errorTopic_vehicleIdMismatch_skipsService() {
         String payload = "{\"forkliftId\":\"REAL02\",\"errorCode\":\"E001\",\"errorSource\":\"DRIVE\","
-                + "\"severity\":\"WARNING\",\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"severity\":\"WARNING\",\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         router.route("forklift/REAL01/error", payload);
 

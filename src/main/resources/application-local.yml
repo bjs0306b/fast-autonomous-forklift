@@ -34,8 +34,9 @@ mqtt:
     forklift-fork-status: forklift/+/fork-status
     forklift-error: forklift/+/error
     cargo-detected: cargo/detected
+    # 이동·포크·적재·비상정지 모든 명령이 쓰는 단일 발행 토픽(prompt32.md 1장 7번 확정).
+    # 구 forklift-emergency 전용 토픽은 사용처가 없어 제거했다.
     forklift-command: forklift/%s/command
-    forklift-emergency: forklift/%s/emergency
     # 측정 스테이션 측정 결과 v1.0 (FR-101-5, MR !36) — 스테이션 PC가 추론·판정 후 결과만 발행
     station-measurement: fast/station/+/measurement
 

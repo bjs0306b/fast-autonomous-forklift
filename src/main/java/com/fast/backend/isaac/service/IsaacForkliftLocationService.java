@@ -1,5 +1,6 @@
 package com.fast.backend.isaac.service;
 
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.isaac.dto.IsaacForkliftLocationMessage;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import com.fast.backend.vehicle.websocket.IsaacVehicleLocationEventData;
@@ -8,15 +9,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * Isaac Sim 위치 메시지를 처리한다(prompt28.md 3장). 10Hz로 들어올 수 있어 DB에 저장하지 않고
- * WebSocket으로만 중계한다 — 기존 {@code ForkliftLocationService}(ROS2 실물 위치)와 동일한 정책이다
- * (요구사항 3장 6번 "기존 정책이 위치를 실시간 WebSocket 전달만 한다면 그대로 유지한다").
+ * WebSocket으로만 중계한다 — 기존 {@code ForkliftLocationService}(ROS2 실물 위치)와 동일한 정책이다.
  *
- * <p>미등록 차량이면 브로드캐스트하지 않고 경고 로그만 남긴다 — 기존 차량 기능과 동일한 정책
- * (요구사항 3장 2번 "등록되지 않은 차량 처리 정책을 기존 차량 기능과 맞춘다").
+ * <p>미등록 차량이면 브로드캐스트하지 않고 경고 로그만 남긴다 — 기존 차량 기능과 동일한 정책.
+ *
+ * <p><b>heading 규격(prompt32.md 1장 5번 확정)</b>: 수신한 {@code heading}(degree)을 [0,360)으로
+ * 정규화해서 중계한다. 이전 버전은 {@code direction}(rad)을 정규화 없이 그대로 통과시켰다 — 확정 규격이
+ * 단위를 degree로, 정상 범위를 [0,360)으로 정하면서 ROS2 위치 경로와 동일한 정규화를 적용하게 됐다.
  */
 @Service
 public class IsaacForkliftLocationService {
@@ -32,8 +35,8 @@ public class IsaacForkliftLocationService {
     }
 
     public void handleLocation(IsaacForkliftLocationMessage message) {
-        // 10Hz 반복 메시지라 INFO로 남기면 로그가 급격히 쌓인다(요구사항 3장 4번). DEBUG로 낮추고
-        // 전체 payload 대신 forkliftId·timestamp만 남긴다.
+        // 10Hz 반복 메시지라 INFO로 남기면 로그가 급격히 쌓인다. DEBUG로 낮추고 전체 payload 대신
+        // forkliftId·timestamp만 남긴다.
         log.debug("Isaac forklift location message received: forkliftId={}, timestamp={}",
                 message.forkliftId(), message.timestamp());
 
@@ -47,10 +50,15 @@ public class IsaacForkliftLocationService {
                 return;
             }
 
-            LocalDateTime receivedAt = LocalDateTime.now();
+            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
             IsaacVehicleLocationEventData data = new IsaacVehicleLocationEventData(
-                    message.forkliftId(), message.x(), message.y(), message.direction(), message.speed(),
-                    message.timestamp(), receivedAt);
+                    message.forkliftId(),
+                    message.x(),
+                    message.y(),
+                    normalizeHeading(message.heading()),
+                    message.speed(),
+                    message.timestamp(),
+                    receivedAt);
             broadcaster.broadcastIsaacLocation(message.forkliftId(), data, message.timestamp());
         } catch (RuntimeException e) {
             log.error("Isaac location broadcast failed unexpectedly: forkliftId={}, error={}",
@@ -59,9 +67,9 @@ public class IsaacForkliftLocationService {
     }
 
     /**
-     * 필수값 누락과 NaN/Infinity를 거부한다(prompt28.md 3장 필드 규격). direction의 -π~π 범위는
-     * "원칙적으로"라고만 돼 있어(강제 규칙 아님) 범위 검증이나 정규화를 하지 않는다 — 합의된 rad 단위
-     * 원본값을 그대로 보존한다. speed 음수는 기존 ForkliftLocationService 정책과 맞춰 거부한다.
+     * 필수값 누락과 NaN/Infinity를 거부한다. heading은 범위를 벗어나도 거부하지 않고 정규화한다
+     * (prompt32.md 1장 5번 "범위를 벗어나면 기존 정규화 로직을 사용할 수 있음"). speed 음수는 기존
+     * ForkliftLocationService 정책과 맞춰 거부한다.
      */
     private boolean isValid(IsaacForkliftLocationMessage message) {
         String forkliftId = message.forkliftId();
@@ -81,8 +89,8 @@ public class IsaacForkliftLocationService {
             log.warn("Isaac location message skipped: x/y is NaN or infinite, forkliftId={}", forkliftId);
             return false;
         }
-        if (message.direction() == null || !isFinite(message.direction())) {
-            log.warn("Isaac location message skipped: direction missing or NaN/infinite, forkliftId={}", forkliftId);
+        if (message.heading() == null || !isFinite(message.heading())) {
+            log.warn("Isaac location message skipped: heading missing or NaN/infinite, forkliftId={}", forkliftId);
             return false;
         }
         if (message.speed() == null || !isFinite(message.speed())) {
@@ -95,6 +103,18 @@ public class IsaacForkliftLocationService {
             return false;
         }
         return true;
+    }
+
+    /** heading(degree)을 [0,360) 범위로 정규화한다(예: -90 → 270, 450 → 90). */
+    private Double normalizeHeading(Double heading) {
+        if (heading == null) {
+            return null;
+        }
+        double normalized = heading % 360.0;
+        if (normalized < 0) {
+            normalized += 360.0;
+        }
+        return normalized;
     }
 
     private boolean isFinite(double value) {

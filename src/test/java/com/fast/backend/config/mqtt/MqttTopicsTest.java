@@ -21,7 +21,6 @@ class MqttTopicsTest {
                 "forklift/+/error",
                 "cargo/detected",
                 "forklift/%s/command",
-                "forklift/%s/emergency",
                 "fast/station/+/measurement");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
@@ -31,13 +30,8 @@ class MqttTopicsTest {
     }
 
     @Test
-    void forkliftCommand_buildsTopicWithForkliftId() {
-        assertThat(mqttTopics.forkliftCommand("F01")).isEqualTo("forklift/F01/command");
-    }
-
-    @Test
-    void forkliftEmergency_buildsTopicWithForkliftId() {
-        assertThat(mqttTopics.forkliftEmergency("F01")).isEqualTo("forklift/F01/emergency");
+    void vehicleCommand_buildsTopicWithVehicleId() {
+        assertThat(mqttTopics.vehicleCommand("F01")).isEqualTo("forklift/F01/command");
     }
 
     @Test
@@ -97,10 +91,10 @@ class MqttTopicsTest {
     }
 
     @Test
-    void forkliftCommand_blankForkliftId_throwsException() {
-        assertThatThrownBy(() -> mqttTopics.forkliftCommand(" "))
+    void vehicleCommand_blankVehicleId_throwsException() {
+        assertThatThrownBy(() -> mqttTopics.vehicleCommand(" "))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> mqttTopics.forkliftCommand(null))
+        assertThatThrownBy(() -> mqttTopics.vehicleCommand(null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -108,5 +102,20 @@ class MqttTopicsTest {
     void extractForkliftId_unrelatedTopic_throwsException() {
         assertThatThrownBy(() -> mqttTopics.extractForkliftId("cargo/detected"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void cargoDetectedTopic_isFixedStringWithNoWildcard() {
+        assertThat(mqttTopics.cargoDetectedTopic()).isEqualTo("cargo/detected");
+        assertThat(mqttTopics.isCargoDetectedTopic("cargo/detected")).isTrue();
+        assertThat(mqttTopics.isCargoDetectedTopic("cargo/detected/extra")).isFalse();
+    }
+
+    @Test
+    void stationMeasurementTopic_matchesWildcardAndExtractsStationId() {
+        assertThat(mqttTopics.stationMeasurementSubscribeTopic()).isEqualTo("fast/station/+/measurement");
+        assertThat(mqttTopics.isStationMeasurementTopic("fast/station/station-1/measurement")).isTrue();
+        assertThat(mqttTopics.isStationMeasurementTopic("fast/station/station-1/other")).isFalse();
+        assertThat(mqttTopics.extractStationId("fast/station/station-1/measurement")).isEqualTo("station-1");
     }
 }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -39,7 +40,7 @@ class ForkliftStatusServiceTest {
 
     @Test
     void handleStatus_validMessage_delegatesToVehicleStatusServiceWithConvertedCommand() {
-        LocalDateTime timestamp = LocalDateTime.of(2026, 7, 21, 18, 0, 0);
+        OffsetDateTime timestamp = LocalDateTime.of(2026, 7, 21, 18, 0, 0).atOffset(java.time.ZoneOffset.ofHours(9));
         ForkliftStatusMessage message = new ForkliftStatusMessage("SIM-F01", "ACTIVE", 82, timestamp);
 
         forkliftStatusService.handleStatus(message);
@@ -62,7 +63,7 @@ class ForkliftStatusServiceTest {
     void handleStatus_vehicleNotFound_isSwallowedAndDoesNotPropagate() {
         when(vehicleStatusService.updateCurrentStatus(any(), any()))
                 .thenThrow(new BusinessException(ErrorCode.VEHICLE_NOT_FOUND, "등록되지 않은 차량입니다: NO-SUCH"));
-        ForkliftStatusMessage message = new ForkliftStatusMessage("NO-SUCH", "ACTIVE", 50, LocalDateTime.now());
+        ForkliftStatusMessage message = new ForkliftStatusMessage("NO-SUCH", "ACTIVE", 50, java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)));
 
         assertThatCode(() -> forkliftStatusService.handleStatus(message)).doesNotThrowAnyException();
     }
@@ -72,7 +73,7 @@ class ForkliftStatusServiceTest {
         when(vehicleStatusService.updateCurrentStatus(any(), any()))
                 .thenThrow(new BusinessException(ErrorCode.VEHICLE_BATTERY_OUT_OF_RANGE,
                         "battery는 0~100 범위여야 합니다: 150"));
-        ForkliftStatusMessage message = new ForkliftStatusMessage("SIM-F01", "ACTIVE", 150, LocalDateTime.now());
+        ForkliftStatusMessage message = new ForkliftStatusMessage("SIM-F01", "ACTIVE", 150, java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)));
 
         assertThatCode(() -> forkliftStatusService.handleStatus(message)).doesNotThrowAnyException();
     }
@@ -81,7 +82,7 @@ class ForkliftStatusServiceTest {
     void handleStatus_unexpectedRuntimeException_isSwallowedAndDoesNotPropagate() {
         when(vehicleStatusService.updateCurrentStatus(any(), any()))
                 .thenThrow(new RuntimeException("DB connection lost"));
-        ForkliftStatusMessage message = new ForkliftStatusMessage("SIM-F01", "ACTIVE", 50, LocalDateTime.now());
+        ForkliftStatusMessage message = new ForkliftStatusMessage("SIM-F01", "ACTIVE", 50, java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)));
 
         assertThatCode(() -> forkliftStatusService.handleStatus(message)).doesNotThrowAnyException();
     }

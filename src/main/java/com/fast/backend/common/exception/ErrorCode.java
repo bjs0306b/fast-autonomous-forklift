@@ -25,10 +25,15 @@ public enum ErrorCode {
     AI_ANALYSIS_RATIO_INVALID(HttpStatus.BAD_REQUEST, "ratios 값이 올바르지 않습니다."),
     AI_ANALYSIS_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 분석 결과입니다."),
 
-    EMBEDDED_COMMAND_TYPE_INVALID(HttpStatus.BAD_REQUEST, "알 수 없는 명령입니다."),
-    EMBEDDED_COMMAND_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 존재하는 commandId입니다."),
-    EMBEDDED_COMMAND_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 명령입니다."),
-    EMBEDDED_COMMAND_LIMIT_INVALID(HttpStatus.BAD_REQUEST, "limit은 1~200 범위여야 합니다."),
+    // 통합 차량 명령(prompt32.md 1장 7~12번). 구 EMBEDDED_COMMAND_* 코드를 대체한다 — 이 도메인은
+    // 더 이상 임베디드 전용이 아니라 ROS2 이동 명령까지 함께 다루기 때문이다.
+    COMMAND_TYPE_INVALID(HttpStatus.BAD_REQUEST, "알 수 없는 명령입니다."),
+    COMMAND_COMBINATION_INVALID(HttpStatus.BAD_REQUEST, "targetSystem/commandCategory 조합이 올바르지 않습니다."),
+    COMMAND_DESTINATION_INVALID(HttpStatus.BAD_REQUEST, "destination 값이 올바르지 않습니다."),
+    COMMAND_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 존재하는 commandId입니다."),
+    COMMAND_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 명령입니다."),
+    COMMAND_LIMIT_INVALID(HttpStatus.BAD_REQUEST, "limit은 1~200 범위여야 합니다."),
+
     EMBEDDED_FORK_STATUS_NOT_FOUND(HttpStatus.NOT_FOUND, "포크 상태 정보가 없습니다."),
 
     STATION_MEASUREMENT_SCHEMA_VERSION_UNSUPPORTED(HttpStatus.BAD_REQUEST, "지원하지 않는 schema_version입니다."),

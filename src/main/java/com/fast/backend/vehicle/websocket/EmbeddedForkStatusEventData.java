@@ -1,6 +1,6 @@
 package com.fast.backend.vehicle.websocket;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * {@code VEHICLE_FORK_STATUS_UPDATED} 이벤트의 {@code data} payload(prompt29.md 8장·19장). 포크
@@ -11,7 +11,7 @@ public record EmbeddedForkStatusEventData(
         String forkState,
         Boolean limitBottom,
         String errorCode,
-        LocalDateTime timestamp,
-        LocalDateTime receivedAt
+        OffsetDateTime timestamp,
+        OffsetDateTime receivedAt
 ) {
 }

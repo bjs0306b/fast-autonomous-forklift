@@ -24,7 +24,7 @@ class IsaacForkliftPathMessageTest {
         String json = "{\"forkliftId\":\"SIM01\",\"waypoints\":["
                 + "{\"x\":1.20,\"y\":0.87},{\"x\":2.40,\"y\":0.87},{\"x\":2.40,\"y\":3.10}"
                 + "],\"goal\":{\"x\":2.40,\"y\":3.10,\"direction\":0.0},"
-                + "\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         IsaacForkliftPathMessage message = objectMapper.readValue(json, IsaacForkliftPathMessage.class);
 
@@ -33,14 +33,14 @@ class IsaacForkliftPathMessageTest {
                 .containsExactly(1.20, 2.40, 2.40);
         assertThat(message.goal().x()).isEqualTo(2.40);
         assertThat(message.goal().y()).isEqualTo(3.10);
-        assertThat(message.goal().direction()).isEqualTo(0.0);
+        assertThat(message.goal().heading()).isEqualTo(0.0);
     }
 
     @Test
     void deserialize_emptyWaypoints_isAllowed() throws Exception {
         String json = "{\"forkliftId\":\"SIM01\",\"waypoints\":[],"
                 + "\"goal\":{\"x\":1.0,\"y\":1.0,\"direction\":0.0},"
-                + "\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         IsaacForkliftPathMessage message = objectMapper.readValue(json, IsaacForkliftPathMessage.class);
 

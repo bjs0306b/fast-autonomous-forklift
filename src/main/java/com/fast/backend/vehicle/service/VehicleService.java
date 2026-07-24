@@ -2,6 +2,7 @@ package com.fast.backend.vehicle.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
 import com.fast.backend.vehicle.domain.VehicleStatus;
@@ -116,8 +117,9 @@ public class VehicleService {
     public VehicleStatusCountResponse countByStatus() {
         List<VehicleStatusCountRow> rows = vehicleCurrentStatusMapper.countByStatusForActiveVehicles();
 
-        // 상태값이 한 번도 관측되지 않은 항목도 0으로 채워 응답에 항상 5개 상태가 모두 나오게 한다
-        // (prompt16.md 14장 예시 응답과 동일한 형태, 등록된 차량이 아예 없을 때도 total=0으로 응답).
+        // 상태값이 한 번도 관측되지 않은 항목도 0으로 채워, 응답에 항상 확정 enum 10종이 전부 나오게 한다
+        // (prompt32.md 1장 3번 "상태별 0건 기본값 처리". 등록된 차량이 아예 없을 때도 total=0 + 10개 항목).
+        // VehicleStatus.values()를 그대로 순회하므로 enum에 값을 추가하면 이 응답도 자동으로 따라간다.
         Map<String, Long> countByStatus = new LinkedHashMap<>();
         for (VehicleStatus status : VehicleStatus.values()) {
             countByStatus.put(status.name(), 0L);
@@ -177,7 +179,12 @@ public class VehicleService {
                 status.getPositionY(),
                 status.getHeading(),
                 status.getSpeed(),
-                status.getMessageAt(),
-                status.getReceivedAt());
+                status.getForkHeight(),
+                status.getHasCargo(),
+                status.getCargoId(),
+                status.getFootprintLength(),
+                status.getFootprintWidth(),
+                CommunicationTime.toOffset(status.getMessageAt()),
+                CommunicationTime.toOffset(status.getReceivedAt()));
     }
 }

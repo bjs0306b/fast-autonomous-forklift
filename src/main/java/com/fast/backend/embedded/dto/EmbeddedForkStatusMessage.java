@@ -1,6 +1,6 @@
 package com.fast.backend.embedded.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * {@code forklift/{id}/fork-status} 토픽으로 수신되는 실물 포크 상태(prompt29.md 8장).
@@ -14,6 +14,6 @@ public record EmbeddedForkStatusMessage(
         String forkState,
         Boolean limitBottom,
         String errorCode,
-        LocalDateTime timestamp
+        OffsetDateTime timestamp
 ) {
 }

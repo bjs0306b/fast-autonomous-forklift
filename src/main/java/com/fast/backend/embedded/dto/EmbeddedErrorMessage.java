@@ -1,6 +1,6 @@
 package com.fast.backend.embedded.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * {@code forklift/{id}/error} 토픽으로 수신되는 실물 임베디드 오류 이벤트(prompt29.md 9장).
@@ -12,6 +12,6 @@ public record EmbeddedErrorMessage(
         String errorSource,
         String severity,
         String message,
-        LocalDateTime timestamp
+        OffsetDateTime timestamp
 ) {
 }

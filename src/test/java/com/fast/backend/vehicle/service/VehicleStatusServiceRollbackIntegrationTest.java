@@ -83,7 +83,7 @@ class VehicleStatusServiceRollbackIntegrationTest {
         // When: 이력 insert가 예외를 던지도록 구성된 상태에서 상태 갱신 호출
         // Then: 예외가 호출자에게 전파된다
         assertThatThrownBy(() -> vehicleStatusService.updateCurrentStatus(VEHICLE_ID,
-                new VehicleStatusUpdateCommand("ACTIVE", 77, 1.0, 2.0, 30.0, 0.4, t1)))
+                new VehicleStatusUpdateCommand("ACTIVE", 77, 1.0, 2.0, 30.0, 0.4, t1.atOffset(java.time.ZoneOffset.ofHours(9)))))
                 .isInstanceOf(DataAccessException.class);
 
         // Then: current_status upsert도 함께 롤백되어 행이 남지 않는다

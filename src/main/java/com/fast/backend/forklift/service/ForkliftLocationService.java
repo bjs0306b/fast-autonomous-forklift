@@ -9,7 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import com.fast.backend.common.time.CommunicationTime;
+
+import java.time.OffsetDateTime;
+import java.util.Set;
 
 /**
  * ROS2 차량 위치 메시지를 처리한다(prompt24.md). {@link ForkliftStatusService}와 달리 이 메시지는
@@ -27,8 +30,19 @@ public class ForkliftLocationService {
 
     private static final Logger log = LoggerFactory.getLogger(ForkliftLocationService.class);
 
-    /** position.frameId가 없을 때의 기본 좌표계(prompt24.md 4장·5장, ROS2/Isaac Sim 실제 규격은 팀 합의 필요). */
+    /** position.frameId가 없을 때의 기본 좌표계(prompt32.md 1장 5번 확정). */
     private static final String DEFAULT_FRAME_ID = "map";
+
+    /**
+     * 허용 frameId(prompt32.md 1장 5번 확정). {@code map}은 전역 지도 좌표계, {@code odom}은 주행거리계
+     * 기준 좌표계다. Isaac과 ROS2는 <b>동일한 원점</b>을 사용한다고 가정한다.
+     *
+     * <p>그 외 frameId는 <b>메시지를 폐기</b>하고 경고 로그를 남긴다(확정 규격이 "validation 실패 또는
+     * 명확한 경고 로그"를 요구했고, 이 클래스는 이미 좌표·quaternion 위반을 전부 폐기로 처리하고 있어
+     * 같은 정책을 유지하는 편이 일관적이다). 알 수 없는 좌표계의 위치를 관제 화면에 그리면 차량이 엉뚱한
+     * 곳에 표시되므로, 다음 정상 메시지를 기다리는 편이 안전하다.
+     */
+    private static final Set<String> ALLOWED_FRAME_IDS = Set.of("map", "odom");
 
     private final VehicleMapper vehicleMapper;
     private final VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster;
@@ -56,7 +70,7 @@ public class ForkliftLocationService {
                 return;
             }
 
-            LocalDateTime receivedAt = LocalDateTime.now();
+            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
             VehicleLocationEventData data = toEventData(message, receivedAt);
             vehicleWebSocketBroadcaster.broadcastLocation(message.vehicleId(), data, message.messageAt());
         } catch (RuntimeException e) {
@@ -88,6 +102,11 @@ public class ForkliftLocationService {
         }
         if (!isFinite(position.x()) || !isFinite(position.y())) {
             log.warn("Vehicle location message skipped: position x/y is NaN or infinite, vehicleId={}", vehicleId);
+            return false;
+        }
+        if (!isFrameIdAllowed(position.frameId())) {
+            log.warn("Vehicle location message skipped: unsupported frameId (allowed: map, odom), "
+                    + "vehicleId={}, frameId={}", vehicleId, position.frameId());
             return false;
         }
 
@@ -150,7 +169,7 @@ public class ForkliftLocationService {
         return !Double.isNaN(value) && !Double.isInfinite(value);
     }
 
-    private VehicleLocationEventData toEventData(ForkliftLocationMessage message, LocalDateTime receivedAt) {
+    private VehicleLocationEventData toEventData(ForkliftLocationMessage message, OffsetDateTime receivedAt) {
         VehicleStatus status = VehicleStatus.fromRaw(message.status());
 
         VehicleLocationEventData.Position position = new VehicleLocationEventData.Position(
@@ -169,8 +188,16 @@ public class ForkliftLocationService {
                 receivedAt);
     }
 
+    /** 생략(null/빈 값)은 기본값 {@code map}으로 허용하고, 그 외에는 허용 목록에 있어야 한다. */
+    private boolean isFrameIdAllowed(String frameId) {
+        if (frameId == null || frameId.isBlank()) {
+            return true;
+        }
+        return ALLOWED_FRAME_IDS.contains(frameId.trim());
+    }
+
     private String normalizeFrameId(String frameId) {
-        return (frameId == null || frameId.isBlank()) ? DEFAULT_FRAME_ID : frameId;
+        return (frameId == null || frameId.isBlank()) ? DEFAULT_FRAME_ID : frameId.trim();
     }
 
     /**
