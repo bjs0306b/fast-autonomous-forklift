@@ -568,7 +568,10 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
 
 ### 8.3 외부 연동 확인 필요 (저장소만으로 검증 불가)
 
-- 실제 Mosquitto Broker 송수신·자동 재연결, 로컬/EC2 포트 연결.
+> **2026-07-24 갱신**: 아래 중 "실제 Mosquitto 송수신"은 **검증 완료**로 바뀌었다(§8.5 참고).
+> 자동 재연결과 EC2 연동은 여전히 미검증이다.
+
+- ~~실제 Mosquitto Broker 송수신~~ → **검증 완료**(§8.5). 단 **자동 재연결과 로컬/EC2 포트 연결은 미검증**.
 - ROS2/Isaac Sim이 실제로 발행하는 JSON이 위 DTO와 정확히 일치하는지.
 - **ROS2/임베디드가 `forklift/{id}/command`를 구독해 통합 envelope를 해석하는지** — 이 저장소에는
   이 토픽을 구독하는 코드가 없다.
@@ -594,6 +597,26 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
 
 실행/환경변수/수동 Mosquitto 명령과 실제 장비 미검증 범위는
 `ros2_ws/src/fast_mqtt_bridge/README.md`를 기준으로 한다.
+
+### 8.5 실제 Mosquitto 브로커 검증 결과 (2026-07-24)
+
+Jira `MQTT 브로커 구축·구독 연결` 검증 과정에서 **실제 Mosquitto(localhost:1883)** 를 대상으로 아래를
+확인했다. 재현 절차는 `infra/mqtt/README.md` 2절, 상세 로그는 `prompt/answer/answer41.md` 참고.
+
+| 검증 항목 | 결과 | 근거 |
+|---|---|---|
+| 브로커 Pub/Sub 왕복 | **성공** | `fast/test/connection mqtt-connected` 수신 |
+| 백엔드 → 브로커 연결 | **성공** | `MQTT subscribed: bean=mqttInboundAdapter` |
+| 8토픽 구독, **구독 QoS 전부 1** | **성공** | `qos=[1, 1, 1, 1, 1, 1, 1, 1]` |
+| 수신 → Router → Service → DB → WebSocket | **성공** | `REAL-F01`/`MOVING`/battery 87, current upsert + history insert + `VEHICLE_STATUS_UPDATED` |
+| **`MOVING` 상태 보존**(ACTIVE로 흡수 안 됨) | **성공** | DB·REST 응답 모두 `MOVING` |
+| 명령 발행 **QoS 1** | **성공** | `forklift/REAL-F01/command` 로 통합 envelope 수신 |
+| 명령 **retained false 실동작** | **성공** | 재구독 시 과거 명령 미전달 |
+| 잘못된 JSON 폐기 후 consumer 유지 | **성공** | 폐기 로그 후 다음 메시지 정상 처리 |
+| 시각 `+09:00` 왕복 | **성공** | 발행 `...+09:00` → REST 응답 `...+09:00` |
+
+**여전히 미검증**: 브로커 중지·재시작을 통한 자동 재연결 실동작, Docker Compose 기동,
+EC2 브로커·인증, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 명령 수신·`command-result` 회신.
 
 ---
 

@@ -117,9 +117,20 @@ mosquitto_pub -h localhost -p 1883 \
   -m '{"commandId":"CMD-TEST-001","vehicleId":"REAL-F01","targetSystem":"ROS2","commandCategory":"MOVE","command":"MOVE","payload":{"destination":{"x":2.5,"y":4.1,"heading":90.0,"frameId":"map"}},"timestamp":"2026-07-24T10:00:00+09:00"}'
 ```
 
+## 브로커 실행
+
+브리지가 붙을 브로커 실행 구성은 저장소의 [`infra/mqtt/`](../../../infra/mqtt/README.md)에 있습니다.
+Docker 가 있으면 `cd infra/mqtt && docker compose up -d`, 없으면 같은 문서의 직접 설치 절차를 따릅니다.
+
+> **clientId 주의**: 브리지 기본값은 `fast-mqtt-bridge`, 백엔드는 `fast-backend-inbound`/
+> `fast-backend-outbound` 입니다. 같은 clientId 로 접속하면 먼저 붙은 쪽이 브로커에서 끊기므로
+> 차량을 여러 대 붙일 때는 `MQTT_CLIENT_ID` 를 차량별로 다르게 주세요.
+
 ## 미검증
 
 - 실제 Mosquitto 접속, 끊김/재접속 및 QoS delivery
+  (백엔드 ↔ 같은 브로커의 연결·구독·발행·retained 는 2026-07-24 검증 완료 —
+  `infra/mqtt/README.md` 5절. **브리지 자체의 접속은 ROS2 런타임이 없어 여전히 미검증**)
 - ROS2 Humble `colcon build`와 launch 기동
 - 실제 차량 위치/경로 토픽
 - Nav2 또는 다른 MOVE 제어 interface
