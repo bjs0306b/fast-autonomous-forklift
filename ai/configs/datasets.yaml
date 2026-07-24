@@ -178,6 +178,53 @@ sources:
     class_map:
       pallet: ["plastic pallet", "wood pallet"]
 
+  # astraws 어둡게 변환 (dataset.darken 산출물) — 파란 플라스틱 파렛트를 무채색
+  # 어두운 톤으로 밀어 리그의 검은 파렛트에 근접시킨 광도 증강. bbox는 원본 그대로.
+  # 실험7(oversampling+증강) 재료 — 기본 비활성, 실험7 병합 시 서버에서 켠다.
+  - name: astraws_dark_train
+    group: astraws_dark
+    type: coco
+    enabled: false
+    prefix: astraws_dark
+    annotations: data/processed/astraws_dark/train/_annotations.coco.json
+    images_root: data/processed/astraws_dark/train
+    class_map:
+      pallet: ["plastic pallet", "wood pallet"]
+
+  - name: astraws_dark_valid
+    group: astraws_dark
+    type: coco
+    enabled: false
+    prefix: astraws_dark_valid
+    annotations: data/processed/astraws_dark/valid/_annotations.coco.json
+    images_root: data/processed/astraws_dark/valid
+    class_map:
+      pallet: ["plastic pallet", "wood pallet"]
+
+  - name: astraws_dark_test
+    group: astraws_dark
+    type: coco
+    enabled: false
+    prefix: astraws_dark_test
+    annotations: data/processed/astraws_dark/test/_annotations.coco.json
+    images_root: data/processed/astraws_dark/test
+    class_map:
+      pallet: ["plastic pallet", "wood pallet"]
+
+  # 리그 copy-paste 합성 (dataset.composite 산출물) — 진짜 파렛트·진짜 카펫 질감을
+  # 유지한 채 위치·스케일·가림 다양성 확보. 라벨은 합성 좌표에서 자동 생성이라 정확.
+  # 실험7 재료 — 기본 비활성.
+  - name: rig_composites
+    group: rig
+    type: coco
+    enabled: false
+    prefix: rig_comp
+    annotations: data/processed/rig_composites/_annotations.coco.json
+    images_root: data/processed/rig_composites
+    class_map:
+      box: [box]
+      pallet: [pallet]
+
   # SKU-110K — 밀집 적재 장면. 학술·비영리 라이선스라 기본 비활성.
   # 사용 여부는 팀 합의 후 결정한다 (README 라이선스 항목 참고).
   - name: sku110k
