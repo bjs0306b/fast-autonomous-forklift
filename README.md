@@ -64,6 +64,25 @@ com.fast.backend
 
 Spring Integration MQTT + Eclipse Paho MQTT v3로 MQTT Broker(Eclipse Mosquitto) 연결, 구독, 발행을 구현했다.
 
+### Broker 실행 (infra/mqtt)
+
+브로커 실행 구성은 [`infra/mqtt/`](infra/mqtt/README.md)에 있다. Docker 가 있으면 Compose 로,
+없으면 Windows/Ubuntu 직접 설치로 띄운다.
+
+```bash
+cd infra/mqtt && docker compose up -d      # Docker 사용 시
+```
+
+MQTT 경로만 검증하려면(= MySQL 자격증명 없이) `mqttcheck` 프로필을 쓴다. 임베디드 H2 + 실제 브로커
+연결 조합이며, H2 가 `test` scope 라 테스트 classpath 를 빌려 쓴다.
+
+```bash
+mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck" "-Dspring-boot.run.useTestClasspath=true"
+```
+
+브로커 실행·연결·구독·명령 발행·retained·재연결 확인 절차는 전부
+[`infra/mqtt/README.md`](infra/mqtt/README.md)에 정리돼 있다.
+
 - 구독 토픽(8종, 백엔드가 실제 사용하는 MQTT QoS는 전부 **1**): `forklift/+/status`, `forklift/+/location`,
   `forklift/+/path`, `forklift/+/command-result`, `forklift/+/fork-status`, `forklift/+/error`,
   `cargo/detected`, `fast/station/+/measurement`. QoS는 `mqtt.default-qos`(로컬 기본 1) 하나를 8개 토픽에
@@ -91,6 +110,23 @@ Spring Integration MQTT + Eclipse Paho MQTT v3로 MQTT Broker(Eclipse Mosquitto)
   상태를 `PUBLISH_FAILED`로 저장하며, gateway 호출 성공은 broker/차량 수신 성공과 구분한다.
 - 통신 규격(JSON 필드)은 2026-07-24 팀 확정 규격으로 갱신됐다(아래 "확정 통신 규격 요약" 참고).
 - 실제 로컬 Mosquitto(winget으로 설치, Windows 서비스로 상시 구동)를 대상으로 구독 성공, 상태/위치/cargo 메시지 수신, 잘못된 JSON 무시, `POST /api/mqtt/test` → `mosquitto_sub` 수신, Broker 재기동 후 자동 재연결까지 실제로 검증했다(`prompt/answer/answer5.md` 참고).
+
+### 실브로커 검증 완료 범위 (2026-07-24)
+
+`mqttcheck` 프로필로 실제 Mosquitto(localhost:1883)를 대상으로 아래를 확인했다. 상세 로그와 재현
+절차는 [`infra/mqtt/README.md`](infra/mqtt/README.md) 5절과 `prompt/answer/answer41.md` 참고.
+
+| 항목 | 결과 |
+|---|---|
+| `mosquitto_pub`/`sub` 왕복 | 성공 |
+| 백엔드 → 브로커 연결, 8토픽 구독(QoS 전부 1) | 성공 |
+| 상태 수신 → Router → Service → DB(current+history) → WebSocket | 성공 |
+| 명령 발행 `forklift/{id}/command` (QoS 1) | 성공 |
+| retained false 실동작(재구독 시 과거 명령 미전달) | 성공 |
+| 잘못된 JSON 폐기 후 consumer 계속 동작 | 성공 |
+
+**미검증**: Docker Compose 기동(개발 PC에 Docker 없음), 브로커 중지·재시작 재연결 실동작,
+EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 명령 수신·결과 회신.
 
 ### 확정 통신 규격 요약 (2026-07-24)
 

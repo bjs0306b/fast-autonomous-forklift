@@ -44,3 +44,20 @@ __pycache__/
 
 ### Mac OS ###
 .DS_Store
+
+### Secrets ###
+# .env 에는 GitLab 토큰, MQTT/DB 비밀번호 같은 실제 값이 들어간다.
+# .env.example(템플릿)만 커밋하고 .env 는 절대 커밋하지 않는다.
+.env
+.env.*
+!.env.example
+
+### MQTT Broker (infra/mqtt) ###
+# Mosquitto 비밀번호 파일 — mosquitto_passwd 로 생성한 실제 자격증명이라 커밋 금지.
+infra/mqtt/config/passwd
+infra/mqtt/config/*.passwd
+# 브로커 런타임 산출물(영속 메시지 DB, 로그). .gitkeep 으로 디렉터리 구조만 유지한다.
+infra/mqtt/data/*
+!infra/mqtt/data/.gitkeep
+infra/mqtt/log/*
+!infra/mqtt/log/.gitkeep
