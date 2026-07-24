@@ -143,6 +143,41 @@ sources:
       box: [box]
       pallet: [pallet]
 
+  # astraws "Pallet Detection" (Roboflow, CC BY 4.0, 원본 367장 → 증강 879장).
+  # **플라스틱 파렛트를 별도 클래스로 라벨링한 유일한 공개 소스** — plastic pallet 808 +
+  # wood pallet 532. 2026-07-24 리그의 검은 플라스틱 파렛트 미검출(도메인 갭) 보강용.
+  # 뷰는 창고 비스듬한 시점 위주라 우리 "바닥 정면 27cm" 뷰와는 다름 — 재질 다양성
+  # 공급이 목적이고, 뷰 갭 해소는 rig 자체 촬영분이 담당한다. 박스 클래스는 없다.
+  - name: astraws_pallet_train
+    group: astraws_pallet
+    type: coco
+    enabled: true
+    prefix: astraws
+    annotations: data/raw/astraws_pallet/train/_annotations.coco.json
+    images_root: data/raw/astraws_pallet/train
+    class_map:
+      pallet: ["plastic pallet", "wood pallet"]
+
+  - name: astraws_pallet_valid
+    group: astraws_pallet
+    type: coco
+    enabled: true
+    prefix: astraws_valid
+    annotations: data/raw/astraws_pallet/valid/_annotations.coco.json
+    images_root: data/raw/astraws_pallet/valid
+    class_map:
+      pallet: ["plastic pallet", "wood pallet"]
+
+  - name: astraws_pallet_test
+    group: astraws_pallet
+    type: coco
+    enabled: true
+    prefix: astraws_test
+    annotations: data/raw/astraws_pallet/test/_annotations.coco.json
+    images_root: data/raw/astraws_pallet/test
+    class_map:
+      pallet: ["plastic pallet", "wood pallet"]
+
   # SKU-110K — 밀집 적재 장면. 학술·비영리 라이선스라 기본 비활성.
   # 사용 여부는 팀 합의 후 결정한다 (README 라이선스 항목 참고).
   - name: sku110k
