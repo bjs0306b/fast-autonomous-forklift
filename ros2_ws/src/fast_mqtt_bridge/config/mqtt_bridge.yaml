@@ -1,0 +1,23 @@
+fast_mqtt_bridge:
+  ros__parameters:
+    vehicle_id: REAL-F01
+    mqtt_host: localhost
+    mqtt_port: 1883
+    mqtt_username: ""
+    mqtt_password: ""
+    mqtt_password_env: MQTT_PASSWORD
+    mqtt_client_id: fast-mqtt-bridge
+    mqtt_keepalive: 60
+    mqtt_qos: 1
+    ros_namespace: ""
+    status_topic: ""
+    location_topic: ""
+    path_topic: ""
+    command_topic: ""
+    command_result_topic: ""
+    location_publish_interval_ms: 100
+    heartbeat_interval_ms: 1000
+    command_cache_ttl_sec: 3600.0
+    command_cache_max_entries: 1000
+    path_max_points: 1000
+

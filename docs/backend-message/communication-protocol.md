@@ -571,6 +571,24 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
 - 임베디드·ROS2가 통합 `command-result` envelope를 회신하는지.
 - 프론트엔드(React, 현재 저장소에 없음)의 STOMP 구독·수신.
 
+### 8.4 ROS2 MQTT bridge 구현 상태 (prompt34)
+
+`ros2_ws/src/fast_mqtt_bridge`에 Python(`rclpy` + `paho-mqtt`) 브리지 패키지를 추가했다.
+
+- 모든 차량 MQTT publish/subscribe는 QoS 1, publish retained false다.
+- 환경변수 > ROS parameter/YAML > 기본값 우선순위를 적용하며 비밀번호는 환경변수로 주입한다.
+- MQTT callback은 priority queue에만 적재하고 ROS2 executor timer가 처리한다.
+- commandId는 TTL/최대 개수 제한이 있는 thread-safe memory cache로 중복 실행을 막는다.
+- 명령 결과는 이 문서 §3.6의 실제 DTO(`result`, `completedAt`, `SUCCESS`)를 사용한다.
+- 위치는 §3.2의 실제 DTO(`position`, `messageAt`)를 사용한다.
+- 경로는 §3.5의 실제 DTO(`waypoints`, `goal`)를 사용한다.
+- 현재 ROS2 저장소에는 상태 원본 type, Nav2 action, 정지/비상정지 service가 없으므로 임의
+  interface를 생성하지 않았다. 기본 명령 adapter는 실행 대신 `REJECTED` 결과를 보낸다.
+- 기존 `forklift_teleop` `/cmd_vel` → UART 동작은 수정하지 않았다.
+
+실행/환경변수/수동 Mosquitto 명령과 실제 장비 미검증 범위는
+`ros2_ws/src/fast_mqtt_bridge/README.md`를 기준으로 한다.
+
 ---
 
 ## Measurement Station v1.0
