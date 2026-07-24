@@ -1,5 +1,6 @@
 package com.fast.backend.isaac.service;
 
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.isaac.dto.IsaacForkliftPathMessage;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
@@ -8,7 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,7 +43,7 @@ public class IsaacForkliftPathService {
                 return;
             }
 
-            LocalDateTime receivedAt = LocalDateTime.now();
+            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
             VehiclePathEventData data = toEventData(message, receivedAt);
             broadcaster.broadcastPath(message.forkliftId(), data, message.timestamp());
         } catch (RuntimeException e) {
@@ -86,8 +87,8 @@ public class IsaacForkliftPathService {
             log.warn("Isaac path message skipped: goal x/y invalid, forkliftId={}", forkliftId);
             return false;
         }
-        if (goal.direction() == null || !isFinite(goal.direction())) {
-            log.warn("Isaac path message skipped: goal direction invalid, forkliftId={}", forkliftId);
+        if (goal.heading() == null || !isFinite(goal.heading())) {
+            log.warn("Isaac path message skipped: goal heading invalid, forkliftId={}", forkliftId);
             return false;
         }
         return true;
@@ -97,13 +98,25 @@ public class IsaacForkliftPathService {
         return !Double.isNaN(value) && !Double.isInfinite(value);
     }
 
-    private VehiclePathEventData toEventData(IsaacForkliftPathMessage message, LocalDateTime receivedAt) {
+    /** goal.heading(degree)을 [0,360)으로 정규화한다(prompt32.md 1장 5번 확정). */
+    private Double normalizeHeading(Double heading) {
+        if (heading == null) {
+            return null;
+        }
+        double normalized = heading % 360.0;
+        if (normalized < 0) {
+            normalized += 360.0;
+        }
+        return normalized;
+    }
+
+    private VehiclePathEventData toEventData(IsaacForkliftPathMessage message, OffsetDateTime receivedAt) {
         List<VehiclePathEventData.Waypoint> waypoints = new ArrayList<>();
         for (IsaacForkliftPathMessage.Waypoint waypoint : message.waypoints()) {
             waypoints.add(new VehiclePathEventData.Waypoint(waypoint.x(), waypoint.y()));
         }
         VehiclePathEventData.Goal goal = new VehiclePathEventData.Goal(
-                message.goal().x(), message.goal().y(), message.goal().direction());
+                message.goal().x(), message.goal().y(), normalizeHeading(message.goal().heading()));
         return new VehiclePathEventData(message.forkliftId(), waypoints, goal, message.timestamp(), receivedAt);
     }
 }

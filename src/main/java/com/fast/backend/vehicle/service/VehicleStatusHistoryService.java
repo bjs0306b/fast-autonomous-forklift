@@ -2,6 +2,7 @@ package com.fast.backend.vehicle.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.vehicle.domain.VehicleStatusHistory;
 import com.fast.backend.vehicle.dto.VehicleStatusHistoryResponse;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
@@ -64,8 +65,13 @@ public class VehicleStatusHistoryService {
                 history.getPositionY(),
                 history.getHeading(),
                 history.getSpeed(),
-                history.getMessageAt(),
-                history.getReceivedAt(),
-                history.getCreatedAt());
+                history.getForkHeight(),
+                history.getHasCargo(),
+                history.getCargoId(),
+                history.getFootprintLength(),
+                history.getFootprintWidth(),
+                CommunicationTime.toOffset(history.getMessageAt()),
+                CommunicationTime.toOffset(history.getReceivedAt()),
+                CommunicationTime.toOffset(history.getCreatedAt()));
     }
 }

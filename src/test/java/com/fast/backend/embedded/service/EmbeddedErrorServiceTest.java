@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,7 +38,7 @@ import static org.mockito.Mockito.when;
  */
 class EmbeddedErrorServiceTest {
 
-    private static final LocalDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0);
+    private static final OffsetDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9));
 
     private VehicleMapper vehicleMapper;
     private EmbeddedErrorHistoryMapper errorHistoryMapper;
@@ -133,7 +134,7 @@ class EmbeddedErrorServiceTest {
 
         assertThatThrownBy(() -> service.findRecentByForkliftId("REAL01", 0))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.EMBEDDED_COMMAND_LIMIT_INVALID);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COMMAND_LIMIT_INVALID);
     }
 
     @Test

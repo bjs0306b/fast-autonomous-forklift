@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,7 +35,7 @@ class ForkliftLocationMessageTest {
                 + "\"heading\":90.0,"
                 + "\"quaternion\":{\"x\":0.0,\"y\":0.0,\"z\":0.7071,\"w\":0.7071},"
                 + "\"speed\":0.4,"
-                + "\"messageAt\":\"2026-07-22T13:30:00\""
+                + "\"messageAt\":\"2026-07-22T13:30:00+09:00\""
                 + "}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
@@ -50,13 +51,13 @@ class ForkliftLocationMessageTest {
         assertThat(message.quaternion().z()).isEqualTo(0.7071);
         assertThat(message.quaternion().w()).isEqualTo(0.7071);
         assertThat(message.speed()).isEqualTo(0.4);
-        assertThat(message.messageAt()).isEqualTo(LocalDateTime.of(2026, 7, 22, 13, 30, 0));
+        assertThat(message.messageAt()).isEqualTo(LocalDateTime.of(2026, 7, 22, 13, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9)));
     }
 
     @Test
     void deserialize_nestedPosition_mapsIndependentlyOfOtherFields() throws Exception {
         String json = "{\"vehicleId\":\"FORKLIFT-01\",\"position\":{\"x\":10.0,\"y\":-5.5,\"frameId\":\"odom\"},"
-                + "\"messageAt\":\"2026-07-22T13:30:00\"}";
+                + "\"messageAt\":\"2026-07-22T13:30:00+09:00\"}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
 
@@ -70,7 +71,7 @@ class ForkliftLocationMessageTest {
     void deserialize_nestedQuaternion_mapsIndependentlyOfOtherFields() throws Exception {
         String json = "{\"vehicleId\":\"FORKLIFT-01\",\"position\":{\"x\":1.0,\"y\":1.0},"
                 + "\"quaternion\":{\"x\":0.1,\"y\":0.2,\"z\":0.3,\"w\":0.9},"
-                + "\"messageAt\":\"2026-07-22T13:30:00\"}";
+                + "\"messageAt\":\"2026-07-22T13:30:00+09:00\"}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
 
@@ -84,28 +85,28 @@ class ForkliftLocationMessageTest {
     @Test
     void deserialize_isoMessageAt_parsesToLocalDateTime() throws Exception {
         String json = "{\"vehicleId\":\"FORKLIFT-01\",\"position\":{\"x\":1.0,\"y\":1.0},"
-                + "\"messageAt\":\"2026-01-05T08:15:30\"}";
+                + "\"messageAt\":\"2026-01-05T08:15:30+09:00\"}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
 
-        assertThat(message.messageAt()).isEqualTo(LocalDateTime.of(2026, 1, 5, 8, 15, 30));
+        assertThat(message.messageAt()).isEqualTo(LocalDateTime.of(2026, 1, 5, 8, 15, 30).atOffset(java.time.ZoneOffset.ofHours(9)));
     }
 
     @Test
     void deserialize_messageAtWithMilliseconds_parsesToLocalDateTime() throws Exception {
         // prompt25.md 1.2장·2장 최종 규격 예시: 밀리초 포함 messageAt.
         String json = "{\"vehicleId\":\"FORKLIFT-01\",\"position\":{\"x\":1.0,\"y\":1.0},"
-                + "\"messageAt\":\"2026-07-22T13:30:00.123\"}";
+                + "\"messageAt\":\"2026-07-22T13:30:00.123+09:00\"}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
 
-        assertThat(message.messageAt()).isEqualTo(LocalDateTime.of(2026, 7, 22, 13, 30, 0, 123_000_000));
+        assertThat(message.messageAt()).isEqualTo(LocalDateTime.of(2026, 7, 22, 13, 30, 0, 123_000_000).atOffset(java.time.ZoneOffset.ofHours(9)));
     }
 
     @Test
     void deserialize_activeStatus_mapsAsIs() throws Exception {
         String json = "{\"vehicleId\":\"FORKLIFT-01\",\"status\":\"ACTIVE\","
-                + "\"position\":{\"x\":1.0,\"y\":1.0},\"messageAt\":\"2026-07-22T13:30:00\"}";
+                + "\"position\":{\"x\":1.0,\"y\":1.0},\"messageAt\":\"2026-07-22T13:30:00+09:00\"}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
 
@@ -126,7 +127,7 @@ class ForkliftLocationMessageTest {
     @Test
     void deserialize_missingOptionalFields_leavesThemNull() throws Exception {
         String json = "{\"vehicleId\":\"FORKLIFT-01\",\"position\":{\"x\":1.0,\"y\":1.0},"
-                + "\"messageAt\":\"2026-07-22T13:30:00\"}";
+                + "\"messageAt\":\"2026-07-22T13:30:00+09:00\"}";
 
         ForkliftLocationMessage message = objectMapper.readValue(json, ForkliftLocationMessage.class);
 

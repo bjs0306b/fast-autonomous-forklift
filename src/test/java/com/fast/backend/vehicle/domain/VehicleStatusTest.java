@@ -29,28 +29,43 @@ class VehicleStatusTest {
     }
 
     @Test
-    void fromRaw_moving_isNormalizedToActive() {
-        // MOVING은 ROS2 내부 표기다 — prompt16.md 5장에서는 "확정 전" 후보값이었지만, prompt25.md
-        // 1.1장에서 ACTIVE로 통일 확정됐다. 호환을 위해 MOVING이 와도 ACTIVE로 정규화한다.
-        assertThat(VehicleStatus.fromRaw("MOVING")).isEqualTo(VehicleStatus.ACTIVE);
+    void fromRaw_moving_isPreservedAsMoving() {
+        // prompt32.md 1장 3번 확정: MOVING은 더 이상 ACTIVE로 흡수되지 않고 독립 상태로 보존된다.
+        assertThat(VehicleStatus.fromRaw("MOVING")).isEqualTo(VehicleStatus.MOVING);
     }
 
     @Test
-    void fromRaw_lowercaseMoving_isNormalizedToActive() {
-        assertThat(VehicleStatus.fromRaw("moving")).isEqualTo(VehicleStatus.ACTIVE);
+    void fromRaw_lowercaseMoving_isPreservedAsMoving() {
+        assertThat(VehicleStatus.fromRaw("moving")).isEqualTo(VehicleStatus.MOVING);
     }
 
     @Test
     void fromRaw_unknownCandidate_returnsUnknownWithoutThrowing() {
-        assertThat(VehicleStatus.fromRaw("LOADING")).isEqualTo(VehicleStatus.UNKNOWN);
+        // LOADING/UNLOADING/ESTOP은 확정 enum에 포함됐으므로, 실제로 정의되지 않은 값으로 검증한다.
+        assertThat(VehicleStatus.fromRaw("PARKED")).isEqualTo(VehicleStatus.UNKNOWN);
+        assertThat(VehicleStatus.fromRaw("CHARGING")).isEqualTo(VehicleStatus.UNKNOWN);
+    }
+
+    /**
+     * 확정 enum 10종(prompt32.md 1장 3번)이 전부 자기 자신으로 정확히 매핑되는지 확인한다 —
+     * 어떤 값도 다른 값으로 흡수되지 않는다는 것이 이번 확정의 핵심이다.
+     */
+    @Test
+    void fromRaw_allConfirmedStatuses_mapToThemselves() {
+        assertThat(VehicleStatus.values()).hasSize(10);
+        for (VehicleStatus status : VehicleStatus.values()) {
+            assertThat(VehicleStatus.fromRaw(status.name())).isEqualTo(status);
+            assertThat(VehicleStatus.fromRaw(status.name().toLowerCase())).isEqualTo(status);
+            assertThat(VehicleStatus.fromRaw("  " + status.name() + "  ")).isEqualTo(status);
+        }
     }
 
     @Test
-    void fromRaw_existingStatusValues_stillMapCorrectly() {
-        // 기존 상태값 회귀 테스트(prompt25.md 9.1장) — MOVING 매핑 추가가 다른 값에 영향을 주지 않는지 확인.
-        assertThat(VehicleStatus.fromRaw("IDLE")).isEqualTo(VehicleStatus.IDLE);
-        assertThat(VehicleStatus.fromRaw("ERROR")).isEqualTo(VehicleStatus.ERROR);
-        assertThat(VehicleStatus.fromRaw("OFFLINE")).isEqualTo(VehicleStatus.OFFLINE);
-        assertThat(VehicleStatus.fromRaw("UNKNOWN")).isEqualTo(VehicleStatus.UNKNOWN);
+    void values_declarationOrderDrivesStatusCountResponseOrder() {
+        // VehicleService#countByStatus가 values() 순서를 그대로 응답 항목 순서로 쓴다.
+        assertThat(VehicleStatus.values()).containsExactly(
+                VehicleStatus.UNKNOWN, VehicleStatus.IDLE, VehicleStatus.ACTIVE, VehicleStatus.MOVING,
+                VehicleStatus.LIFTING, VehicleStatus.LOADING, VehicleStatus.UNLOADING, VehicleStatus.ESTOP,
+                VehicleStatus.ERROR, VehicleStatus.OFFLINE);
     }
 }

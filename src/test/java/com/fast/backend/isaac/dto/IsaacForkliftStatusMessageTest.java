@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,7 +26,7 @@ class IsaacForkliftStatusMessageTest {
     void deserialize_fullPayload_mapsAllFields() throws Exception {
         String json = "{\"forkliftId\":\"SIM01\",\"status\":\"MOVING\",\"battery\":87,"
                 + "\"forkHeight\":0.120,\"hasCargo\":true,\"cargoId\":\"BOX-0042\","
-                + "\"footprint\":{\"length\":0.28,\"width\":0.16},\"timestamp\":\"2026-07-22T10:30:00.123\"}";
+                + "\"footprint\":{\"length\":0.28,\"width\":0.16},\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
         IsaacForkliftStatusMessage message = objectMapper.readValue(json, IsaacForkliftStatusMessage.class);
 
@@ -37,7 +38,7 @@ class IsaacForkliftStatusMessageTest {
         assertThat(message.cargoId()).isEqualTo("BOX-0042");
         assertThat(message.footprint().length()).isEqualTo(0.28);
         assertThat(message.footprint().width()).isEqualTo(0.16);
-        assertThat(message.timestamp()).isEqualTo(LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000));
+        assertThat(message.timestamp()).isEqualTo(LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000).atOffset(java.time.ZoneOffset.ofHours(9)));
     }
 
     @Test
@@ -60,7 +61,7 @@ class IsaacForkliftStatusMessageTest {
     void deserialize_missingCargoId_isNull() throws Exception {
         String json = "{\"forkliftId\":\"SIM01\",\"status\":\"IDLE\",\"battery\":100,"
                 + "\"forkHeight\":0.0,\"hasCargo\":false,"
-                + "\"footprint\":{\"length\":0.28,\"width\":0.16},\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"footprint\":{\"length\":0.28,\"width\":0.16},\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         IsaacForkliftStatusMessage message = objectMapper.readValue(json, IsaacForkliftStatusMessage.class);
 

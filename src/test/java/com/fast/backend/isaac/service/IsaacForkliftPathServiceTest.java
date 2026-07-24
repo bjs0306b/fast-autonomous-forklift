@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,7 +26,7 @@ import static org.mockito.Mockito.when;
  */
 class IsaacForkliftPathServiceTest {
 
-    private static final LocalDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000);
+    private static final OffsetDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000).atOffset(java.time.ZoneOffset.ofHours(9));
 
     private VehicleMapper vehicleMapper;
     private VehicleWebSocketBroadcaster broadcaster;
@@ -58,7 +59,7 @@ class IsaacForkliftPathServiceTest {
         assertThat(data.waypoints()).extracting(VehiclePathEventData.Waypoint::x)
                 .containsExactly(1.20, 2.40, 2.40);
         assertThat(data.goal().x()).isEqualTo(2.40);
-        assertThat(data.goal().direction()).isEqualTo(0.0);
+        assertThat(data.goal().heading()).isEqualTo(0.0);
         assertThat(data.receivedAt()).isNotNull();
     }
 

@@ -1,22 +1,24 @@
 # F.A.S.T. 통신 규격 (Communication Protocol)
 
 > 이 문서는 **현재 저장소의 실제 운영 코드**(DTO record, `MqttTopics`/`MqttProperties`,
-> `MqttMessageRouter`, 각 Service, `VehicleWebSocketBroadcaster`/`AiCargoAnalysisBroadcaster`,
-> 각 Controller)를 근거로 작성했다. prompt/answer/README의 과거 설계가 아니라 코드가 기준이다.
+> `MqttMessageRouter`, 각 Service, `VehicleWebSocketBroadcaster`/`AiCargoAnalysisBroadcaster`/
+> `StationMeasurementBroadcaster`, 각 Controller)를 근거로 작성했다.
 > 코드와 문서가 어긋나면 **코드가 옳고 이 문서를 고쳐야 한다.**
 >
+> **2026-07-24 갱신**: prompt32.md의 팀 확정 통신 규격을 코드에 반영하면서 이 문서를 함께 갱신했다.
+> 이전 버전에 있던 `미확정` 항목 9개 중 8개가 확정되어 표기를 제거했다(남은 항목은 §8 참고).
+>
 > 표기 규칙:
-> - `미확정` : 코드에는 임시값이 있으나 팀(특히 ROS2=D, 프론트=F) 합의가 필요한 항목.
 > - `외부 연동 확인 필요` : 실제 Mosquitto/ROS2/Isaac Sim/브라우저 없이는 저장소만으로 검증 불가.
-> - 모든 JSON 시각 필드는 Jackson(`jackson-datatype-jsr310`) 기본 `LocalDateTime` 직렬화 =
->   **타임존 없는 ISO-8601**(예: `2026-07-23T11:20:27`). 타임존/오프셋 처리는 `미확정`.
+> - `팀 확인 필요` : 확정 규격 문서가 명시하지 않아 이 저장소가 판단해 구현한 항목.
+> - 모든 통신 시각은 **Asia/Seoul(+09:00) ISO-8601 `OffsetDateTime`** (예: `2026-07-23T11:20:27+09:00`).
 
 ---
 
 ## 0. 전송 계층 개요
 
 ```
-ROS2 / Isaac Sim / 임베디드(REAL) / AI
+ROS2 / Isaac Sim / 임베디드(REAL) / AI / 측정 스테이션
         │  (MQTT publish)
         ▼
    MQTT Broker (Eclipse Mosquitto)          ← 외부 연동 확인 필요
@@ -25,171 +27,209 @@ ROS2 / Isaac Sim / 임베디드(REAL) / AI
 MqttPahoMessageDrivenChannelAdapter → mqttInputChannel
         → MqttMessageReceiver → MqttMessageRouter
         → (도메인별 DTO 역직렬화) → 도메인 Service
-        → (선택적 DB 저장) + VehicleWebSocketBroadcaster/AiCargoAnalysisBroadcaster
+        → (선택적 DB 저장) + Broadcaster
         ▼
 STOMP SimpleBroker (/topic) ── SockJS(/ws) ──► Frontend   ← 저장소에 프론트 없음(외부 연동 확인 필요)
 
-Frontend/REST → Controller → Service → MqttPublisher → MqttGateway
-        → mqttOutboundChannel → MqttPahoMessageHandler → forklift/{id}/command → ROS2/임베디드
+Frontend/REST → VehicleCommandController → VehicleCommandService → VehicleCommandPublisher
+        → MqttPublisher → MqttGateway → mqttOutboundChannel → MqttPahoMessageHandler
+        → forklift/{vehicleId}/command → ROS2 / 임베디드
 ```
 
-- MQTT 접속·QoS 값은 `application-local.yml`의 `mqtt.*`를 `MqttProperties`로 바인딩(코드 하드코딩 없음).
-- **기본 QoS = `mqtt.default-qos`(로컬 기본값 `1`)**. 구독 7토픽 모두 이 QoS로 등록되고, 발행도 이 QoS 사용.
-- **retained**: 발행 시 `false`(Isaac/임베디드 명령 Publisher 공통). `미확정` — 토픽별 QoS/retained 정책은
-  합의 문서에 명시되지 않음.
+- MQTT 접속값은 `application-local.yml`의 `mqtt.*`를 `MqttProperties`로 바인딩(코드 하드코딩 없음).
+- **명령·명령 결과 QoS = 1, retained = false** (확정). 명령 QoS/retained는 안전 관련 계약이라
+  설정값이 아니라 `VehicleCommandPublisher`의 상수(`COMMAND_QOS`, `COMMAND_RETAINED`)로 고정했다.
+- **상태·위치·오류 등 인바운드 구독 QoS = 1** (`mqtt.default-qos`, 로컬 기본 1).
 - STOMP: endpoint `/ws`(SockJS), 브로커 prefix `/topic`, 앱 prefix `/app`, 허용 Origin
-  `websocket.allowed-origin-patterns`(로컬 기본 `*`, 운영은 좁혀야 함).
+  `websocket.allowed-origin-patterns`(로컬 기본 `*`, 운영은 반드시 좁혀야 함).
 
 ---
 
 ## 1. 전체 데이터 흐름 요약표 (실제 코드 기준)
 
-| 영역 | 입력 토픽/API | 입력 DTO | 처리 Service | DB 저장 | 출력 토픽/WebSocket | 테스트 |
+| 영역 | 입력 토픽/API | 입력 DTO | 처리 Service | DB 저장 | 출력 destination | 테스트 |
 |---|---|---|---|---|---|---|
-| ROS2 상태 | `forklift/+/status` (구독) | `ForkliftStatusMessage` | `ForkliftStatusService` → `VehicleStatusService` | `vehicle_current_status` upsert + `vehicle_status_history` insert | `/topic/vehicles/status`(+`/{id}`) `VEHICLE_STATUS_UPDATED` | ServiceTest(Mockito) + **StatusServiceIntegrationTest**/MapperTest(H2) |
-| ROS2 위치 | `forklift/+/location` (구독, payload에 `vehicleId` 키) | `ForkliftLocationMessage` | `ForkliftLocationService` | 저장 안 함(중계만) | `/topic/vehicles/location`(+`/{id}`) `VEHICLE_LOCATION_UPDATED` | ForkliftLocationServiceTest(Mockito), LocationEventDataTest(H2 아님) |
-| Isaac 상태 | `forklift/+/status` (구독, `forkHeight`/`hasCargo`/`footprint` 有 또는 `battery` 無) | `IsaacForkliftStatusMessage` | `IsaacForkliftStatusService` → `VehicleStatusService` | `vehicle_current_status` upsert + `vehicle_status_history` insert | `/topic/vehicles/status`(+`/{id}`) `VEHICLE_STATUS_UPDATED` | IsaacForkliftStatusServiceTest(Mockito) |
-| Isaac 위치 | `forklift/+/location` (구독, payload에 `forkliftId` 키) | `IsaacForkliftLocationMessage` | `IsaacForkliftLocationService` | 저장 안 함(중계만) | `/topic/vehicles/location`(+`/{id}`) `VEHICLE_LOCATION_UPDATED` | IsaacForkliftLocationServiceTest(Mockito) |
-| Isaac 경로 | `forklift/+/path` (구독) | `IsaacForkliftPathMessage` | `IsaacForkliftPathService` | 저장 안 함(중계만) | `/topic/vehicles/path`(+`/{id}`) `VEHICLE_PATH_UPDATED` | IsaacForkliftPathServiceTest(Mockito) |
-| 임베디드 명령 | `POST /api/vehicles/{forkliftId}/embedded-commands` (REST) | `EmbeddedCommandRequest` → `EmbeddedForkliftCommandMessage` | `EmbeddedCommandService` → `EmbeddedForkliftCommandPublisher` | `embedded_vehicle_command` insert | (발행) `forklift/{id}/command` | EmbeddedCommandServiceTest(Mockito), **EmbeddedCommandIntegrationTest**(H2) |
-| 임베디드 명령 결과 | `forklift/+/command-result` (구독) | `EmbeddedCommandResultMessage` | `EmbeddedCommandResultService` | `embedded_vehicle_command` update | `/topic/vehicles/result`(+`/{id}`) `VEHICLE_COMMAND_RESULT_UPDATED` | EmbeddedCommandResultServiceTest(Mockito) |
-| 임베디드 포크 상태 | `forklift/+/fork-status` (구독) | `EmbeddedForkStatusMessage` | `EmbeddedForkStatusService` | `vehicle_fork_current_status` upsert | `/topic/vehicles/fork-status`(+`/{id}`) `VEHICLE_FORK_STATUS_UPDATED` | EmbeddedForkStatusServiceTest(Mockito), MapperTest(H2) |
-| 임베디드 오류 | `forklift/+/error` (구독) | `EmbeddedErrorMessage` | `EmbeddedErrorService` | `embedded_error_history` insert | `/topic/vehicles/errors`(+`/{id}`) `VEHICLE_ERROR_OCCURRED` | EmbeddedErrorServiceTest(Mockito), MapperTest(H2) |
-| AI 화물 분석 | `cargo/detected` (구독) | `AiCargoAnalysisMessage` | `AiCargoAnalysisService` | `ai_cargo_analysis` + `ai_cargo_detection_box` insert | `/topic/ai/cargo-analysis`(+`/{cargoId}`) | AiCargoAnalysisServiceTest(Mockito), **AiCargoAnalysisIntegrationTest**/MapperTest(H2) |
-
-> **주의(테스트)**: "(Mockito)" 표기 서비스 단위 테스트는 현재 개발 PC의 JDK가 21이 아니라(JBR 25)
-> Mockito inline mock 계측 실패로 실행되지 못한다(코드 결함 아님, 환경 문제). H2 통합/Mapper 테스트는
-> 정상 통과한다. 상세는 `prompt/answer/answer13.md` 참고.
+| ROS2 상태 | `forklift/+/status` (구독) | `ForkliftStatusMessage` | `ForkliftStatusService` → `VehicleStatusService` | `vehicle_current_status` upsert + `vehicle_status_history` insert | `/topic/vehicles/status`(+`/{id}`) | ServiceTest + StatusServiceIntegrationTest/MapperTest(H2) |
+| ROS2 위치 | `forklift/+/location` (payload에 `vehicleId` 키) | `ForkliftLocationMessage` | `ForkliftLocationService` | 저장 안 함(중계만) | `/topic/vehicles/location`(+`/{id}`) | ForkliftLocationServiceTest, **ForkliftLocationFrameIdTest** |
+| Isaac 상태 | `forklift/+/status` (`forkHeight`/`hasCargo`/`footprint` 有 또는 `battery` 無) | `IsaacForkliftStatusMessage` | `IsaacForkliftStatusService` → `VehicleStatusService` | current + history (**Isaac 확장 5필드 포함**) | `/topic/vehicles/status`(+`/{id}`) | IsaacForkliftStatusServiceTest, **VehicleStatusIsaacExtrasIntegrationTest**(H2) |
+| Isaac 위치 | `forklift/+/location` (payload에 `forkliftId` 키) | `IsaacForkliftLocationMessage` | `IsaacForkliftLocationService` | 저장 안 함(중계만) | `/topic/vehicles/location`(+`/{id}`) | IsaacForkliftLocationServiceTest |
+| Isaac 경로 | `forklift/+/path` (구독) | `IsaacForkliftPathMessage` | `IsaacForkliftPathService` | 저장 안 함(중계만) | `/topic/vehicles/path`(+`/{id}`) | IsaacForkliftPathServiceTest |
+| **통합 명령** | `POST /api/vehicles/{vehicleId}/commands` (REST) | `VehicleCommandRequest` → `VehicleCommandMessage` | `VehicleCommandService` → `VehicleCommandPublisher` | `embedded_vehicle_command` insert | (발행) `forklift/{vehicleId}/command` | VehicleCommandServiceTest, **VehicleCommandIntegrationTest**(H2) |
+| **통합 명령 결과** | `forklift/+/command-result` (구독) | `VehicleCommandResultMessage` | `VehicleCommandResultService` | `embedded_vehicle_command` update | `/topic/vehicles/result`(+`/{id}`) | VehicleCommandResultServiceTest |
+| 임베디드 포크 상태 | `forklift/+/fork-status` (구독) | `EmbeddedForkStatusMessage` | `EmbeddedForkStatusService` | `vehicle_fork_current_status` upsert | `/topic/vehicles/fork-status`(+`/{id}`) | EmbeddedForkStatusServiceTest, MapperTest(H2) |
+| 임베디드 오류 | `forklift/+/error` (구독) | `EmbeddedErrorMessage` | `EmbeddedErrorService` | `embedded_error_history` insert | `/topic/vehicles/errors`(+`/{id}`) | EmbeddedErrorServiceTest, MapperTest(H2) |
+| AI 화물 분석 | `cargo/detected` (구독) | `AiCargoAnalysisMessage` | `AiCargoAnalysisService` | `ai_cargo_analysis` + `ai_cargo_detection_box` | `/topic/ai/cargo-analysis`(+`/{cargoId}`) | AiCargoAnalysisServiceTest, IntegrationTest(H2) |
+| 측정 스테이션 | `fast/station/+/measurement` (구독) | `StationMeasurementMessage` | `StationMeasurementService` | `station_measurement` + `station_measurement_box` | `/topic/stations/measurements`, `/topic/stations/{id}/measurements` | StationMeasurementIntegrationTest(H2), **StationMeasurementBroadcasterTest** |
 
 ---
 
 ## 2. MQTT 토픽 목록 (코드에서 그대로 추출)
 
-`MqttProperties.Topics` / `application-local.yml`의 `mqtt.topics.*` 기준.
+`MqttProperties.Topics` / `application-local.yml`의 `mqtt.topics.*` 기준. **2026-07-24 재점검**
+(prompt33.md) — 아래 표는 QoS는 항상 **MQTT QoS**(0/1/2 정수, iOS와 무관)로 표기하고, 코드에서
+확인할 수 없는 값은 추측하지 않고 "확인 불가"로 표시한다.
 
-| 토픽 패턴 | 방향 | 발행자(Publisher) | 구독자(Subscriber) | QoS | retained |
-|---|---|---|---|---|---|
-| `forklift/+/status` | 인바운드(구독) | ROS2 / Isaac Sim | 백엔드 `MqttMessageRouter.routeStatus` | 1 (`default-qos`) | — |
-| `forklift/+/location` | 인바운드(구독) | ROS2 / Isaac Sim | `routeLocation` | 1 | — |
-| `forklift/+/path` | 인바운드(구독) | Isaac Sim | `routePath` | 1 | — |
-| `forklift/+/command-result` | 인바운드(구독) | 임베디드(REAL) | `routeCommandResult` | 1 | — |
-| `forklift/+/fork-status` | 인바운드(구독) | 임베디드(REAL) | `routeForkStatus` | 1 | — |
-| `forklift/+/error` | 인바운드(구독) | 임베디드(REAL) | `routeEmbeddedError` | 1 | — |
-| `cargo/detected` | 인바운드(구독) | AI | `routeCargoDetected` | 1 | — |
-| `forklift/%s/command` | 아웃바운드(발행) | 백엔드 `Isaac/EmbeddedForkliftCommandPublisher` | ROS2 / 임베디드 | 1 | `false` |
-| `forklift/%s/emergency` | (정의만 존재) | — | — | — | — |
+| 토픽 패턴 | 방향 | 발행자 | 구독자 | Payload DTO | 발행 MQTT QoS | 구독 MQTT QoS | retained | 설정 위치 | 코드 위치 |
+|---|---|---|---|---|---:|---:|---|---|---|
+| `forklift/+/status` | ROS2/Isaac → Backend | ROS2 / Isaac Sim | `MqttMessageRouter.routeStatus` | `ForkliftStatusMessage` / `IsaacForkliftStatusMessage` | 확인 불가(외부 발행자) | **1** | 구독 전용(발행자가 결정, 백엔드는 확인 불가) | `mqtt.default-qos` | `MqttConfig.mqttInboundAdapter` |
+| `forklift/+/location` | ROS2/Isaac → Backend | ROS2 / Isaac Sim | `routeLocation` | `ForkliftLocationMessage` / `IsaacForkliftLocationMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
+| `forklift/+/path` | Isaac → Backend | Isaac Sim | `routePath` | `IsaacForkliftPathMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
+| `forklift/{vehicleId}/command` | Backend → ROS2/Embedded | 백엔드 `VehicleCommandPublisher` | ROS2 **및** 임베디드 | `VehicleCommandMessage` | **1**(코드 상수) | 해당 없음(발행 전용) | **false**(코드 상수) | 코드 상수(설정값 미참조) | `VehicleCommandPublisher.COMMAND_QOS/COMMAND_RETAINED` |
+| `forklift/+/command-result` | ROS2/Embedded → Backend | ROS2 / 임베디드 | `routeCommandResult` | `VehicleCommandResultMessage` | 확인 불가 | **1** | 구독 전용 | `mqtt.default-qos` | `MqttConfig` |
+| `forklift/+/fork-status` | Embedded → Backend | 임베디드(REAL) | `routeForkStatus` | `EmbeddedForkStatusMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
+| `forklift/+/error` | Embedded → Backend | 임베디드(REAL) | `routeEmbeddedError` | `EmbeddedErrorMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
+| `cargo/detected` | AI → Backend | AI | `routeCargoDetected` | `AiCargoAnalysisMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
+| `fast/station/+/measurement` | Station → Backend | 측정 스테이션 PC | `routeStationMeasurement` | `StationMeasurementMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 
-- `forklift/%s/emergency`는 `MqttTopics`/설정에 **정의는 되어 있으나 현재 이를 발행/구독하는 코드가 없다**
-  (`외부 연동 확인 필요` 이전에, 백엔드 내부적으로도 미사용). 신규 사용 시 별도 합의 필요.
-- 토픽의 `{id}`(=`+`) 세그먼트와 payload 안의 식별자(`forkliftId`/`vehicleId`)는 **반드시 일치**해야 한다.
-  `MqttMessageRouter.isVehicleIdConsistentWithTopic`가 불일치 시 해당 메시지를 버리고 경고 로그만 남긴다.
+### 백엔드가 실제로 보장하는 범위 vs 외부 연동 확인 필요
+
+| 구분 | 내용 |
+|---|---|
+| **① 백엔드 발행 시 보장** | `forklift/{vehicleId}/command` 발행은 **MQTT QoS 1, retained false**를 코드 상수로 고정 보장한다(`VehicleCommandPublisherTest`로 회귀 검증). |
+| **② 백엔드 구독 시 사용** | 8개 인바운드 토픽 전부 `mqtt.default-qos`(현재 1) 하나를 균등 적용한다(`MqttConfigTest`로 회귀 검증). retained는 구독자가 정하는 값이 아니라 발행자가 정하므로 백엔드가 보장할 수 없다. |
+| **③ 외부 발행 측이 맞춰야 함(백엔드 코드만으로 보장 불가)** | ROS2/Isaac/임베디드가 상태·위치·경로·명령 결과를 실제로 MQTT QoS 1로 발행하는지, AI/스테이션이 `cargo/detected`/`fast/station/.../measurement`를 QoS 1·retained false로 발행하는지 — **외부 연동 확인 필요**. |
+
+**QoS/retained의 실제 실행 시 적용값(코드 근거)**: `MqttConfig.mqttOutboundHandler()`는
+`handler.setDefaultQos(mqttProperties.defaultQos())` / `handler.setDefaultRetained(false)`로 **폴백 기본값**을
+설정하지만, Spring Integration MQTT의 `DefaultPahoMessageConverter.fromMessage()`(spring-integration-mqtt
+6.3.4 소스로 직접 확인)는 메시지에 `MqttHeaders.QOS`/`MqttHeaders.RETAINED` 헤더가 있으면 **그 헤더값을
+우선** 쓰고, 헤더가 없을 때만 이 폴백을 쓴다. `MqttGateway.publish(...)`는 두 헤더를 모든 호출에 강제하므로
+(`@Header(MqttHeaders.QOS)`/`@Header(MqttHeaders.RETAINED)`), 현재 코드의 유일한 발행 경로인
+`VehicleCommandPublisher`(QoS 1/retained false)와 검증용 `MqttTestController`(호출자 지정값)는 **항상
+헤더값이 그대로 적용**된다 — `mqttOutboundHandler()`의 설정값 기반 폴백은 지금 코드에서 도달 불가능하다.
+
+- **`forklift/{id}/emergency` 토픽은 제거됐다.** 확정 규격(1장 7번)에 따라 비상 정지도 공통 command
+  토픽을 쓴다. 제거 전 영향도를 확인한 결과 이 토픽을 발행·구독하는 프로덕션 코드가 하나도 없어
+  (설정과 `MqttTopics`에 정의만 존재) 안전하게 삭제할 수 있었다.
+- **명령 토픽이 하나로 통합됐다.** 이전에는 같은 토픽을 Isaac용/임베디드용 두 DTO가 서로 다른 스키마로
+  공유해 수신 측이 구분할 수 없었다(구 문서 §4.2의 `미확정`). 이제 하나의 envelope에
+  `targetSystem`/`commandCategory`가 실려 수신 측이 payload를 깊게 파싱하기 전에 분기할 수 있다.
+- 토픽의 `{id}`(=`+`) 세그먼트와 payload 안의 식별자는 **반드시 일치**해야 한다.
+  `MqttMessageRouter.isVehicleIdConsistentWithTopic`가 불일치 시 메시지를 버리고 경고 로그만 남긴다.
 
 ### 2.1 같은 토픽의 ROS2 / Isaac 판별 규칙 (실제 Router 코드)
 
-`forklift/+/status`와 `forklift/+/location`은 ROS2와 Isaac이 **같은 토픽 이름을 공유**한다. Router가
-payload의 키로 구분한다:
+`forklift/+/status`와 `forklift/+/location`은 ROS2와 Isaac이 **같은 토픽 이름을 공유**한다.
+확정 규격(1장 2번)은 **이 판별 구조를 그대로 유지**하기로 했다 — 상태·위치 메시지의 식별자 키를 임의로
+통일하지 않는다.
 
 - **status**: `forkHeight` 또는 `hasCargo` 또는 `footprint` 키가 있거나, **`battery` 키가 아예 없으면**
-  → Isaac(`IsaacForkliftStatusMessage`). 그 외(`forkliftId`+`battery` 형태) → ROS2(`ForkliftStatusMessage`).
-- **location**: `forkliftId` 키가 있으면 → Isaac(`IsaacForkliftLocationMessage`), `vehicleId` 키면 → ROS2
-  (`ForkliftLocationMessage`).
+  → Isaac(`IsaacForkliftStatusMessage`). 그 외 → ROS2(`ForkliftStatusMessage`).
+- **location**: `forkliftId` 키가 있으면 → Isaac, `vehicleId` 키면 → ROS2.
 
-> `미확정`/주의: ROS2 **상태** DTO(`ForkliftStatusMessage`)의 식별자 키는 `forkliftId`인데, ROS2 **위치**
-> DTO(`ForkliftLocationMessage`)의 식별자 키는 `vehicleId`다. 코드는 이 상태대로 동작하지만, 실물 ROS2
-> 규격에서 두 키 이름을 통일할지 여부는 팀 합의 필요.
+| 메시지 | 식별자 키 | 확정 |
+|---|---|---|
+| ROS2 상태 | `forkliftId` | 유지 |
+| ROS2 위치 | `vehicleId` | 유지 |
+| Isaac 상태 | `forkliftId` | 유지 |
+| Isaac 위치 | `forkliftId` | 유지 |
+| **명령 / 명령 결과 / WebSocket envelope** | **`vehicleId`** | **신규 규격** |
+
+> 새로 정의한 명령 메시지와 WebSocket envelope만 Java JSON 표기 관례에 따라 `vehicleId`를 쓴다
+> (`vehicleID`가 아니다). 기존 상태·위치 메시지의 키 차이는 Router의 판별 근거라 그대로 둔다.
 
 ---
 
 ## 3. 인바운드 메시지 규격 (JSON = 각 DTO record 필드)
 
-JSON 키 = record 컴포넌트 이름(카멜케이스). 아래 타입/필수여부는 **DTO 정의 그대로**다. 값 검증(범위·필수)은
-각 Service에서 수행하며, 위반 시 해당 메시지만 폐기(앱은 계속 동작)한다.
+JSON 키 = record 컴포넌트 이름(카멜케이스). 값 검증은 각 Service가 수행하며, 위반 시 해당 메시지만
+폐기한다(앱은 계속 동작).
+
+**시각 필드 공통 규칙**: 전부 `OffsetDateTime`이며 `+09:00`을 붙여 보낸다.
+오프셋이 없는 값도 과도기 호환으로 **수신은 되지만**(Asia/Seoul로 간주) 경고 로그가 남는다
+(`CommunicationTimeModule`, §9 참고).
 
 ### 3.1 ROS2 상태 — `forklift/+/status` → `ForkliftStatusMessage`
 
 ```json
-{ "forkliftId": "REAL-F01", "status": "ACTIVE", "battery": 87, "timestamp": "2026-07-23T11:20:27" }
+{ "forkliftId": "REAL-F01", "status": "MOVING", "battery": 87, "timestamp": "2026-07-23T11:20:27+09:00" }
 ```
 
 | 필드 | 타입 | 필수 | 비고 |
 |---|---|---|---|
 | forkliftId | string | 필수 | 토픽 `{id}`와 일치해야 함 |
 | status | string | 필수 | `VehicleStatus.fromRaw`로 정규화(§6.1) |
-| battery | int(primitive) | 필수 | 이 키의 존재가 ROS2 판별 근거. Service에서 0~100 검증 |
-| timestamp | LocalDateTime | 필수 | messageAt으로 사용 |
+| battery | int(primitive) | 필수 | 이 키의 존재가 ROS2 판별 근거. 0~100 검증 |
+| timestamp | OffsetDateTime | 필수 | messageAt으로 사용 |
 
-처리: `VehicleStatusService.updateCurrentStatus`로 위임 → current_status upsert + status_history insert →
-트랜잭션 커밋 성공 후 `broadcastStatus`. 롤백 시에는 WebSocket을 발행하지 않으며, WebSocket 전송
-실패는 Broadcaster가 흡수해 이미 커밋된 DB 결과에 영향을 주지 않는다. 미등록 차량이면
-`VEHICLE_NOT_FOUND`를 잡아 경고 로그로 다운그레이드.
+처리: `VehicleStatusService.updateCurrentStatus` → current upsert + history insert → **트랜잭션 커밋 후**
+`broadcastStatus`. 롤백 시 WebSocket을 발행하지 않으며, 전송 실패는 Broadcaster가 흡수한다.
+미등록 차량이면 `VEHICLE_NOT_FOUND`를 잡아 경고 로그로 다운그레이드.
 
 ### 3.2 ROS2 위치 — `forklift/+/location` → `ForkliftLocationMessage`
 
 ```json
 {
-  "vehicleId": "REAL-F01", "status": "ACTIVE",
+  "vehicleId": "REAL-F01", "status": "MOVING",
   "position": { "x": 1.2, "y": 3.4, "frameId": "map" },
   "heading": 90.0,
   "quaternion": { "x": 0.0, "y": 0.0, "z": 0.7071, "w": 0.7071 },
-  "speed": 0.5, "messageAt": "2026-07-23T11:20:27"
+  "speed": 0.5, "messageAt": "2026-07-23T11:20:27+09:00"
 }
 ```
 
 | 필드 | 타입 | 필수 | 비고 |
 |---|---|---|---|
 | vehicleId | string | 필수 | 없으면(=`forkliftId`면) Isaac 경로로 감 |
-| status | string | 선택 | 위치 이벤트에도 상태를 함께 실어 보냄(중계용) |
-| position.x / position.y | double | 필수 | NaN/Infinity면 메시지 폐기 |
-| position.frameId | string | 선택 | 없으면 기본 `"map"` |
-| heading | double | 선택 | 단위 degree/radian `미확정`. 코드상 [0,360) degree로 정규화 |
-| quaternion.x/y/z/w | double | 선택(전부 or 전무) | 일부만 채우면 폐기. 네 값 모두 null이면 "없음" |
+| status | string | 선택 | 표시용(상태 저장은 상태 토픽만의 책임) |
+| position.x / position.y | double | 필수 | **단위 m**. NaN/Infinity면 메시지 폐기 |
+| position.frameId | string | 선택 | **`map` 또는 `odom`만 허용**, 생략 시 `map`. 그 외는 메시지 폐기 + 경고 로그 |
+| heading | double | 선택 | **단위 degree**, [0,360)으로 정규화해 중계 |
+| quaternion.x/y/z/w | double | 선택(전부 or 전무) | 일부만 채우면 폐기. 원본 그대로 중계 |
 | speed | double | 선택 | 음수/비유한이면 폐기 |
-| messageAt | LocalDateTime | 필수 | |
+| messageAt | OffsetDateTime | 필수 | |
 
 처리: `ForkliftLocationService` — **DB 저장 안 함**, `existsByVehicleId` 확인 후 `broadcastLocation`만.
-(상태 저장은 상태 토픽만의 책임 — 위치/상태가 같은 행을 upsert하면 서로 값을 지우는 문제 방지.)
 
 ### 3.3 Isaac 상태 — `forklift/+/status` → `IsaacForkliftStatusMessage`
 
 ```json
 {
-  "forkliftId": "SIM-F01", "status": "ACTIVE", "battery": 80,
+  "forkliftId": "SIM-F01", "status": "LIFTING", "battery": 80,
   "forkHeight": 0.35, "hasCargo": true, "cargoId": "C-100",
   "footprint": { "length": 1.2, "width": 0.8 },
-  "timestamp": "2026-07-23T11:20:27"
+  "timestamp": "2026-07-23T11:20:27+09:00"
 }
 ```
 
 | 필드 | 타입 | 필수 | 비고 |
 |---|---|---|---|
 | forkliftId | string | 필수 | |
-| status | string | 선택 | LWT OFFLINE 최소 메시지 가능(`battery` 키 없음이 Isaac 판별 근거 중 하나) |
-| battery | Integer(nullable) | 선택 | |
-| forkHeight | double | 선택 | Isaac 판별 키 |
-| hasCargo | boolean | 선택 | Isaac 판별 키 |
-| cargoId | string | 선택 | |
-| footprint.length / footprint.width | double | 선택 | Isaac 판별 키 |
-| timestamp | LocalDateTime | 필수 | |
+| status | string | 필수 | Isaac 어휘 7종(§6.2) → 공통 상태로 **1:1 매핑** |
+| battery | Integer | 일반 상태 필수 | LWT OFFLINE이면 생략 가능 |
+| forkHeight | Double | 일반 상태 필수 | Isaac 판별 키. **DB 저장됨** |
+| hasCargo | Boolean | 일반 상태 필수 | Isaac 판별 키. **DB 저장됨** |
+| cargoId | string | 선택 | **DB 저장됨** |
+| footprint.length / width | Double | 일반 상태 필수 | Isaac 판별 키. **DB 저장됨** |
+| timestamp | OffsetDateTime | 선택 | LWT면 없을 수 있음(수신 시각으로 대체) |
 
-처리: `IsaacForkliftStatusService` → `VehicleStatusService.updateCurrentStatus`(current+history 저장) +
-`broadcastIsaacStatus`. `미확정`: forkHeight/hasCargo/cargoId/footprint를 담을 DB 컬럼이 현재
-`vehicle_current_status`에 없어 **상태값·배터리만 저장되고 나머지는 WebSocket으로만 중계**된다.
+**확장 필드가 DB에 저장된다(확정 1장 4번)**: `forkHeight`/`hasCargo`/`cargoId`/`footprint.length`/
+`footprint.width`가 `vehicle_current_status`와 `vehicle_status_history`의
+`fork_height`/`has_cargo`/`cargo_id`/`footprint_length`/`footprint_width` 컬럼에 저장된다.
+
+**보존 정책(중요)**: ROS2 상태 메시지에는 이 필드가 없다. 그런 메시지가 같은 행을 갱신할 때
+**기존 Isaac 값을 null로 덮어쓰지 않고 그대로 보존**한다(`VehicleStatusService`의
+`applyIsaacExtras`). 반대로 Isaac 메시지에서는 null도 유효한 갱신값이다 — 화물을 내려놓아 `cargoId`가
+사라진 경우를 표현할 수 있어야 하기 때문이다. 상태 이력에는 **병합이 끝난 유효 상태**가 한 행으로
+저장되므로, 이력의 각 행은 "그 메시지를 받은 시점에 시스템이 알고 있던 전체 상태"를 나타낸다.
 
 ### 3.4 Isaac 위치 — `forklift/+/location` → `IsaacForkliftLocationMessage`
 
 ```json
-{ "forkliftId": "SIM-F01", "x": 1.2, "y": 3.4, "direction": 90.0, "speed": 0.5, "timestamp": "2026-07-23T11:20:27" }
+{ "forkliftId": "SIM-F01", "x": 1.2, "y": 3.4, "heading": 90.0, "speed": 0.5, "timestamp": "2026-07-23T11:20:27+09:00" }
 ```
 
 | 필드 | 타입 | 필수 | 비고 |
 |---|---|---|---|
 | forkliftId | string | 필수 | 이 키가 Isaac 판별 근거 |
-| x / y | double | 선택 | 평면 좌표 |
-| direction | double | 선택 | heading에 대응(단위 `미확정`) |
-| speed | double | 선택 | |
-| timestamp | LocalDateTime | 필수 | |
+| x / y | double | 필수 | **단위 m**. ROS2와 **동일 원점** 가정 |
+| heading | double | 필수 | **단위 degree**, [0,360) 정규화. 구 필드명 `direction`은 읽기 alias로 허용 |
+| speed | double | 필수 | m/s, 음수 불가 |
+| timestamp | OffsetDateTime | 필수 | |
 
-처리: `IsaacForkliftLocationService` — DB 저장 안 함, `broadcastIsaacLocation`만.
+> **`direction` alias 주의(외부 연동 확인 필요)**: alias는 **이름**만 호환할 뿐 **단위를 변환하지 않는다**.
+> 옛 브리지가 rad 값을 `direction`으로 보내면 그 값이 degree로 해석된다. 단위 전환은 Isaac 브리지 쪽에서
+> 함께 이뤄져야 한다.
 
 ### 3.5 Isaac 경로 — `forklift/+/path` → `IsaacForkliftPathMessage`
 
@@ -197,46 +237,47 @@ JSON 키 = record 컴포넌트 이름(카멜케이스). 아래 타입/필수여�
 {
   "forkliftId": "SIM-F01",
   "waypoints": [ { "x": 1.0, "y": 2.0 }, { "x": 1.5, "y": 2.5 } ],
-  "goal": { "x": 5.0, "y": 6.0, "direction": 180.0 },
-  "timestamp": "2026-07-23T11:20:27"
+  "goal": { "x": 5.0, "y": 6.0, "heading": 180.0 },
+  "timestamp": "2026-07-23T11:20:27+09:00"
 }
 ```
 
-처리: `IsaacForkliftPathService` — DB 저장 안 함, `broadcastPath`만. (ROS2엔 이 토픽 사용 사례 없어 판별 없이
-곧바로 Isaac 처리.)
+좌표 단위 m, `goal.heading`은 degree([0,360) 정규화). `goal.direction`은 읽기 alias.
+처리: `IsaacForkliftPathService` — DB 저장 안 함, `broadcastPath`만.
 
-### 3.6 임베디드 명령 결과 — `forklift/+/command-result` → `EmbeddedCommandResultMessage`
+### 3.6 통합 명령 결과 — `forklift/+/command-result` → `VehicleCommandResultMessage`
 
 ```json
 {
-  "commandId": "CMD-001", "forkliftId": "REAL01", "command": "FORK_UP", "result": "SUCCESS",
-  "forkState": "BOTTOM", "limitBottom": true, "emergencyStopApplied": false,
-  "stoppedActions": ["DRIVE","FORK"], "requiresReset": false,
-  "errorCode": null, "message": "완료", "completedAt": "2026-07-23T11:20:27"
+  "commandId": "CMD-003", "vehicleId": "REAL-F01",
+  "targetSystem": "ALL", "commandCategory": "SAFETY", "command": "EMERGENCY_STOP",
+  "result": "SUCCESS", "message": "주행과 포크 정지 완료",
+  "completedAt": "2026-07-23T11:20:28+09:00"
 }
 ```
 
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| commandId | string | 발행했던 명령의 ID와 매칭해 상태 전이 |
-| forkliftId | string | 토픽 `{id}`와 일치 |
-| command | string | `EmbeddedCommandType`(§6.2) |
-| result | string | 성공/실패 결과 → `EmbeddedCommandStatus`(§6.3)로 반영 |
-| forkState | string | `EmbeddedForkState`(§6.4) |
-| limitBottom | boolean | 하강 리미트 스위치 |
-| emergencyStopApplied | boolean | |
-| stoppedActions | string[] | `EmbeddedStoppedAction`(§6.6) 값들 |
-| requiresReset | boolean | E-STOP 리셋 필요 여부 |
-| errorCode | string(nullable) | |
-| message | string(nullable) | |
-| completedAt | LocalDateTime | 이벤트 발생 시각 |
+| 필드 | 타입 | 필수 | 비고 |
+|---|---|---|---|
+| commandId | string | 필수 | 발행했던 명령의 ID와 매칭 |
+| vehicleId | string | 필수 | 토픽 `{id}`와 일치. 구 `forkliftId` 키도 alias로 수신 |
+| targetSystem | string | 권장 | 없으면 구 형식으로 간주(경고 로그 후 이 검증만 생략) |
+| commandCategory | string | 권장 | 동일 |
+| command | string | 필수 | `VehicleCommandType`(§6.3) |
+| result | string | 필수 | ACCEPTED / IN_PROGRESS / SUCCESS / FAILED / REJECTED / CANCELLED |
+| completedAt | OffsetDateTime | 필수 | |
+| forkState / limitBottom / emergencyStopApplied / stoppedActions / requiresReset / errorCode | 선택 | | 임베디드 결과 전용. 비상정지 결과의 핵심이라 규격 예시에 없어도 유지 |
 
-처리: `EmbeddedCommandResultService` → `embedded_vehicle_command` update + `broadcastEmbeddedCommandResult`.
+**필수 검증 순서**: ① 토픽 vehicleId ↔ payload vehicleId ② commandId 존재 ③ 기존 명령과 vehicleId 일치
+④ targetSystem 일치 ⑤ commandCategory 일치 ⑥ command 일치 ⑦ 허용된 상태 전이 ⑧ 중복 종료 결과.
+⑦·⑧은 `VehicleCommandStatus.canTransitionTo`가 함께 처리한다(종료 상태에서는 어떤 전이도 거부되므로
+중복 결과가 자동으로 걸러진다).
+
+처리: `VehicleCommandResultService` → `embedded_vehicle_command` update + `broadcastCommandResult`.
 
 ### 3.7 임베디드 포크 상태 — `forklift/+/fork-status` → `EmbeddedForkStatusMessage`
 
 ```json
-{ "forkliftId": "REAL01", "forkState": "MOVING_UP", "limitBottom": false, "errorCode": null, "timestamp": "2026-07-23T11:20:27" }
+{ "forkliftId": "REAL-F01", "forkState": "MOVING_UP", "limitBottom": false, "errorCode": null, "timestamp": "2026-07-23T11:20:27+09:00" }
 ```
 
 처리: `EmbeddedForkStatusService` → `vehicle_fork_current_status` upsert + `broadcastForkStatus`.
@@ -244,166 +285,224 @@ JSON 키 = record 컴포넌트 이름(카멜케이스). 아래 타입/필수여�
 ### 3.8 임베디드 오류 — `forklift/+/error` → `EmbeddedErrorMessage`
 
 ```json
-{ "forkliftId": "REAL01", "errorCode": "E-DRV-01", "errorSource": "DRIVE", "severity": "CRITICAL", "message": "모터 과전류", "timestamp": "2026-07-23T11:20:27" }
+{ "forkliftId": "REAL-F01", "errorCode": "E-DRV-01", "errorSource": "DRIVE", "severity": "CRITICAL", "message": "모터 과전류", "timestamp": "2026-07-23T11:20:27+09:00" }
 ```
-
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| forkliftId | string | |
-| errorCode | string | |
-| errorSource | string | `EmbeddedErrorSource`(§6.5) |
-| severity | string | `EmbeddedErrorSeverity`(§6.7) |
-| message | string | |
-| timestamp | LocalDateTime | |
 
 처리: `EmbeddedErrorService` → `embedded_error_history` insert + `broadcastEmbeddedError`.
 
 ### 3.9 AI 화물 분석 — `cargo/detected` → `AiCargoAnalysisMessage`
 
-```json
-{
-  "schemaVersion": "1.0", "analysisId": "A-1001", "vehicleId": "SIM-F01", "cargoId": "C-100",
-  "status": "OK",
-  "detection": { "boxes": [ { "className": "pallet", "confidence": 0.98, "bboxPx": [10,20,100,200] } ] },
-  "distance": { "valueCm": 123.4, "stdCm": 1.2 },
-  "dimensions": { "widthCm": 80.0, "heightCm": 60.0, "depthCm": 120.0, "volumeCm3": 576000.0, "scale": "REAL" },
-  "loadBalance": { "direction": ["LEFT","FRONT"], "message": "좌측 편중" },
-  "ratios": { "horizontal": 0.6, "vertical": 0.4 },
-  "message": null, "capturedAt": "2026-07-23T11:20:26", "processedAt": "2026-07-23T11:20:27"
-}
-```
-
-| 필드 | 타입 | 비고 |
-|---|---|---|
-| schemaVersion | string | 지원하지 않으면 `AI_ANALYSIS_SCHEMA_VERSION_UNSUPPORTED` |
-| analysisId | string | 중복 저장 방지(UNIQUE) |
-| vehicleId / cargoId | string(nullable) | FK 없이 느슨한 문자열 |
-| status | string | `AiAnalysisStatus`(§6.8): OK / NO_DETECTION / UNRELIABLE |
-| detection.boxes[].className | string | |
-| detection.boxes[].confidence | double | |
-| detection.boxes[].bboxPx | int[] | [x, y, width, height] |
-| distance.valueCm / stdCm | double | cm |
-| dimensions.widthCm/heightCm/depthCm/volumeCm3 | double | cm / cm³ |
-| dimensions.scale | string | `DimensionScale`(§6.9): REAL / MINIATURE |
-| loadBalance.direction | string[] | `LoadBalanceDirection`(§6.10). DB엔 쉼표 join 문자열로 저장 |
-| loadBalance.message | string | |
-| ratios.horizontal / vertical | double | |
-| capturedAt / processedAt | LocalDateTime | |
-
-처리: `AiCargoAnalysisService.process` → `ai_cargo_analysis` + `ai_cargo_detection_box` insert(같은
-트랜잭션) + `AiCargoAnalysisBroadcaster.broadcast`.
+이전 버전과 규격이 동일하다(시각 필드는 이 도메인 내부에서 `LocalDateTime`을 유지). 상세는 이전 문서
+내용과 같으며 변경된 것은 **WebSocket 출력이 공통 envelope로 감싸진다**는 점뿐이다(§5.2).
 
 ---
 
-## 4. 아웃바운드(발행) 명령 규격
+## 4. 아웃바운드(발행) 명령 규격 — `forklift/{vehicleId}/command`
 
-### 4.1 `forklift/{id}/command` — 임베디드/실물 명령 `EmbeddedForkliftCommandMessage`
+**이동·포크/적재·비상정지 명령이 전부 이 토픽 하나, 이 envelope 하나를 쓴다.**
 
-REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandRequest{command, reason}`)
-→ `EmbeddedCommandService.issueCommand` → `EmbeddedForkliftCommandPublisher.publish`가 발행:
+REST `POST /api/vehicles/{vehicleId}/commands` (body `VehicleCommandRequest`)
+→ `VehicleCommandService.issueCommand` → `VehicleCommandPublisher.publish`.
+
+### 4.1 공통 envelope — `VehicleCommandMessage`
 
 ```json
-{ "commandId": "CMD-001", "forkliftId": "REAL01", "command": "FORK_UP", "reason": "적재 준비", "timestamp": "2026-07-23T11:20:27" }
+{
+  "commandId": "CMD-001",
+  "vehicleId": "REAL-F01",
+  "targetSystem": "ROS2",
+  "commandCategory": "MOVE",
+  "command": "MOVE",
+  "payload": {},
+  "reason": null,
+  "timestamp": "2026-07-23T11:20:27+09:00"
+}
 ```
 
-- `command`는 `EmbeddedCommandType.fromRaw`로 검증, 미지원 값이면 `EMBEDDED_COMMAND_TYPE_INVALID`.
-- 지원 명령: `STOP`, `FORK_UP`, `FORK_DOWN`, `LOAD`, `UNLOAD`, `EMERGENCY_STOP`, `RESET_ESTOP`.
-- 저장: `embedded_vehicle_command` insert(PENDING) → 발행 성공 시 PUBLISHED, 실패 시 PUBLISH_FAILED(롤백 안 함).
-- QoS = `default-qos`(1), retained = `false`.
-- `active=false`는 목록·집계 제외 정책일 뿐 명령 차단 정책은 합의되지 않아, 현재 명령 발행은 차량
-  존재 여부만 확인한다.
+- **필수**: `commandId`, `vehicleId`, `targetSystem`, `commandCategory`, `command`, `timestamp`
+- **선택**: `payload`, `reason`
+- `payload`는 destination이 없는 명령에서도 **`null`이 아니라 빈 객체 `{}`** 로 나간다 — 수신 측이
+  키 존재 여부를 분기하지 않고 항상 같은 모양으로 읽을 수 있게 하기 위해서다.
+- **`commandId`와 `timestamp`는 백엔드가 생성한다.** REST 요청 DTO에는 이 두 필드 자리가 아예 없다.
+
+### 4.2 명령 조합 검증 규칙 (확정)
+
+| command | targetSystem | commandCategory | payload.destination |
+|---|---|---|---|
+| `MOVE` | `ROS2` | `MOVE` | **필수** |
+| `FORK_UP` / `FORK_DOWN` | `EMBEDDED` | `FORK` | — |
+| `LOAD` / `UNLOAD` | `EMBEDDED` | `LOAD` | — |
+| `EMERGENCY_STOP` | `ALL` | `SAFETY` | — |
+| `RESET_ESTOP` | `ALL` | `SAFETY` | — |
+| `STOP` | `EMBEDDED` | `SAFETY` | — `팀 확인 필요` |
+
+- 요청이 `targetSystem`/`commandCategory`를 **생략하면 백엔드가 위 표대로 채운다.**
+- 요청이 **명시했는데 표와 다르면 발행하지 않고 400 `COMMAND_COMBINATION_INVALID`** 로 거부한다 —
+  호출자가 잘못 알고 있는 조합을 조용히 고쳐서 발행하면, 수신 측이 `targetSystem`으로 1차 분기하는
+  설계 자체가 신뢰를 잃기 때문이다.
+- `STOP`은 확정 규격의 "지원값" 목록에는 있으나 조합 규칙 절에 없다. 추측으로 ROS2에 배정하지 않고
+  이 프로젝트가 기존에 STOP을 실물 임베디드 명령으로 다뤄 온 동작을 유지했다 — `팀 확인 필요`.
+- `RESET_ESTOP`은 규격이 "ALL 또는 팀 기존 처리 대상에 맞게"로 열어 뒀다. EMERGENCY_STOP과 짝을
+  이루므로 동일하게 `ALL`+`SAFETY`로 고정했다.
+
+### 4.3 이동 명령 예시
+
+```json
+{
+  "commandId": "CMD-001", "vehicleId": "SIM-F01",
+  "targetSystem": "ROS2", "commandCategory": "MOVE", "command": "MOVE",
+  "payload": { "destination": { "x": 5.0, "y": 6.0, "heading": 180.0, "frameId": "map" } },
+  "reason": null, "timestamp": "2026-07-23T11:20:27+09:00"
+}
+```
+
+destination 검증: `x`/`y` 필수·finite·**단위 m**, `heading`은 **degree**([0,360) 정규화해서 발행),
+`frameId`는 **`map` 또는 `odom`**(생략 시 `map`). 위반 시 400 `COMMAND_DESTINATION_INVALID`.
+
+### 4.4 임베디드 명령 예시
+
+```json
+{
+  "commandId": "CMD-002", "vehicleId": "REAL-F01",
+  "targetSystem": "EMBEDDED", "commandCategory": "FORK", "command": "FORK_UP",
+  "payload": {}, "reason": "적재 준비", "timestamp": "2026-07-23T11:20:27+09:00"
+}
+```
+
+### 4.5 비상 정지 예시
+
+```json
+{
+  "commandId": "CMD-003", "vehicleId": "REAL-F01",
+  "targetSystem": "ALL", "commandCategory": "SAFETY", "command": "EMERGENCY_STOP",
+  "payload": {}, "reason": "관제 사용자 비상 정지", "timestamp": "2026-07-23T11:20:27+09:00"
+}
+```
+
+수신 측이 **가장 먼저 분기할 수 있도록** `targetSystem=ALL` + `commandCategory=SAFETY` +
+`command=EMERGENCY_STOP` 조합이 항상 보장된다.
 
 #### EMERGENCY_STOP 백엔드 보장 범위
 
-`EMERGENCY_STOP`도 위 공통 임베디드 명령 흐름을 사용한다. 백엔드는 UUID `commandId` 생성, 명령
-저장, `forklift/{id}/command` publish 시도, `PUBLISHED`/`PUBLISH_FAILED` 상태 기록까지만 보장한다.
-`PUBLISHED`는 브로커 발행 호출 성공이며 ROS2 수신, 모터 정지, 하드웨어 안전 또는 정지 완료를 뜻하지
-않는다. 실제 정지·해제·fail-safe와 중복 명령 정책은 ROS2·임베디드 담당자와 장비 검증이 필요하다.
+백엔드는 UUID `commandId` 생성, 명령 저장, `forklift/{vehicleId}/command` publish 시도,
+`PUBLISHED`/`PUBLISH_FAILED` 상태 기록까지만 보장한다. **`PUBLISHED`는 브로커 발행 호출 성공이며
+ROS2 수신, 모터 정지, 하드웨어 안전, 정지 완료를 뜻하지 않는다.** 실제 정지·해제·fail-safe와 중복 명령
+정책은 ROS2·임베디드 담당자와 장비 검증이 필요하다 — `외부 연동 확인 필요`.
 
-### 4.2 `forklift/{id}/command` — Isaac 명령 `IsaacForkliftCommandMessage`
+### 4.6 명령 상태 전이
 
-`IsaacForkliftCommandPublisher`가 같은 토픽 형식으로 발행(같은 `MqttPublisher`/`MqttTopics.forkliftCommand`
-재사용). JSON:
-
-```json
-{ "forkliftId": "SIM-F01", "command": "MOVE", "destination": { "x": 5.0, "y": 6.0, "direction": 180.0 }, "timestamp": "2026-07-23T11:20:27" }
+```
+PENDING     → PUBLISHED, PUBLISH_FAILED
+PUBLISHED   → ACCEPTED, IN_PROGRESS, SUCCESS, FAILED, REJECTED, CANCELLED
+ACCEPTED    → IN_PROGRESS, SUCCESS, FAILED, REJECTED, CANCELLED
+IN_PROGRESS → SUCCESS, FAILED, REJECTED, CANCELLED
+(SUCCESS/FAILED/REJECTED/CANCELLED/PUBLISH_FAILED = 종료 상태, 더 이상 전이 없음)
 ```
 
-> `미확정`: 같은 `forklift/{id}/command` 토픽을 Isaac용/임베디드용이 **서로 다른 JSON 스키마**로 공유한다
-> (Isaac=destination 좌표, 임베디드=commandId+reason). 실제 수신 측(ROS2 브리지/임베디드 펌웨어)이 이를
-> 어떻게 구분할지는 `외부 연동 확인 필요`.
+MQTT 발행이 실패해도 트랜잭션을 롤백하지 않고 `PUBLISH_FAILED`로 정직하게 저장한다 —
+"발행 실패를 실행 성공으로 저장하지 않는다"는 조건은 이 상태 분리로 만족된다.
 
 ---
 
 ## 5. WebSocket(STOMP) 아웃바운드 규격
 
-- **엔드포인트**: `/ws` (SockJS). 프론트는 `new SockJS("http(s)://<host>/ws")`로 연결(순수 WebSocket URL 아님).
+- **엔드포인트**: `/ws` (SockJS). 프론트는 `new SockJS("http(s)://<host>/ws")`로 연결.
 - **브로커 prefix**: `/topic` (SimpleBroker). **앱 prefix**: `/app`.
-- 모든 이벤트는 "전체 destination"과 "차량별 destination(`/{id}`)" **두 곳에 동시 전송**된다.
-- 상태 이벤트는 상태 DB 트랜잭션 커밋 후 전송한다. 전송 실패는 Broadcaster가 흡수(로그만)하므로
-  커밋된 DB 결과에 영향이 없다.
+- 모든 이벤트는 "전체 destination"과 "개별 destination(`/{id}`)" **두 곳에 동시 전송**된다.
+- 상태 이벤트는 DB 트랜잭션 **커밋 후** 전송한다. 전송 실패는 Broadcaster가 흡수(로그만)한다.
 
-### 5.1 차량 이벤트 봉투(envelope) — `VehicleWebSocketEvent<T>`
+### 5.1 공통 envelope — `RealtimeEvent<T>`
+
+**차량·AI·스테이션 이벤트가 전부 같은 봉투를 쓴다**(확정 1장 13번). 이전에는 도메인마다 봉투가 달랐고
+AI는 봉투 자체가 없었다.
 
 ```json
-{ "eventType": "VEHICLE_STATUS_UPDATED", "vehicleId": "REAL-F01", "occurredAt": "2026-07-23T11:20:27", "data": { /* T */ } }
+{
+  "eventType": "VEHICLE_STATUS_UPDATED",
+  "vehicleId": "REAL-F01",
+  "occurredAt": "2026-07-23T11:20:27+09:00",
+  "data": { }
+}
 ```
 
-| destination(전체 / 차량별) | eventType | data 페이로드 타입 | 출처 |
+| 필드 | 필수 | 비고 |
+|---|---|---|
+| eventType | 필수 | §5.3 목록 |
+| vehicleId | **nullable** | 차량 이벤트는 필수. 차량과 연결된 AI 이벤트는 그 vehicleId. 연결되지 않은 AI/스테이션 이벤트는 `null` |
+| occurredAt | 필수 | `OffsetDateTime` `+09:00`. 서버 처리 시각이 아니라 **이벤트 발생 시각** |
+| data | 필수 | 도메인별 payload |
+
+**도메인 식별자 위치**: 최상위 식별자 이름은 `vehicleId` 하나로 통일한다. AI의 `cargoId`, 스테이션의
+`stationId`/`measurementId`는 최상위로 올리지 않고 `data` 내부에 그대로 유지한다.
+
+> destination은 통일하지 않았다 — 목표는 **payload envelope 구조의 통일**이지 경로 통합이 아니다.
+
+### 5.2 destination · eventType · data 매핑
+
+| destination(전체 / 개별) | eventType | data 타입 | vehicleId |
 |---|---|---|---|
-| `/topic/vehicles/status` / `…/{id}` | `VEHICLE_STATUS_UPDATED` | `VehicleStatusResponse`(ROS2) / `IsaacVehicleStatusEventData`(Isaac) | 상태 저장 후 |
-| `/topic/vehicles/location` / `…/{id}` | `VEHICLE_LOCATION_UPDATED` | `VehicleLocationEventData`(ROS2) / `IsaacVehicleLocationEventData`(Isaac) | 위치 중계 |
-| `/topic/vehicles/path` / `…/{id}` | `VEHICLE_PATH_UPDATED` | `VehiclePathEventData` | Isaac 경로 |
-| `/topic/vehicles/result` / `…/{id}` | `VEHICLE_COMMAND_RESULT_UPDATED` | `EmbeddedCommandResultEventData` | 명령 결과 |
-| `/topic/vehicles/fork-status` / `…/{id}` | `VEHICLE_FORK_STATUS_UPDATED` | `EmbeddedForkStatusEventData` | 포크 상태 |
-| `/topic/vehicles/errors` / `…/{id}` | `VEHICLE_ERROR_OCCURRED` | `EmbeddedErrorEventData` | 임베디드 오류 |
+| `/topic/vehicles/status` / `…/{id}` | `VEHICLE_STATUS_UPDATED` | `VehicleStatusResponse`(ROS2) / `IsaacVehicleStatusEventData`(Isaac) | 필수 |
+| `/topic/vehicles/location` / `…/{id}` | `VEHICLE_LOCATION_UPDATED` | `VehicleLocationEventData` / `IsaacVehicleLocationEventData` | 필수 |
+| `/topic/vehicles/path` / `…/{id}` | `VEHICLE_PATH_UPDATED` | `VehiclePathEventData` | 필수 |
+| `/topic/vehicles/result` / `…/{id}` | `VEHICLE_COMMAND_RESULT_UPDATED` | `VehicleCommandResultEventData` | 필수 |
+| `/topic/vehicles/fork-status` / `…/{id}` | `VEHICLE_FORK_STATUS_UPDATED` | `EmbeddedForkStatusEventData` | 필수 |
+| `/topic/vehicles/errors` / `…/{id}` | `VEHICLE_ERROR_OCCURRED` | `EmbeddedErrorEventData` | 필수 |
+| `/topic/ai/cargo-analysis` / `…/{cargoId}` | `AI_CARGO_ANALYSIS_COMPLETED` | `AiCargoAnalysisResponse` | **nullable** |
+| `/topic/stations/measurements`, `/topic/stations/{stationId}/measurements` | `STATION_MEASUREMENT_COMPLETED` | `StationMeasurementResponse` | **항상 null** |
 
-> 참고: `VehicleWebSocketBroadcaster`에는 `broadcastCommandResult`(`VehicleCommandResultEventData`,
-> `RESULT_ALL` 재사용)도 있으나 이를 호출하는 프로덕션 코드는 현재 없다(임베디드 결과는
-> `broadcastEmbeddedCommandResult` 사용).
+스테이션은 차량과 독립적으로 동작해 측정 결과에 차량이 배정되지 않으므로 `vehicleId`가 항상 `null`이다.
 
-### 5.2 AI 분석 이벤트 — `AiCargoAnalysisBroadcaster`
+### 5.3 eventType 전체 목록 — `RealtimeEventType`
 
-- destination: `/topic/ai/cargo-analysis` (전체), `/topic/ai/cargo-analysis/{cargoId}` (cargoId 있을 때).
-- payload: `AiCargoAnalysisResponse`(봉투 없이 그대로 전송).
-
-> `미확정`/합의 필요(프론트=F): 차량 이벤트는 `VehicleWebSocketEvent` 봉투로 감싸는데 AI 이벤트는 봉투
-> 없이 응답 객체를 그대로 보낸다 — 프론트 구독 규격 통일 여부.
+`VEHICLE_STATUS_UPDATED`, `VEHICLE_LOCATION_UPDATED`, `VEHICLE_PATH_UPDATED`,
+`VEHICLE_COMMAND_RESULT_UPDATED`, `VEHICLE_FORK_STATUS_UPDATED`, `VEHICLE_ERROR_OCCURRED`,
+`AI_CARGO_ANALYSIS_COMPLETED`, `STATION_MEASUREMENT_COMPLETED`
 
 ---
 
 ## 6. Enum 값 (코드 정의 그대로)
 
-### 6.1 VehicleStatus
-`UNKNOWN, IDLE, ACTIVE, ERROR, OFFLINE` — `fromRaw`: null/빈값/미정의 → `UNKNOWN`, `"MOVING"` → `ACTIVE`
-(대소문자 무시). `미확정`: 최종 상태 값 목록(MOVING/LOADING/UNLOADING/CHARGING/EMERGENCY_STOP 후보)은 합의 필요.
+### 6.1 VehicleStatus (확정 10종)
+`UNKNOWN, IDLE, ACTIVE, MOVING, LIFTING, LOADING, UNLOADING, ESTOP, ERROR, OFFLINE`
 
-### 6.2 EmbeddedCommandType
-`STOP, FORK_UP, FORK_DOWN, LOAD, UNLOAD, EMERGENCY_STOP, RESET_ESTOP`
+의미: UNKNOWN=상태 확인 불가 / IDLE=대기·정지 / ACTIVE=일반 작업 활성 / MOVING=주행 중 /
+LIFTING=포크 승강 중 / LOADING=적재 중 / UNLOADING=하역 중 / ESTOP=비상 정지 상태 / ERROR=오류 발생 /
+OFFLINE=통신 단절·접속 종료.
 
-### 6.3 EmbeddedCommandStatus
+`fromRaw`: null·빈값·미정의 값 → `UNKNOWN`. **어떤 값도 다른 값으로 치환하지 않는다** —
+과거의 `MOVING → ACTIVE` 정규화는 폐지됐다. 대소문자와 앞뒤 공백만 흡수한다.
+enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`)의 항목 순서다.
+
+### 6.2 IsaacForkliftStatus
+`IDLE, MOVING, LIFTING, LOADING, ERROR, ESTOP, OFFLINE` — 확장된 `VehicleStatus`에 **전부 1:1 대응**한다
+(정보 손실 없음).
+
+### 6.3 VehicleCommandType
+`MOVE, STOP, FORK_UP, FORK_DOWN, LOAD, UNLOAD, EMERGENCY_STOP, RESET_ESTOP`
+
+### 6.4 VehicleCommandTargetSystem
+`ROS2, EMBEDDED, ALL`
+
+### 6.5 VehicleCommandCategory
+`MOVE, FORK, LOAD, SAFETY`
+
+### 6.6 VehicleCommandStatus
 `PENDING, PUBLISHED, PUBLISH_FAILED, ACCEPTED, IN_PROGRESS, SUCCESS, FAILED, REJECTED, CANCELLED`
 
-### 6.4 EmbeddedForkState
+### 6.7 EmbeddedForkState
 `MOVING_UP, MOVING_DOWN, STOPPED, BOTTOM, ERROR, UNKNOWN`
 
-### 6.5 EmbeddedErrorSource
+### 6.8 EmbeddedErrorSource
 `DRIVE, STEERING, FORK, LIMIT_SWITCH, UART, SYSTEM`
 
-### 6.6 EmbeddedStoppedAction
+### 6.9 EmbeddedStoppedAction
 `DRIVE, STEERING, FORK`
 
-### 6.7 EmbeddedErrorSeverity
+### 6.10 EmbeddedErrorSeverity
 `WARNING, ERROR, CRITICAL`
 
-### 6.8 AiAnalysisStatus
-`OK, NO_DETECTION, UNRELIABLE`
-
-### 6.9 DimensionScale
-`REAL, MINIATURE`
-
-### 6.10 LoadBalanceDirection
-`LEFT, RIGHT, FRONT, BACK`
+### 6.11 AiAnalysisStatus / DimensionScale / LoadBalanceDirection
+`OK, NO_DETECTION, UNRELIABLE` / `REAL, MINIATURE` / `LEFT, RIGHT, FRONT, BACK`
 
 ---
 
@@ -415,41 +514,61 @@ REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandR
 | POST | `/api/vehicles` | 차량 등록 | 항상 |
 | PATCH | `/api/vehicles/{vehicleId}/active` | 차량 활성·비활성 변경 | 항상 |
 | GET | `/api/vehicles` | 활성 차량 목록 | 항상 |
-| GET | `/api/vehicles/status-counts` | 상태별 집계 | 항상 |
+| GET | `/api/vehicles/status-counts` | 상태별 집계(**10종 전부, 0건 포함**) | 항상 |
 | GET | `/api/vehicles/{vehicleId}` | 차량 상세 | 항상 |
-| GET | `/api/vehicles/{vehicleId}/status-history?limit=` | 상태 이력(기본 50, 1~200) | 항상 |
-| PUT | `/api/vehicles/{vehicleId}/status` | 상태 갱신(테스트용) | `vehicle.status-test-api.enabled`(로컬만 true) |
-| POST | `/api/vehicles/{forkliftId}/embedded-commands` | 명령 발행 | 항상 |
-| GET | `/api/vehicles/{forkliftId}/embedded-commands` / `/{commandId}` | 명령 조회 | 항상 |
+| GET | `/api/vehicles/{vehicleId}/status-history?limit=` | 상태 이력(기본 50, 1~200, **Isaac 확장 필드 포함**) | 항상 |
+| PUT | `/api/vehicles/{vehicleId}/status` | 상태 갱신(테스트용) | `vehicle.status-test-api.enabled` |
+| **POST** | **`/api/vehicles/{vehicleId}/commands`** | **통합 명령 발행** | 항상 |
+| **GET** | **`/api/vehicles/{vehicleId}/commands`** / **`/{commandId}`** | **명령 조회** | 항상 |
+| POST/GET | `/api/vehicles/{vehicleId}/embedded-commands`(+`/{commandId}`) | 위 API의 **deprecated alias** | 항상 |
 | GET | `/api/vehicles/{forkliftId}/fork-status` | 포크 현재 상태 | 항상 |
 | GET | `/api/vehicles/{forkliftId}/embedded-errors?limit=` | 오류 이력 | 항상 |
 | GET | `/api/ai/cargo-analysis/{analysisId}` | 분석 단건 | 항상 |
 | GET | `/api/cargos/{cargoId}/ai-analysis/latest` | 최신 분석 | 항상 |
-| POST | `/api/mqtt/test` | MQTT 임시 발행(검증용) | `mqtt.test-api.enabled`(로컬만 true) |
+| GET | `/api/stations/measurements/{measurementId}` | 측정 단건 | 항상 |
+| GET | `/api/stations/{stationId}/measurements/latest` | 스테이션 최신 측정 | 항상 |
+| POST | `/api/mqtt/test` | MQTT 임시 발행(검증용) | `mqtt.test-api.enabled` |
 
 공통 응답 형식: `{ "success": bool, "data": {...}|null, "error": { "code", "message" }|null }`.
 
+**명령 관련 ErrorCode**: `COMMAND_TYPE_INVALID`(400), `COMMAND_COMBINATION_INVALID`(400),
+`COMMAND_DESTINATION_INVALID`(400), `COMMAND_NOT_FOUND`(404), `COMMAND_LIMIT_INVALID`(400),
+`COMMAND_ID_DUPLICATED`(409), `VEHICLE_NOT_FOUND`(404).
+
 ---
 
-## 8. 팀 합의 필요(미확정) 및 외부 연동 확인 필요 정리
+## 8. 하위 호환 정책 · 남은 미확정 · 외부 연동 확인 필요
 
-**미확정 (팀 합의 필요, 특히 D=ROS2 / F=프론트)**
-1. 토픽별 QoS/retained 정책(현재 전부 `default-qos=1`, 명령 retained=false 임시).
-2. 위치 `heading`/Isaac `direction`의 단위(degree/radian)와 좌표계/frameId 표준.
-3. ROS2 상태 식별자 키 `forkliftId` vs ROS2 위치 식별자 키 `vehicleId` 불일치 통일 여부.
-4. `VehicleStatus` 최종 상태 값 목록.
-5. Isaac 상태의 forkHeight/hasCargo/cargoId/footprint DB 저장 여부(현재 미저장, 중계만).
-6. `forklift/{id}/command` 토픽을 Isaac/임베디드가 서로 다른 JSON으로 공유하는 방식.
-7. WebSocket payload 봉투 통일(차량=`VehicleWebSocketEvent` vs AI=응답 객체 그대로).
-8. LocalDateTime 타임존/오프셋 처리 규칙.
-9. `forklift/%s/emergency` 토픽의 실제 사용 주체·JSON 규격(현재 미사용).
+### 8.1 하위 호환 (과도기 조치 — 제거 조건 포함)
 
-**외부 연동 확인 필요 (저장소만으로 검증 불가)**
+| 항목 | 동작 | 제거 조건 |
+|---|---|---|
+| 오프셋 없는 timestamp | Asia/Seoul로 간주해 수신 + **경고 로그** (`CommunicationTimeModule`) | 모든 발행 측이 `+09:00`을 붙이고 경고 로그가 사라지면 |
+| 명령 결과의 `forkliftId` 키 | `vehicleId`의 `@JsonAlias`로 수신 | 임베디드·ROS2가 `vehicleId`로 전환하면 |
+| 명령 결과의 `targetSystem`/`commandCategory` 누락 | 해당 검증만 생략 + **deprecated 경고 로그**. WebSocket 출력은 저장된 값으로 채워 완전한 envelope 유지 | 동일 |
+| 위치·경로의 `direction` 필드 | `heading`의 읽기 alias (**단위 변환은 하지 않음**) | Isaac 브리지가 degree `heading`으로 전환하면 |
+| `POST/GET /api/vehicles/{id}/embedded-commands` | `/commands`로 위임하는 alias | 프론트·테스트 도구가 `/commands`로 전환하면 |
+
+**새 규격이 표준이다.** 위 항목은 전부 과도기 조치이며 신규 코드는 새 규격만 사용해야 한다.
+
+### 8.2 남은 미확정 / 팀 확인 필요
+
+1. `STOP` 명령의 `targetSystem`/`commandCategory` 조합 — 확정 규격의 조합표에 없어 기존 동작
+   (`EMBEDDED`+`SAFETY`)을 유지했다. `팀 확인 필요`
+2. Isaac 브리지의 `direction`(rad) → `heading`(degree) **단위 전환 시점** — 백엔드는 이름 alias만
+   제공하고 값 변환은 하지 않는다.
+3. Isaac 브리지의 차량 ID 표기(`SIM_F01` 언더스코어) vs 백엔드 등록 차량(`SIM-F01` 하이픈) 불일치 —
+   백엔드 밖 문제이지만 이대로면 모든 시뮬 메시지가 미등록 차량으로 폐기된다.
+
+### 8.3 외부 연동 확인 필요 (저장소만으로 검증 불가)
+
 - 실제 Mosquitto Broker 송수신·자동 재연결, 로컬/EC2 포트 연결.
-- 실제 ROS2/Isaac Sim의 발행 JSON이 위 DTO와 정확히 일치하는지.
-- 임베디드(REAL) 펌웨어가 `forklift/{id}/command` 임베디드 스키마를 수신·해석하는지.
-- `EMERGENCY_STOP` 수신 즉시 ROS2·모터 드라이버가 실제 정지하는지와 해제 승인·네트워크 단절
+- ROS2/Isaac Sim이 실제로 발행하는 JSON이 위 DTO와 정확히 일치하는지.
+- **ROS2/임베디드가 `forklift/{id}/command`를 구독해 통합 envelope를 해석하는지** — 이 저장소에는
+  이 토픽을 구독하는 코드가 없다.
+- **`EMERGENCY_STOP` 수신 즉시 ROS2·모터 드라이버가 실제로 정지하는지**, 해제 승인·네트워크 단절
   fail-safe·중복 명령 정책.
+- 임베디드·ROS2가 통합 `command-result` envelope를 회신하는지.
 - 프론트엔드(React, 현재 저장소에 없음)의 STOMP 구독·수신.
 
 ---
@@ -475,8 +594,8 @@ REST `POST /api/vehicles/{forkliftId}/embedded-commands` (body `EmbeddedCommandR
 | 방향 | 인바운드(백엔드가 구독) |
 | Publisher | 측정 스테이션 PC |
 | Subscriber | 백엔드 `MqttMessageRouter.routeStationMeasurement` → `StationMeasurementService.process` |
-| QoS | `mqtt.default-qos`(로컬 기본 1) — `미확정`(최종값 합의 필요) |
-| retained | `false`(기본) — `미확정` |
+| QoS | 1 (확정, `mqtt.default-qos`) |
+| retained | `false` (확정) |
 | station_id 검증 | 토픽 `{station_id}`와 payload `station_id` 불일치 시 메시지 폐기 + 경고 로그, 앱은 계속 동작 |
 
 ### 전체 JSON 예시 (수신, snake_case)
@@ -579,8 +698,10 @@ MySQL/H2 공용 DATETIME은 타임존을 담지 못하므로, `measured_at`을 *
 | `/topic/stations/measurements`(전체) | `STATION_MEASUREMENT_COMPLETED` | `StationMeasurementEvent`(envelope) |
 | `/topic/stations/{stationId}/measurements`(스테이션별) | 동일 | 동일 |
 
-envelope: `{ "eventType", "stationId", "occurredAt", "data": StationMeasurementResponse }`. 기존
-`/topic/ai/cargo-analysis`를 재사용하지 않고 스테이션 전용 도메인 경로를 쓴다.
+envelope: 공통 `RealtimeEvent` — `{ "eventType", "vehicleId": null, "occurredAt", "data": StationMeasurementResponse }`
+(§5.1 참고). 스테이션은 차량과 독립적으로 동작해 측정 결과에 차량이 배정되지 않으므로 `vehicleId`는 항상
+null이고, `stationId`/`measurementId`는 최상위로 올리지 않고 `data` 안에 유지된다. destination은 기존
+스테이션 전용 경로를 그대로 쓴다(공통화 대상은 payload 구조이지 경로가 아니다).
 
 ### 조회 REST API
 
@@ -624,10 +745,9 @@ insert 실패 등 예상치 못한 예외는 `@Transactional`로 함께 롤백�
 - 합의 필요(특히 D=ROS2 아님, **F=프론트 / AI 담당**):
   1. direction enum이 프론트 표시 로직과 일치하는지(수직 2개 제약 여부 포함)
   2. bbox_px를 최종적으로 유지할지(관제 오버레이 사용 여부)
-  3. QoS/retained 최종값
   4. HTTP POST 대안 도입 여부 — 이번 구현은 MQTT만, HTTP POST는 **대안 검토 가능**으로만 남김
 
 ---
 
-_기준 커밋/코드 스냅샷: 이 문서는 현재 워킹트리의 운영 코드를 근거로 작성됨. DTO/토픽/destination이 코드에서
+_기준: 이 문서는 2026-07-24 워킹트리의 운영 코드를 근거로 작성됐다. DTO/토픽/destination이 코드에서
 바뀌면 이 문서도 함께 갱신할 것._

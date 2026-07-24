@@ -1,6 +1,6 @@
 package com.fast.backend.vehicle.websocket;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * {@code VEHICLE_STATUS_UPDATED} 이벤트의 {@code data} payload — Isaac Sim 상태 메시지 전용
@@ -21,8 +21,8 @@ public record IsaacVehicleStatusEventData(
         Boolean hasCargo,
         String cargoId,
         Footprint footprint,
-        LocalDateTime timestamp,
-        LocalDateTime receivedAt
+        OffsetDateTime timestamp,
+        OffsetDateTime receivedAt
 ) {
 
     public record Footprint(Double length, Double width) {

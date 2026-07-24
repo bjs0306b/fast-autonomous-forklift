@@ -1,6 +1,6 @@
 package com.fast.backend.embedded.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /** {@code GET /api/vehicles/{forkliftId}/embedded-errors} 목록 응답 항목(prompt29.md 18장). */
 public record EmbeddedErrorResponse(
@@ -10,7 +10,7 @@ public record EmbeddedErrorResponse(
         String errorSource,
         String severity,
         String message,
-        LocalDateTime occurredAt,
-        LocalDateTime receivedAt
+        OffsetDateTime occurredAt,
+        OffsetDateTime receivedAt
 ) {
 }

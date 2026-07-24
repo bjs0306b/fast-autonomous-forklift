@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -26,7 +27,7 @@ import static org.mockito.Mockito.when;
  */
 class IsaacForkliftLocationServiceTest {
 
-    private static final LocalDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000);
+    private static final OffsetDateTime TIMESTAMP = LocalDateTime.of(2026, 7, 22, 10, 30, 0, 123_000_000).atOffset(java.time.ZoneOffset.ofHours(9));
 
     private VehicleMapper vehicleMapper;
     private VehicleWebSocketBroadcaster broadcaster;
@@ -55,7 +56,7 @@ class IsaacForkliftLocationServiceTest {
         assertThat(data.x()).isEqualTo(1.2340);
         assertThat(data.y()).isEqualTo(0.8720);
         // rad 값을 degree로 정규화·변환하지 않는다 — 합의 규격 그대로 보존.
-        assertThat(data.direction()).isEqualTo(1.5708);
+        assertThat(data.heading()).isEqualTo(1.5708);
         assertThat(data.speed()).isEqualTo(0.1500);
         assertThat(data.receivedAt()).isNotNull();
     }
@@ -131,7 +132,7 @@ class IsaacForkliftLocationServiceTest {
     }
 
     @Test
-    void handleLocation_negativeDirection_isAcceptedAsIs() {
+    void handleLocation_negativeHeading_isNormalizedToPositiveRange() {
         // -π~π 범위는 "원칙적으로"라는 표현으로만 명시돼 있어(강제 아님) 음수 자체는 거부하지 않는다.
         when(vehicleMapper.existsByVehicleId("SIM01")).thenReturn(true);
         IsaacForkliftLocationMessage message = new IsaacForkliftLocationMessage(
@@ -142,7 +143,8 @@ class IsaacForkliftLocationServiceTest {
         ArgumentCaptor<IsaacVehicleLocationEventData> captor =
                 ArgumentCaptor.forClass(IsaacVehicleLocationEventData.class);
         verify(broadcaster).broadcastIsaacLocation(eq("SIM01"), captor.capture(), any());
-        assertThat(captor.getValue().direction()).isEqualTo(-1.5708);
+        // prompt32.md 1장 5번 확정: heading은 degree이며 [0,360)으로 정규화된다.
+        assertThat(captor.getValue().heading()).isEqualTo(360.0 - 1.5708);
     }
 
     /**

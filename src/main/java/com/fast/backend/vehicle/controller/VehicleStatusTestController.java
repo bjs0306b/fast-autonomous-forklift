@@ -12,8 +12,6 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.ZoneId;
-
 /**
  * 실제 MQTT(ROS2·Isaac Sim) 연동 전까지 상태 갱신 로직을 검증하기 위한 임시 API
  * (prompt16.md 12장). {@code MqttTestController}와 동일한 패턴 — 독립 프로퍼티 스위치로 켜고 끈다
@@ -38,6 +36,9 @@ public class VehicleStatusTestController {
     @PutMapping("/api/vehicles/{vehicleId}/status")
     public ApiResponse<VehicleStatusResponse> updateStatus(
             @PathVariable String vehicleId, @Valid @RequestBody VehicleStatusUpdateRequest request) {
+        // messageAt은 요청·커맨드 모두 OffsetDateTime이라 변환 없이 그대로 넘긴다(prompt32.md 1장 6번).
+        // Asia/Seoul 벽시계로의 DB 저장 변환은 VehicleStatusService가 CommunicationTime으로 전담한다.
+        // Isaac 확장 필드는 이 테스트 API가 다루지 않으므로 isaacExtras=null로 두어 기존 값이 보존된다.
         VehicleStatusUpdateCommand command = new VehicleStatusUpdateCommand(
                 request.status(),
                 request.battery(),
@@ -45,9 +46,7 @@ public class VehicleStatusTestController {
                 request.positionY(),
                 request.heading(),
                 request.speed(),
-                request.messageAt() != null
-                        ? request.messageAt().atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
-                        : null);
+                request.messageAt());
 
         VehicleStatusResponse response = vehicleStatusService.updateCurrentStatus(vehicleId, command);
         return ApiResponse.success(response);

@@ -2,7 +2,7 @@ package com.fast.backend.vehicle.websocket;
 
 import com.fast.backend.vehicle.domain.VehicleStatus;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * {@code VEHICLE_LOCATION_UPDATED} 이벤트의 {@code data} payload(prompt20.md 8장, prompt24.md 7장).
@@ -27,8 +27,8 @@ public record VehicleLocationEventData(
         Double heading,
         Quaternion quaternion,
         Double speed,
-        LocalDateTime messageAt,
-        LocalDateTime receivedAt
+        OffsetDateTime messageAt,
+        OffsetDateTime receivedAt
 ) {
 
     public record Position(Double x, Double y, String frameId) {

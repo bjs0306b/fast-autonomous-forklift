@@ -20,7 +20,7 @@ class EmbeddedErrorMessageTest {
     @Test
     void deserialize_mapsAllFields() throws Exception {
         String json = "{\"forkliftId\":\"REAL01\",\"errorCode\":\"E001\",\"errorSource\":\"DRIVE\","
-                + "\"severity\":\"CRITICAL\",\"message\":\"모터 과전류\",\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"severity\":\"CRITICAL\",\"message\":\"모터 과전류\",\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         EmbeddedErrorMessage message = objectMapper.readValue(json, EmbeddedErrorMessage.class);
 
@@ -35,7 +35,7 @@ class EmbeddedErrorMessageTest {
     void deserialize_unrecognizedErrorCode_stillDeserializesAsString() throws Exception {
         // errorCode는 후보 목록이 확정되지 않아 String으로만 검증한다(9장 근거) — 임의 문자열도 허용.
         String json = "{\"forkliftId\":\"REAL01\",\"errorCode\":\"E999-UNSEEN\",\"errorSource\":\"SYSTEM\","
-                + "\"severity\":\"WARNING\",\"timestamp\":\"2026-07-22T10:30:00\"}";
+                + "\"severity\":\"WARNING\",\"timestamp\":\"2026-07-22T10:30:00+09:00\"}";
 
         EmbeddedErrorMessage message = objectMapper.readValue(json, EmbeddedErrorMessage.class);
 

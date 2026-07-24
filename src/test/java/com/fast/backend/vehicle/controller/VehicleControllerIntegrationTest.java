@@ -120,7 +120,7 @@ class VehicleControllerIntegrationTest {
 
         vehicleStatusService.updateCurrentStatus("IT-F10",
                 new VehicleStatusUpdateCommand("ACTIVE", 91, 1.0, 2.0, 45.0, 0.5,
-                        java.time.LocalDateTime.now().withNano(0)));
+                        java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)).withNano(0)));
 
         VehicleCurrentStatus current = vehicleCurrentStatusMapper.findByVehicleId("IT-F10").orElseThrow();
         org.assertj.core.api.Assertions.assertThat(current.getStatus()).isEqualTo(VehicleStatus.ACTIVE);
@@ -138,7 +138,7 @@ class VehicleControllerIntegrationTest {
                 .andExpect(status().isCreated());
         vehicleStatusService.updateCurrentStatus("IT-F11",
                 new VehicleStatusUpdateCommand("ACTIVE", 80, null, null, null, null,
-                        java.time.LocalDateTime.now().withNano(0)));
+                        java.time.OffsetDateTime.now(java.time.ZoneOffset.ofHours(9)).withNano(0)));
 
         mockMvc.perform(patch("/api/vehicles/IT-F11/active")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -225,9 +225,9 @@ class VehicleControllerIntegrationTest {
         }
         java.time.LocalDateTime messageAt = java.time.LocalDateTime.now().withNano(0);
         vehicleStatusService.updateCurrentStatus("IT-F14",
-                new VehicleStatusUpdateCommand("ACTIVE", 80, null, null, null, null, messageAt));
+                new VehicleStatusUpdateCommand("ACTIVE", 80, null, null, null, null, messageAt.atOffset(java.time.ZoneOffset.ofHours(9))));
         vehicleStatusService.updateCurrentStatus("IT-F15",
-                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, messageAt));
+                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, messageAt.atOffset(java.time.ZoneOffset.ofHours(9))));
         mockMvc.perform(patch("/api/vehicles/IT-F15/active")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":false}"))
@@ -271,10 +271,10 @@ class VehicleControllerIntegrationTest {
     }
 
     @Test
-    void statusCounts_returnsAllFiveStatusesWithTotal() throws Exception {
+    void statusCounts_returnsAllTenStatusesWithTotal() throws Exception {
         mockMvc.perform(get("/api/vehicles/status-counts"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items.length()").value(5));
+                .andExpect(jsonPath("$.data.items.length()").value(10));
     }
 
     /**
@@ -295,9 +295,9 @@ class VehicleControllerIntegrationTest {
         java.time.LocalDateTime t1 = java.time.LocalDateTime.now().minusMinutes(1);
         java.time.LocalDateTime t2 = java.time.LocalDateTime.now();
         vehicleStatusService.updateCurrentStatus("IT-F05",
-                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, t1));
+                new VehicleStatusUpdateCommand("IDLE", 70, null, null, null, null, t1.atOffset(java.time.ZoneOffset.ofHours(9))));
         vehicleStatusService.updateCurrentStatus("IT-F05",
-                new VehicleStatusUpdateCommand("ACTIVE", 65, 1.0, 2.0, 90.0, 0.5, t2));
+                new VehicleStatusUpdateCommand("ACTIVE", 65, 1.0, 2.0, 90.0, 0.5, t2.atOffset(java.time.ZoneOffset.ofHours(9))));
 
         mockMvc.perform(get("/api/vehicles/IT-F05"))
                 .andExpect(status().isOk())

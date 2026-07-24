@@ -37,12 +37,12 @@ class VehicleStatusTestControllerTest {
     }
 
     @Test
-    void updateStatus_convertsOffsetDateTimeToLocalDateTimeAndDelegates() {
+    void updateStatus_passesOffsetDateTimeThroughUnchanged() {
         OffsetDateTime messageAt = OffsetDateTime.of(2026, 7, 21, 18, 0, 0, 0, ZoneOffset.ofHours(9));
         VehicleStatusUpdateRequest request = new VehicleStatusUpdateRequest(
                 "ACTIVE", 82, 1.2, 3.4, 90.0, 0.4, messageAt);
         VehicleStatusResponse expected = new VehicleStatusResponse(
-                VehicleStatus.ACTIVE, 82, 1.2, 3.4, 90.0, 0.4, null, null);
+                VehicleStatus.ACTIVE, 82, 1.2, 3.4, 90.0, 0.4, null, null, null, null, null, null, null);
         when(vehicleStatusService.updateCurrentStatus(eq("SIM-F01"), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(expected);
 
@@ -55,14 +55,17 @@ class VehicleStatusTestControllerTest {
         VehicleStatusUpdateCommand command = captor.getValue();
         assertThat(command.status()).isEqualTo("ACTIVE");
         assertThat(command.battery()).isEqualTo(82);
-        assertThat(command.messageAt()).isEqualTo(messageAt.atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDateTime());
+        // prompt32.md 1장 6번 확정: 요청·커맨드 모두 OffsetDateTime이라 Controller가 변환하지 않는다.
+        assertThat(command.messageAt()).isEqualTo(messageAt);
+        // Isaac 확장 필드를 다루지 않는 호출자이므로 isaacExtras는 null이어야 한다(기존 값 보존).
+        assertThat(command.isaacExtras()).isNull();
     }
 
     @Test
     void updateStatus_nullMessageAt_passesNullThrough() {
         VehicleStatusUpdateRequest request = new VehicleStatusUpdateRequest("IDLE", null, null, null, null, null, null);
         when(vehicleStatusService.updateCurrentStatus(eq("SIM-F01"), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new VehicleStatusResponse(VehicleStatus.IDLE, null, null, null, null, null, null, null));
+                .thenReturn(new VehicleStatusResponse(VehicleStatus.IDLE, null, null, null, null, null, null, null, null, null, null, null, null));
 
         controller.updateStatus("SIM-F01", request);
 

@@ -29,17 +29,26 @@ CREATE TABLE IF NOT EXISTS vehicle (
 -- 차량당 최신 상태 한 행만 유지(vehicle_id가 PK). 상태 이력 테이블(vehicle_status_history)은
 -- 이번 FR-501-1 범위에 포함하지 않는다 — 필요해지면 후속 Story로 분리한다(prompt16.md 7장 조건,
 -- answer15.md 15장 참고).
+-- Isaac 확장 필드(fork_height/has_cargo/cargo_id/footprint_length/footprint_width)는 prompt32.md 1장
+-- 4번 확정에 따라 추가했다. Isaac 상태 메시지에만 들어오는 값이라 전부 nullable이며, ROS2 상태 메시지가
+-- 이 컬럼들을 null로 덮어쓰지 않도록 VehicleStatusService가 "기존 값 보존" 정책으로 병합한다
+-- (그 클래스 Javadoc의 "Isaac 확장 필드 병합 정책" 참고).
 CREATE TABLE IF NOT EXISTS vehicle_current_status (
-    vehicle_id   VARCHAR(50)  NOT NULL PRIMARY KEY,
-    status       VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
-    battery      INT          NULL,
-    position_x   DOUBLE       NULL,
-    position_y   DOUBLE       NULL,
-    heading      DOUBLE       NULL,
-    speed        DOUBLE       NULL,
-    message_at   DATETIME     NULL,
-    received_at  DATETIME     NOT NULL,
-    updated_at   DATETIME     NOT NULL,
+    vehicle_id       VARCHAR(50)  NOT NULL PRIMARY KEY,
+    status           VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
+    battery          INT          NULL,
+    position_x       DOUBLE       NULL,
+    position_y       DOUBLE       NULL,
+    heading          DOUBLE       NULL,
+    speed            DOUBLE       NULL,
+    fork_height      DOUBLE       NULL,
+    has_cargo        BOOLEAN      NULL,
+    cargo_id         VARCHAR(50)  NULL,
+    footprint_length DOUBLE       NULL,
+    footprint_width  DOUBLE       NULL,
+    message_at       DATETIME     NULL,
+    received_at      DATETIME     NOT NULL,
+    updated_at       DATETIME     NOT NULL,
     CONSTRAINT fk_vehicle_current_status_vehicle
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id)
 );
@@ -53,17 +62,22 @@ CREATE TABLE IF NOT EXISTS vehicle_current_status (
 -- 두면 "인덱스가 이미 존재함" 오류로 두 번째 컨텍스트 기동이 실패한다. 인라인으로 두면 테이블
 -- 전체가 CREATE TABLE IF NOT EXISTS 하나로 함께 보호된다.
 CREATE TABLE IF NOT EXISTS vehicle_status_history (
-    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    vehicle_id   VARCHAR(50) NOT NULL,
-    status       VARCHAR(20) NOT NULL,
-    battery      INT NULL,
-    position_x   DOUBLE NULL,
-    position_y   DOUBLE NULL,
-    heading      DOUBLE NULL,
-    speed        DOUBLE NULL,
-    message_at   DATETIME NULL,
-    received_at  DATETIME NOT NULL,
-    created_at   DATETIME NOT NULL,
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    vehicle_id       VARCHAR(50) NOT NULL,
+    status           VARCHAR(20) NOT NULL,
+    battery          INT NULL,
+    position_x       DOUBLE NULL,
+    position_y       DOUBLE NULL,
+    heading          DOUBLE NULL,
+    speed            DOUBLE NULL,
+    fork_height      DOUBLE NULL,
+    has_cargo        BOOLEAN NULL,
+    cargo_id         VARCHAR(50) NULL,
+    footprint_length DOUBLE NULL,
+    footprint_width  DOUBLE NULL,
+    message_at       DATETIME NULL,
+    received_at      DATETIME NOT NULL,
+    created_at       DATETIME NOT NULL,
     CONSTRAINT fk_vehicle_status_history_vehicle
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
     INDEX idx_vehicle_status_history_vehicle_message (vehicle_id, message_at DESC)
@@ -181,15 +195,31 @@ CREATE TABLE IF NOT EXISTS station_measurement_box (
         FOREIGN KEY (station_measurement_id) REFERENCES station_measurement (id)
 );
 
--- 실물 지게차(REAL01) 임베디드 제어 명령(prompt29.md 17장). command_id는 REST 응답·MQTT 결과 연결의
--- 유일한 키라 UNIQUE로 이중 방어한다(애플리케이션 사전 확인 + DB 제약, prompt27.md에서 검증한 패턴과
--- 동일). stopped_actions는 loadBalance.direction(prompt26.md)과 동일하게 쉼표 구분 문자열로 저장한다
+-- 차량 제어 명령 통합 테이블(prompt29.md 17장 → prompt32.md 1장 7~11번, 3장 3번으로 확장).
+-- command_id는 REST 응답·MQTT 결과 연결의 유일한 키라 UNIQUE로 이중 방어한다(애플리케이션 사전 확인 +
+-- DB 제약). stopped_actions는 loadBalance.direction(prompt26.md)과 동일하게 쉼표 구분 문자열로 저장한다
 -- (JSON 컬럼 미사용 원칙 유지, 원소가 최대 3개뿐이라 자식 테이블도 과함).
+--
+-- prompt32.md 확정으로 추가된 컬럼:
+--   target_system    ROS2 / EMBEDDED / ALL
+--   command_category MOVE / FORK / LOAD / SAFETY
+--   payload_json     명령별로 구조가 다른 payload를 JSON "문자열"로 보관. MySQL JSON 컬럼 타입을 쓰지
+--                    않은 이유는 이 프로젝트가 한 번도 JSON 컬럼을 쓴 적이 없고(load_direction/
+--                    stopped_actions 모두 문자열), 테스트가 도는 H2와의 호환 문제를 새로 만들지 않기
+--                    위해서다(prompt32.md 3장 4번 "H2 테스트 호환성을 고려해 안전한 방식을 선택").
+--
+-- 테이블/컬럼 이름은 embedded_vehicle_command · forklift_id를 그대로 유지한다(prompt32.md 3장 3번이
+-- 허용한 "기존 forklift_id 유지 정책"). 이름을 바꾸면 운영 DB 마이그레이션과 기존 데이터 이관 위험이
+-- 커지는 데 비해 얻는 게 이름 일관성뿐이기 때문이다. 애플리케이션 계층(Domain/DTO/JSON)에서는 확정
+-- 규격대로 vehicleId를 쓰고, Mapper XML이 forklift_id 컬럼과 매핑한다.
 CREATE TABLE IF NOT EXISTS embedded_vehicle_command (
     id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
     command_id               VARCHAR(100) NOT NULL,
     forklift_id              VARCHAR(50) NOT NULL,
     command                  VARCHAR(30) NOT NULL,
+    target_system            VARCHAR(20) NOT NULL,
+    command_category         VARCHAR(20) NOT NULL,
+    payload_json             VARCHAR(1000) NULL,
     reason                   VARCHAR(100) NULL,
     status                   VARCHAR(20) NOT NULL,
     issued_at                DATETIME NOT NULL,

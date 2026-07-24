@@ -5,11 +5,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fast.backend.ai.dto.AiCargoAnalysisMessage;
 import com.fast.backend.ai.service.AiCargoAnalysisService;
+import com.fast.backend.command.dto.VehicleCommandResultMessage;
+import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.config.mqtt.MqttTopics;
-import com.fast.backend.embedded.dto.EmbeddedCommandResultMessage;
 import com.fast.backend.embedded.dto.EmbeddedErrorMessage;
 import com.fast.backend.embedded.dto.EmbeddedForkStatusMessage;
-import com.fast.backend.embedded.service.EmbeddedCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedErrorService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
 import com.fast.backend.forklift.dto.ForkliftLocationMessage;
@@ -52,7 +52,7 @@ public class MqttMessageRouter {
     private final IsaacForkliftLocationService isaacForkliftLocationService;
     private final IsaacForkliftStatusService isaacForkliftStatusService;
     private final IsaacForkliftPathService isaacForkliftPathService;
-    private final EmbeddedCommandResultService embeddedCommandResultService;
+    private final VehicleCommandResultService vehicleCommandResultService;
     private final EmbeddedForkStatusService embeddedForkStatusService;
     private final EmbeddedErrorService embeddedErrorService;
     private final StationMeasurementService stationMeasurementService;
@@ -63,7 +63,7 @@ public class MqttMessageRouter {
             IsaacForkliftLocationService isaacForkliftLocationService,
             IsaacForkliftStatusService isaacForkliftStatusService,
             IsaacForkliftPathService isaacForkliftPathService,
-            EmbeddedCommandResultService embeddedCommandResultService,
+            VehicleCommandResultService vehicleCommandResultService,
             EmbeddedForkStatusService embeddedForkStatusService,
             EmbeddedErrorService embeddedErrorService,
             StationMeasurementService stationMeasurementService) {
@@ -75,7 +75,7 @@ public class MqttMessageRouter {
         this.isaacForkliftLocationService = isaacForkliftLocationService;
         this.isaacForkliftStatusService = isaacForkliftStatusService;
         this.isaacForkliftPathService = isaacForkliftPathService;
-        this.embeddedCommandResultService = embeddedCommandResultService;
+        this.vehicleCommandResultService = vehicleCommandResultService;
         this.embeddedForkStatusService = embeddedForkStatusService;
         this.embeddedErrorService = embeddedErrorService;
         this.stationMeasurementService = stationMeasurementService;
@@ -180,15 +180,15 @@ public class MqttMessageRouter {
      */
     private void routeCommandResult(String topic, String payload) {
         try {
-            EmbeddedCommandResultMessage message = objectMapper.readValue(payload, EmbeddedCommandResultMessage.class);
-            if (!isVehicleIdConsistentWithTopic(topic, message.forkliftId())) {
+            VehicleCommandResultMessage message = objectMapper.readValue(payload, VehicleCommandResultMessage.class);
+            if (!isVehicleIdConsistentWithTopic(topic, message.vehicleId())) {
                 return;
             }
-            embeddedCommandResultService.handleResult(message);
+            vehicleCommandResultService.handleResult(message);
         } catch (JsonProcessingException e) {
-            log.error("Failed to parse embedded command result message: topic={}, error={}", topic, e.getMessage());
+            log.error("Failed to parse vehicle command result message: topic={}, error={}", topic, e.getMessage());
         } catch (RuntimeException e) {
-            log.error("Embedded command result processing failed unexpectedly: error={}", e.getMessage());
+            log.error("Vehicle command result processing failed unexpectedly: error={}", e.getMessage());
         }
     }
 

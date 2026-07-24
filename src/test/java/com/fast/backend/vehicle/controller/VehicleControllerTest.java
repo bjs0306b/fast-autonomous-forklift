@@ -105,7 +105,7 @@ class VehicleControllerTest {
     void statusHistory_defaultLimit_delegatesFiftyToService() {
         List<VehicleStatusHistoryResponse> expected = List.of(
                 new VehicleStatusHistoryResponse(1L, "SIM-F01", VehicleStatus.ACTIVE, 82, 1.2, 3.4, 90.0, 0.4,
-                        null, null, null));
+                        null, null, null, null, null, null, null, null));
         when(vehicleStatusHistoryService.findRecentHistory("SIM-F01", 50)).thenReturn(expected);
 
         ApiResponse<List<VehicleStatusHistoryResponse>> response = controller.statusHistory("SIM-F01", 50);

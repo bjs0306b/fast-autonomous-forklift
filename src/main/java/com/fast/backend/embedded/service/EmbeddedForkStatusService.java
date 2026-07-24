@@ -2,6 +2,7 @@ package com.fast.backend.embedded.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.embedded.domain.EmbeddedForkState;
 import com.fast.backend.embedded.domain.VehicleForkCurrentStatus;
 import com.fast.backend.embedded.dto.EmbeddedForkStatusMessage;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * {@code forklift/{id}/fork-status} 메시지를 검증·저장·브로드캐스트한다(prompt29.md 8장·16장
@@ -66,15 +68,15 @@ public class EmbeddedForkStatusService {
                         message.forkliftId(), forkState);
             }
 
-            LocalDateTime receivedAt = LocalDateTime.now();
+            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
             VehicleForkCurrentStatus entity = new VehicleForkCurrentStatus();
             entity.setForkliftId(message.forkliftId());
             entity.setForkState(forkState);
             entity.setLimitBottom(message.limitBottom());
             entity.setErrorCode(message.errorCode());
-            entity.setMessageAt(message.timestamp());
-            entity.setReceivedAt(receivedAt);
-            entity.setUpdatedAt(receivedAt);
+            entity.setMessageAt(CommunicationTime.toLocal(message.timestamp()));
+            entity.setReceivedAt(CommunicationTime.toLocal(receivedAt));
+            entity.setUpdatedAt(CommunicationTime.toLocal(receivedAt));
             forkStatusMapper.upsert(entity);
 
             EmbeddedForkStatusEventData data = new EmbeddedForkStatusEventData(
@@ -100,8 +102,8 @@ public class EmbeddedForkStatusService {
                 status.getForkState() != null ? status.getForkState().name() : null,
                 status.getLimitBottom(),
                 status.getErrorCode(),
-                status.getMessageAt(),
-                status.getReceivedAt());
+                CommunicationTime.toOffset(status.getMessageAt()),
+                CommunicationTime.toOffset(status.getReceivedAt()));
     }
 
     private boolean isValid(EmbeddedForkStatusMessage message) {
