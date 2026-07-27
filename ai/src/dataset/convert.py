@@ -21,7 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="공개 데이터셋 → 박스 단일 클래스 COCO 변환")
     parser.add_argument("--config", type=Path, required=True, help="데이터셋 구성 YAML")
     parser.add_argument("--out", type=Path, help="출력 경로 (미지정 시 config의 output 사용)")
-    parser.add_argument("--only", help="특정 소스 하나만 변환 (소스 name)")
+    parser.add_argument("--only", action="append",
+                        help="특정 소스만 변환 (소스 name, 반복 지정 가능)")
     parser.add_argument(
         "--keep-empty",
         action="store_true",
@@ -44,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for source in config["sources"]:
         name = source["name"]
-        if args.only and name != args.only:
+        if args.only and name not in args.only:
             continue
         if not source.get("enabled", True) and not args.only:
             print(f"[건너뜀] {name} — enabled: false")
