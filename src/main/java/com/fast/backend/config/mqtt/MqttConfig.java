@@ -23,8 +23,10 @@ import java.util.Arrays;
  * MQTT v3(Eclipse Paho) 연결, 구독(Inbound), 발행(Outbound) 인프라를 구성한다.
  * Inbound/Outbound는 {@link #mqttClientFactory()} 하나를 공유하되, 서로 다른 Client ID로 접속한다.
  *
- * <p>실제로 Broker에 접속하는 6개 Bean(Client Factory, 3개 Channel, Inbound Adapter, Outbound Handler)은
- * {@code mqtt.enabled}(기본값 true)이 false일 때 생성되지 않는다. MQTT를 다루지 않는
+ * <p>실제로 Broker에 접속하는 Client Factory, Inbound Adapter, Outbound Handler는
+ * {@code mqtt.enabled}(기본값 true)이 false일 때 생성되지 않는다. {@code @ServiceActivator}가 참조하는
+ * 채널 이름은 Spring Integration이 암시적으로 생성할 수 있지만, Paho 연결 Bean이 없으므로 실제 Broker
+ * 접속은 발생하지 않는다. MQTT를 다루지 않는
  * {@code @SpringBootTest}(예: {@code FastBackendApplicationTests})가 매번 실제 Broker에 접속하면서
  * 같은 Client ID로 충돌(Lost connection)하는 문제를 막기 위해, 테스트 프로필({@code application-test.yml})에서
  * 이 값을 false로 둔다. {@link MqttProperties} 바인딩 자체는 조건과 무관하게 항상 활성화된다.
@@ -102,7 +104,12 @@ public class MqttConfig {
         String[] topics = {
                 mqttTopics.forkliftStatusSubscribeTopic(),
                 mqttTopics.forkliftLocationSubscribeTopic(),
-                mqttTopics.cargoDetectedTopic()
+                mqttTopics.forkliftPathSubscribeTopic(),
+                mqttTopics.forkliftCommandResultSubscribeTopic(),
+                mqttTopics.forkliftForkStatusSubscribeTopic(),
+                mqttTopics.forkliftErrorSubscribeTopic(),
+                mqttTopics.cargoDetectedTopic(),
+                mqttTopics.stationMeasurementSubscribeTopic()
         };
         int[] qosLevels = new int[topics.length];
         Arrays.fill(qosLevels, mqttProperties.defaultQos());

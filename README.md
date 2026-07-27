@@ -2,9 +2,9 @@
 
 F.A.S.T. — AIoT 기반 무인 지게차 물류 자동화 시스템의 Spring Boot 백엔드입니다.
 
-이 저장소의 현재 단계 목표는 Jira 이슈 **S15P11A304-88 (Spring Boot 프로젝트 골격 구성)** 범위에 한정됩니다.
-실제 비즈니스 기능(MQTT, MySQL, MyBatis, WebSocket, ROS2/Isaac Sim/React 연동, 차량 제어 등)은 아직 구현하지 않으며,
-향후 이러한 기능을 추가하기 쉬운 패키지 구조와 공통 기반(공통 응답, 예외 처리, 설정, 로깅)만 제공합니다.
+현재 저장소에는 Spring Boot 공통 기반뿐 아니라 MQTT 수신·명령 발행, MySQL/MyBatis 차량 상태·명령 저장,
+WebSocket 이벤트 중계가 구현되어 있습니다. 실제 Mosquitto/ROS2/임베디드와의 end-to-end 연동 완료 여부는
+코드 구현·자동 테스트와 구분해 각 문서의 `외부 연동 확인 필요` 항목으로 관리합니다.
 
 ## 시스템 구성 (최종 목표)
 
@@ -64,15 +64,90 @@ com.fast.backend
 
 Spring Integration MQTT + Eclipse Paho MQTT v3로 MQTT Broker(Eclipse Mosquitto) 연결, 구독, 발행을 구현했다.
 
-- 구독 토픽: `forklift/+/status`, `forklift/+/location`, `cargo/detected`
+### Broker 실행 (infra/mqtt)
+
+브로커 실행 구성은 [`infra/mqtt/`](infra/mqtt/README.md)에 있다. Docker 가 있으면 Compose 로,
+없으면 Windows/Ubuntu 직접 설치로 띄운다.
+
+```bash
+cd infra/mqtt && docker compose up -d      # Docker 사용 시
+```
+
+MQTT 경로만 검증하려면(= MySQL 자격증명 없이) `mqttcheck` 프로필을 쓴다. 임베디드 H2 + 실제 브로커
+연결 조합이며, H2 가 `test` scope 라 테스트 classpath 를 빌려 쓴다.
+
+```bash
+mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck" "-Dspring-boot.run.useTestClasspath=true"
+```
+
+브로커 실행·연결·구독·명령 발행·retained·재연결 확인 절차는 전부
+[`infra/mqtt/README.md`](infra/mqtt/README.md)에 정리돼 있다.
+
+- 구독 토픽(8종, 백엔드가 실제 사용하는 MQTT QoS는 전부 **1**): `forklift/+/status`, `forklift/+/location`,
+  `forklift/+/path`, `forklift/+/command-result`, `forklift/+/fork-status`, `forklift/+/error`,
+  `cargo/detected`, `fast/station/+/measurement`. QoS는 `mqtt.default-qos`(로컬 기본 1) 하나를 8개 토픽에
+  균등 적용한다(`MqttConfig.mqttInboundAdapter`, `MqttConfigTest`로 회귀 검증).
+- 발행 토픽(1종): `forklift/{vehicleId}/command` — 이동(ROS2)·포크/적재(임베디드)·비상정지를 모두
+  이 토픽 하나로 발행한다. payload의 `targetSystem`/`commandCategory`로 수신 측이 분기한다.
+  **MQTT QoS 1, retained false**(확정, `VehicleCommandPublisher`의 코드 상수 — 설정값을 참조하지 않음).
+  구 `forklift/{id}/emergency` 전용 토픽은 제거됐다.
+- **백엔드가 보장하는 범위**: ① 발행 시 QoS 1/retained false(코드 상수) ② 구독 시 QoS 1(`mqtt.default-qos`).
+  **외부 연동 확인 필요**: ROS2/Isaac/임베디드/AI/스테이션이 실제로 QoS 1로 발행하는지는 백엔드 코드만으로
+  보장할 수 없다 — 저장소만으로는 확인 불가.
 - 수신 흐름: `MqttPahoMessageDrivenChannelAdapter` → `mqttInputChannel` → `MqttMessageReceiver` → `MqttMessageRouter` → (`ForkliftStatusMessage`/`ForkliftLocationMessage`로 역직렬화 후 처리, 알 수 없는 토픽은 경고 로그, 잘못된 JSON은 오류 로그만 남기고 계속 동작)
 - 발행 흐름: 도메인 Service → `MqttPublisher` → `MqttGateway` → `mqttOutboundChannel` → `MqttPahoMessageHandler` → MQTT Broker
 - 접속 설정은 `application-local.yml`의 `mqtt.*`를 `MqttProperties`(`@ConfigurationProperties`)로 바인딩해서 사용하며, 코드에 하드코딩하지 않는다. 주요 접속 값(`enabled`, `test-api.enabled`, `broker-url`, `username`, `password`, `inbound-client-id`, `outbound-client-id`, `default-qos`)은 `${ENV_VAR:기본값}` 형태로 환경변수 오버라이드가 가능하다(아래 "EC2 Mosquitto Broker 연동" 참고).
 - Inbound(`fast-backend-inbound`)와 Outbound(`fast-backend-outbound`) Client ID는 분리되어 있고, `MqttPahoClientFactory` 하나를 공유한다.
 - 검증용 임시 API: `POST /api/mqtt/test` (`{"topic":"...","payload":"...","qos":1,"retained":false}`) — 실제 지게차 제어 API가 아니며, 이번 Jira 이슈 검증 목적으로만 존재한다. `mqtt.test-api.enabled` 프로퍼티로 켜고 끄며, **기본값은 `false`(비활성화)**다(prompt9.md 기준 변경 — 값을 명시하지 않은 환경에서는 노출되지 않는 것이 더 안전하다는 판단). 로컬 개발 환경(`application-local.yml`)에서는 이 값을 `true`로 명시적으로 켜뒀다(`@Profile`이 아니라 `@ConditionalOnProperty`를 쓰는 이유는 `answer7.md` 8장 참고).
-- MQTT 인프라(Client Factory/Channel/Adapter/Handler) 전체도 `mqtt.enabled`(기본값 `true`)로 켜고 끌 수 있다. `src/test/resources/application-test.yml`에서 이 값을 `false`로 둬서, `@SpringBootTest`가 여러 개 뜰 때 같은 Client ID로 실제 Broker에 동시 접속하며 발생하던 `Lost connection` 로그를 없앴다(`answer7.md` 참고).
-- 통신 규격(JSON 필드)은 확정 규격이 아니라 임시 Mock 규격이다.
+- MQTT의 broker 연결 Bean(Client Factory/Inbound Adapter/Outbound Handler)은 `mqtt.enabled`(기본값
+  `true`)로 켜고 끌 수 있다. `src/test/resources/application-test.yml`에서는 `false`로 두므로 실제
+  Broker에 접속하지 않는다. `@ServiceActivator`가 참조하는 내부 channel은 Spring Integration이 자동
+  생성할 수 있지만 Paho 연결 Bean이 없어 외부 접속은 발생하지 않는다.
+- 수신 경계는 전체 payload 대신 byte 길이만 로그에 남긴다. null/blank/non-object/잘못된 JSON은
+  Router가 해당 메시지만 폐기하고, 예상하지 못한 Service 예외도 Router와 Receiver의 이중 경계에서
+  consumer thread 밖으로 전파되지 않는다.
+- gateway 발행 실패는 `MqttPublishException`으로 변환된다. `VehicleCommandService`는 이를 받아 DB
+  상태를 `PUBLISH_FAILED`로 저장하며, gateway 호출 성공은 broker/차량 수신 성공과 구분한다.
+- 통신 규격(JSON 필드)은 2026-07-24 팀 확정 규격으로 갱신됐다(아래 "확정 통신 규격 요약" 참고).
 - 실제 로컬 Mosquitto(winget으로 설치, Windows 서비스로 상시 구동)를 대상으로 구독 성공, 상태/위치/cargo 메시지 수신, 잘못된 JSON 무시, `POST /api/mqtt/test` → `mosquitto_sub` 수신, Broker 재기동 후 자동 재연결까지 실제로 검증했다(`prompt/answer/answer5.md` 참고).
+
+### 실브로커 검증 완료 범위 (2026-07-24)
+
+`mqttcheck` 프로필로 실제 Mosquitto(localhost:1883)를 대상으로 아래를 확인했다. 상세 로그와 재현
+절차는 [`infra/mqtt/README.md`](infra/mqtt/README.md) 5절과 `prompt/answer/answer41.md` 참고.
+
+| 항목 | 결과 |
+|---|---|
+| `mosquitto_pub`/`sub` 왕복 | 성공 |
+| 백엔드 → 브로커 연결, 8토픽 구독(QoS 전부 1) | 성공 |
+| 상태 수신 → Router → Service → DB(current+history) → WebSocket | 성공 |
+| 명령 발행 `forklift/{id}/command` (QoS 1) | 성공 |
+| retained false 실동작(재구독 시 과거 명령 미전달) | 성공 |
+| 잘못된 JSON 폐기 후 consumer 계속 동작 | 성공 |
+
+**미검증**: Docker Compose 기동(개발 PC에 Docker 없음), 브로커 중지·재시작 재연결 실동작,
+EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 명령 수신·결과 회신.
+
+### 확정 통신 규격 요약 (2026-07-24)
+
+팀 확정 규격을 코드에 반영했다. 상세는 `docs/backend-message/communication-protocol.md` 참고.
+
+- **시각**: 모든 통신 시각은 Asia/Seoul `+09:00` ISO-8601 `OffsetDateTime`
+  (예: `2026-07-23T11:20:27+09:00`). DB에는 Asia/Seoul 벽시계로 저장하고 읽을 때 오프셋을 복원한다.
+- **차량 상태 10종**: `UNKNOWN, IDLE, ACTIVE, MOVING, LIFTING, LOADING, UNLOADING, ESTOP, ERROR, OFFLINE`.
+  `MOVING`을 `ACTIVE`로 변환하던 기존 정규화는 폐지됐다 — 어떤 값도 다른 값으로 흡수되지 않는다.
+- **좌표·방향**: 좌표 단위 m, `frameId`는 `map`/`odom`만 허용(기본 `map`), 방향 필드는 `heading`
+  (단위 degree, [0,360) 정규화). Isaac의 구 `direction` 필드는 과도기 읽기 alias로만 허용한다.
+- **Isaac 확장 필드 DB 저장**: `forkHeight`/`hasCargo`/`cargoId`/`footprint`가 `vehicle_current_status`와
+  `vehicle_status_history`에 저장된다. ROS2 상태 메시지는 이 값들을 null로 덮어쓰지 않고 보존한다.
+- **명령 공통 envelope**: `{commandId, vehicleId, targetSystem, commandCategory, command, payload, reason, timestamp}`.
+  `commandId`(UUID)와 `timestamp`는 백엔드가 생성하며, 잘못된 조합은 발행하지 않고 400으로 거부한다.
+- **WebSocket 공통 envelope**: 차량·AI·스테이션 이벤트가 모두
+  `{eventType, vehicleId, occurredAt, data}` 형태를 공유한다(`vehicleId`는 nullable).
+
+운영 DB에 적용할 마이그레이션 SQL은
+`src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql`에 있다
+(schema.sql과 마찬가지로 **수동 실행 전제**).
 
 ### 알려진 제한사항
 

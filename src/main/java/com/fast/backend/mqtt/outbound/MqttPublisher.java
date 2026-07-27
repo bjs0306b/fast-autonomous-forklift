@@ -36,7 +36,14 @@ public class MqttPublisher {
      */
     public void publishRaw(String payload, String topic, int qos, boolean retained) {
         log.info("Publishing MQTT message: topic={}, qos={}, retained={}", topic, qos, retained);
-        mqttGateway.publish(payload, topic, qos, retained);
+        try {
+            mqttGateway.publish(payload, topic, qos, retained);
+            log.info("MQTT publish accepted: topic={}, qos={}, retained={}", topic, qos, retained);
+        } catch (RuntimeException e) {
+            log.error("MQTT publish failed: topic={}, qos={}, retained={}, error={}",
+                    topic, qos, retained, e.getMessage());
+            throw new MqttPublishException("Failed to publish MQTT message: topic=" + topic, e);
+        }
     }
 
     private String serialize(Object payload) {

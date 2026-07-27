@@ -1,0 +1,232 @@
+# Nav2 params for a simulated forklift (SIM_F02).
+#
+# Draft. Once D hands over the params used on the real Orin, switch to that file
+# and only change the frame/topic names - keeping one tuned config for both the
+# real and simulated vehicle is what makes sim results mean anything.
+#
+# Vehicle: rear-wheel steered, cannot rotate in place.
+#   wheelbase 0.16 m, max steer 0.5 rad  ->  min turning radius 0.293 m
+#   Aisles must therefore be at least 2*0.293 + body width wide.
+#
+# Frame names come from kinematic_vehicle.py: "<VEHICLE_ID>_base_link" etc.
+# Change SIM_F02_* throughout when running a different vehicle.
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: "SIM_F02_base_link"
+    odom_frame_id: "SIM_F02_odom"
+    global_frame_id: "map"
+    scan_topic: scan
+    # The scene is 3x2 m, so the defaults (tuned for building-sized maps) are
+    # far too coarse.
+    laser_max_range: 12.0
+    laser_min_range: 0.12
+    max_particles: 2000
+    min_particles: 500
+    # Update after small movements - a miniature vehicle covers little ground.
+    update_min_d: 0.05
+    update_min_a: 0.1
+    resample_interval: 1
+    transform_tolerance: 0.5
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    set_initial_pose: false
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: SIM_F02_base_link
+    odom_topic: odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.05
+      movement_time_allowance: 15.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.15
+      stateful: true
+
+    # Regulated Pure Pursuit suits a car-like vehicle: it follows the path with
+    # a lookahead point instead of trying to rotate towards the goal, which an
+    # Ackermann chassis cannot do.
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.2
+      lookahead_dist: 0.3
+      min_lookahead_dist: 0.15
+      max_lookahead_dist: 0.5
+      use_velocity_scaled_lookahead_dist: true
+      transform_tolerance: 0.2
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 0.293   # = min turning radius
+      regulated_linear_scaling_min_speed: 0.05
+      # No in-place rotation. Leaving this on makes the controller command a
+      # spin the vehicle physically cannot perform, and it stalls.
+      use_rotate_to_heading: false
+      allow_reversing: false
+      max_angular_accel: 1.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: SIM_F02_odom
+      robot_base_frame: SIM_F02_base_link
+      rolling_window: true
+      width: 2
+      height: 2
+      resolution: 0.02
+      footprint: "[[0.14, 0.08], [0.14, -0.08], [-0.14, -0.08], [-0.14, 0.08]]"
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        # The real vehicle sees with lidar plus two forward ToF modules
+        # (FR-304). The simulated one must use the same set, otherwise a path
+        # that is clear in simulation can be blocked in reality.
+        observation_sources: scan tof_left tof_right
+        scan:
+          topic: scan
+          data_type: "LaserScan"
+          max_obstacle_height: 0.5
+          raytrace_max_range: 12.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 8.0
+          obstacle_min_range: 0.0
+          clearing: true
+          marking: true
+        tof_left:
+          topic: tof_left
+          data_type: "PointCloud2"
+          max_obstacle_height: 0.3
+          raytrace_max_range: 4.0
+          obstacle_max_range: 3.0
+          clearing: true
+          marking: true
+        tof_right:
+          topic: tof_right
+          data_type: "PointCloud2"
+          max_obstacle_height: 0.3
+          raytrace_max_range: 4.0
+          obstacle_max_range: 3.0
+          clearing: true
+          marking: true
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.15
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: SIM_F02_base_link
+      resolution: 0.02
+      track_unknown_space: true
+      footprint: "[[0.14, 0.08], [0.14, -0.08], [-0.14, -0.08], [-0.14, 0.08]]"
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: scan
+          data_type: "LaserScan"
+          max_obstacle_height: 0.5
+          raytrace_max_range: 12.0
+          obstacle_max_range: 8.0
+          clearing: true
+          marking: true
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.15
+
+map_server:
+  ros__parameters:
+    use_sim_time: true
+    yaml_filename: "sim_warehouse.yaml"
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 5.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      # SMAC Hybrid-A* respects a turning radius; the default NavFn plans paths
+      # an Ackermann vehicle cannot follow.
+      plugin: "nav2_smac_planner::SmacPlannerHybrid"
+      tolerance: 0.1
+      downsample_costmap: false
+      allow_unknown: true
+      max_iterations: 1000000
+      max_planning_time: 3.0
+      motion_model_for_search: "DUBIN"    # forward only; use REEDS_SHEPP to allow reversing
+      angle_quantization_bins: 72
+      minimum_turning_radius: 0.293
+      reverse_penalty: 2.0
+      change_penalty: 0.15
+      non_straight_penalty: 1.2
+      cost_penalty: 2.0
+      analytic_expansion_ratio: 3.5
+      smooth_path: true
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: SIM_F02_odom
+    robot_base_frame: SIM_F02_base_link
+    behavior_plugins: ["backup", "wait"]
+    # No "spin" behaviour - the recovery would ask for an in-place rotation the
+    # vehicle cannot do, and it would sit there failing.
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: true
+    smoothing_frequency: 20.0
+    max_velocity: [0.3, 0.0, 1.0]
+    min_velocity: [-0.3, 0.0, -1.0]
+    max_accel: [0.5, 0.0, 2.0]
+    max_decel: [-0.5, 0.0, -2.0]
+    odom_topic: "odom"
+    odom_duration: 0.1

@@ -1,0 +1,44 @@
+# =============================================================================
+# FAST 로컬 개발용 MQTT Broker (Eclipse Mosquitto)
+# =============================================================================
+#
+# 실행:  cd infra/mqtt && docker compose up -d
+# 상태:  docker compose ps
+# 로그:  docker compose logs --tail=100 mosquitto
+# 종료:  docker compose down          (데이터 유지)
+#        docker compose down -v       (데이터 삭제)
+#
+# Docker 가 없는 환경(예: 사내 PC)에서는 Ubuntu/Windows 직접 설치 방식을 쓴다 —
+# infra/mqtt/README.md 의 "Docker 없이 실행" 절 참고.
+# =============================================================================
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: fast-mosquitto
+    restart: unless-stopped
+
+    ports:
+      # 127.0.0.1 로 바인딩을 제한한다. "1883:1883" 으로 쓰면 개발 PC 의 모든
+      # 네트워크 인터페이스에 브로커가 노출되고, 익명 접속을 허용한 이 로컬 설정과
+      # 합쳐지면 같은 네트워크의 누구나 차량 명령 토픽에 발행할 수 있게 된다.
+      - "127.0.0.1:1883:1883"
+
+    volumes:
+      # 설정은 읽기 전용으로 마운트한다(컨테이너가 설정을 덮어쓰지 못하게).
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # 인증을 켤 때만 사용한다. passwd 파일이 없으면 이 줄을 주석 처리한 상태로 둔다
+      # (없는 파일을 마운트하면 Docker 가 디렉터리를 만들어 버려 기동이 실패한다).
+      # - ./config/passwd:/mosquitto/config/passwd:ro
+      - ./data:/mosquitto/data
+      - ./log:/mosquitto/log
+
+    healthcheck:
+      # mosquitto_sub 로 SYS 토픽을 1건 받아보고 브로커가 실제로 응답하는지 확인한다.
+      # 포트 LISTEN 여부만 보는 것보다 확실하다(포트는 열렸는데 브로커가 응답하지
+      # 못하는 상태를 잡아낸다).
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t '$$SYS/broker/uptime' -C 1 -W 3 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

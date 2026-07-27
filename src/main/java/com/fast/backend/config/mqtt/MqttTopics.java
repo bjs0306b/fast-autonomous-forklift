@@ -15,11 +15,21 @@ public class MqttTopics {
     private final MqttProperties.Topics topics;
     private final Pattern statusTopicPattern;
     private final Pattern locationTopicPattern;
+    private final Pattern pathTopicPattern;
+    private final Pattern commandResultTopicPattern;
+    private final Pattern forkStatusTopicPattern;
+    private final Pattern errorTopicPattern;
+    private final Pattern stationMeasurementTopicPattern;
 
     public MqttTopics(MqttProperties mqttProperties) {
         this.topics = mqttProperties.topics();
         this.statusTopicPattern = toSubscribePattern(topics.forkliftStatus());
         this.locationTopicPattern = toSubscribePattern(topics.forkliftLocation());
+        this.pathTopicPattern = toSubscribePattern(topics.forkliftPath());
+        this.commandResultTopicPattern = toSubscribePattern(topics.forkliftCommandResult());
+        this.forkStatusTopicPattern = toSubscribePattern(topics.forkliftForkStatus());
+        this.errorTopicPattern = toSubscribePattern(topics.forkliftError());
+        this.stationMeasurementTopicPattern = toSubscribePattern(topics.stationMeasurement());
     }
 
     public String forkliftStatusSubscribeTopic() {
@@ -30,16 +40,42 @@ public class MqttTopics {
         return topics.forkliftLocation();
     }
 
+    public String forkliftPathSubscribeTopic() {
+        return topics.forkliftPath();
+    }
+
+    public String forkliftCommandResultSubscribeTopic() {
+        return topics.forkliftCommandResult();
+    }
+
+    public String forkliftForkStatusSubscribeTopic() {
+        return topics.forkliftForkStatus();
+    }
+
+    public String forkliftErrorSubscribeTopic() {
+        return topics.forkliftError();
+    }
+
     public String cargoDetectedTopic() {
         return topics.cargoDetected();
     }
 
-    public String forkliftCommand(String forkliftId) {
-        return String.format(topics.forkliftCommand(), requireForkliftId(forkliftId));
+    public String stationMeasurementSubscribeTopic() {
+        return topics.stationMeasurement();
     }
 
-    public String forkliftEmergency(String forkliftId) {
-        return String.format(topics.forkliftEmergency(), requireForkliftId(forkliftId));
+    /**
+     * 차량 명령 발행 토픽 {@code forklift/{vehicleId}/command}를 만든다.
+     *
+     * <p>이동(ROS2)·포크/적재(임베디드)·비상정지(ALL) <b>모든 명령이 이 토픽 하나</b>를 쓴다
+     * (prompt32.md 1장 7번 확정). 수신 측은 payload의 {@code targetSystem}/{@code commandCategory}로
+     * 자기 명령인지 판별한다.
+     *
+     * <p>구 {@code forkliftEmergency(...)}(= {@code forklift/{id}/emergency})는 제거됐다 —
+     * 근거는 {@link MqttProperties.Topics} Javadoc 참고.
+     */
+    public String vehicleCommand(String vehicleId) {
+        return String.format(topics.forkliftCommand(), requireForkliftId(vehicleId));
     }
 
     public boolean isForkliftStatusTopic(String topic) {
@@ -50,8 +86,43 @@ public class MqttTopics {
         return topic != null && locationTopicPattern.matcher(topic).matches();
     }
 
+    public boolean isForkliftPathTopic(String topic) {
+        return topic != null && pathTopicPattern.matcher(topic).matches();
+    }
+
+    public boolean isForkliftCommandResultTopic(String topic) {
+        return topic != null && commandResultTopicPattern.matcher(topic).matches();
+    }
+
+    public boolean isForkliftForkStatusTopic(String topic) {
+        return topic != null && forkStatusTopicPattern.matcher(topic).matches();
+    }
+
+    public boolean isForkliftErrorTopic(String topic) {
+        return topic != null && errorTopicPattern.matcher(topic).matches();
+    }
+
     public boolean isCargoDetectedTopic(String topic) {
         return topics.cargoDetected().equals(topic);
+    }
+
+    public boolean isStationMeasurementTopic(String topic) {
+        return topic != null && stationMeasurementTopicPattern.matcher(topic).matches();
+    }
+
+    /**
+     * {@code fast/station/{station_id}/measurement}에서 station_id를 추출한다. isStationMeasurementTopic이
+     * 이미 true로 확인된 토픽에서만 호출되므로 매칭은 항상 성공한다.
+     */
+    public String extractStationId(String topic) {
+        if (topic == null) {
+            throw new IllegalArgumentException("topic must not be null");
+        }
+        Matcher matcher = stationMeasurementTopicPattern.matcher(topic);
+        if (matcher.matches()) {
+            return matcher.group(1);
+        }
+        throw new IllegalArgumentException("Cannot extract stationId from topic: " + topic);
     }
 
     public String extractForkliftId(String topic) {
@@ -65,6 +136,22 @@ public class MqttTopics {
         Matcher locationMatcher = locationTopicPattern.matcher(topic);
         if (locationMatcher.matches()) {
             return locationMatcher.group(1);
+        }
+        Matcher pathMatcher = pathTopicPattern.matcher(topic);
+        if (pathMatcher.matches()) {
+            return pathMatcher.group(1);
+        }
+        Matcher commandResultMatcher = commandResultTopicPattern.matcher(topic);
+        if (commandResultMatcher.matches()) {
+            return commandResultMatcher.group(1);
+        }
+        Matcher forkStatusMatcher = forkStatusTopicPattern.matcher(topic);
+        if (forkStatusMatcher.matches()) {
+            return forkStatusMatcher.group(1);
+        }
+        Matcher errorMatcher = errorTopicPattern.matcher(topic);
+        if (errorMatcher.matches()) {
+            return errorMatcher.group(1);
         }
         throw new IllegalArgumentException("Cannot extract forkliftId from topic: " + topic);
     }
