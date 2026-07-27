@@ -102,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         model_path=cfg.model_path, input_size=cfg.input_size,
         score_threshold=cfg.score_threshold, class_names=cfg.class_names,
         norm_mean=cfg.norm_mean, norm_std=cfg.norm_std,
+        class_thresholds=cfg.class_score_thresholds,
     )
     detections = detector.detect(frame)
     distance = (Measurement(distance_cm=args.distance, std_cm=0.0,

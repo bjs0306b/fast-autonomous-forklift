@@ -56,8 +56,15 @@ class StationConfig:
 
     # --- 모델 (ONNX, mmdeploy end2end: dets[x1,y1,x2,y2,score] + labels) ---
     model_path: Path = Path("models/end2end.onnx")
-    input_size: int = 800   # 실험5(-m@800+SCD, 0.753) end2end.onnx는 800 입력으로 export
+    input_size: int = 800   # 실험7(증강) end2end.onnx는 800 입력으로 export
     score_threshold: float = 0.5
+    # 클래스별 임계 — 파렛트만 낮춘다. 검은 플라스틱 격자라 박스처럼 큰 단색면이 없어
+    # 점수가 낮게 잡힌다. 리그 평가셋 30장 실측(S15P11A304-148, docs/ai/rig-eval-map.md):
+    #   파렛트 0.4 → 정밀도 96.8% / 재현율 100%(30/30)
+    #   파렛트 0.5 → 정밀도 96.7% / 재현율  96.7% (1개 놓침)
+    #   박스   0.5 → 정밀도 93.9% / 재현율  95.5% (0.4로 낮추면 정밀도 91.5%로 하락)
+    class_score_thresholds: dict[str, float] = field(
+        default_factory=lambda: {"pallet": 0.4})
     # 학습 클래스 순서 (configs/datasets.yaml: box=1, pallet=2 → 라벨 0, 1)
     class_names: tuple[str, ...] = ("box", "pallet")
     # RTMDet 표준 전처리 상수 (BGR, to_rgb=False)

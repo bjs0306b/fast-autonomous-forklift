@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     detector = OnnxDetector(
         cfg.model_path, cfg.input_size, cfg.score_threshold,
         cfg.class_names, cfg.norm_mean, cfg.norm_std,
+        class_thresholds=cfg.class_score_thresholds,
     )
     detections = detector.detect(frame)
 
