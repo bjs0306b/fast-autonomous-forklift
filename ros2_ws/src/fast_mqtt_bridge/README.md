@@ -63,6 +63,8 @@ adapter는 팀이 ROS2 interface를 확정한 뒤 연결해야 합니다.
 | `MQTT_PASSWORD` | 빈 값(YAML에 평문 저장 금지) |
 | `MQTT_CLIENT_ID` | `fast-mqtt-bridge` |
 | `MQTT_KEEPALIVE` | `60` |
+| `MQTT_TLS_ENABLED` | `false` |
+| `MQTT_CA_CERT` | 빈 값 |
 | `VEHICLE_ID` | `REAL-F01` |
 | `ROS_NAMESPACE` | 빈 값 |
 
@@ -72,6 +74,23 @@ ros2 launch fast_mqtt_bridge mqtt_bridge.launch.py \
   vehicle_id:=REAL-F01 mqtt_host:=localhost mqtt_port:=1883 \
   location_topic:=/confirmed/odom path_topic:=/confirmed/path
 ```
+
+EC2 TLS 브로커 예시:
+
+```bash
+export MQTT_BROKER_HOST='<broker-host-or-ip>'
+export MQTT_BROKER_PORT='8883'
+export MQTT_USERNAME='<username>'
+export MQTT_PASSWORD='<password>'
+export MQTT_TLS_ENABLED='true'
+export MQTT_CA_CERT="$HOME/mqtt-certs/ca.crt"
+
+ros2 launch fast_mqtt_bridge mqtt_bridge.launch.py \
+  vehicle_id:=REAL-F01 location_topic:=/confirmed/odom
+```
+
+TLS를 활성화하면 CA 인증서가 반드시 존재해야 하며 서버 인증서의 hostname/IP 검증을
+비활성화하지 않는다. CA 인증서와 실제 자격증명은 저장소에 커밋하지 않는다.
 
 `status_topic`, `location_topic`, `path_topic` 기본값은 빈 문자열입니다. 확인되지 않은 토픽을
 자동 구독하지 않습니다. `location_publish_interval_ms` 최솟값은 broker 과부하 방지를 위해

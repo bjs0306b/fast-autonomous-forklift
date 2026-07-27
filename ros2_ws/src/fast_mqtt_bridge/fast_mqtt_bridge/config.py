@@ -12,6 +12,17 @@ def _environment(name: str, default: Any, cast: Callable[[str], Any] = str) -> A
     return cast(value)
 
 
+def _boolean(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"invalid boolean value: {value}")
+
+
 @dataclass(frozen=True)
 class BridgeConfig:
     mqtt_host: str = "localhost"
@@ -22,6 +33,8 @@ class BridgeConfig:
     mqtt_keepalive: int = 60
     mqtt_qos: int = 1
     mqtt_retained: bool = False
+    mqtt_tls_enabled: bool = False
+    mqtt_ca_cert: str = ""
     vehicle_id: str = "REAL-F01"
     ros_namespace: str = ""
     heartbeat_interval_ms: int = 1000
@@ -63,6 +76,20 @@ class BridgeConfig:
             ),
             mqtt_qos=int(get_parameter("mqtt_qos", defaults.mqtt_qos)),
             mqtt_retained=False,
+            mqtt_tls_enabled=_environment(
+                "MQTT_TLS_ENABLED",
+                _boolean(
+                    get_parameter(
+                        "mqtt_tls_enabled",
+                        defaults.mqtt_tls_enabled,
+                    )
+                ),
+                _boolean,
+            ),
+            mqtt_ca_cert=_environment(
+                "MQTT_CA_CERT",
+                get_parameter("mqtt_ca_cert", defaults.mqtt_ca_cert),
+            ),
             vehicle_id=_environment(
                 "VEHICLE_ID",
                 get_parameter("vehicle_id", defaults.vehicle_id),
@@ -106,6 +133,8 @@ class BridgeConfig:
             raise ValueError("all vehicle MQTT topics require QoS 1")
         if self.mqtt_retained:
             raise ValueError("vehicle MQTT publishes must not be retained")
+        if self.mqtt_tls_enabled and not self.mqtt_ca_cert.strip():
+            raise ValueError("mqtt_ca_cert is required when MQTT TLS is enabled")
         if self.mqtt_keepalive <= 0:
             raise ValueError("mqtt_keepalive must be positive")
         if self.heartbeat_interval_ms <= 0:
