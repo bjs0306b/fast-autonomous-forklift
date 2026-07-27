@@ -44,7 +44,14 @@ class StationConfig:
 
     # --- TF-Nova ---
     tfnova_port: str = "COM3"
-    tfnova_scale: float = 1.033       # 비율 보정 계수(FR-103-1, 5점 재캘리 2026-07-23). --calibrate로 재확인
+    # 거리 보정(FR-103-1): 실제 = 원값 × scale + offset.
+    # **리그 마운트 3점 재캘리 2026-07-27** (카메라 각도 표준·Nova 수평 고정 후,
+    # 박스 정면 정조준): 실제 140/181/210 → 원값 137.0/178.0/207.0, 차이 전부 −3.0cm.
+    # 차이가 일정 = 고정 오프셋(Nova 렌즈가 카메라 기준면보다 앞). 비율은 1.0219→
+    # 1.0145로 거리마다 달라져 스케일 모델은 기각. 그래서 scale 1.0 + offset 3.0.
+    # ⚠️ 마운트를 바꾸면 반드시 박스 표적으로 --calibrate 3점 재확인.
+    tfnova_scale: float = 1.0
+    tfnova_offset_cm: float = 3.0
     tfnova_seconds: float = 0.5
 
     # --- 모델 (ONNX, mmdeploy end2end: dets[x1,y1,x2,y2,score] + labels) ---

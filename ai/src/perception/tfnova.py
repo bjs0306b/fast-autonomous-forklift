@@ -45,16 +45,25 @@ DEFAULT_MIN_FRAMES = 10
 #   원값(cm)   53    67    75    116   194
 #   원값/실제  0.96  0.96  0.97  0.97  0.97
 #
-# 원값 ≈ 0.968×실제 (절편≈0) → 거리에 비례해 과소하게 읽는다. 200cm 클린월에서
-# 원값 194(−6cm)로 비율이 고정 오프셋(−2cm)을 확실히 배제. 그래서 고정 오프셋이
-# 아니라 스케일로 보정한다: 실제 = 원값 × SCALE.
+# 원값 ≈ 0.968×실제 (절편≈0) → 거리에 비례해 과소하게 읽는다고 봤다.
 #
-# (2026-07-20 탁상 캘리는 상수 −2로 보였으나 정조준·클린월 5점이 비율을 확정 —
-#  탁상 데이터는 손 줄자 편향으로 추정. 데모 범위 55~80cm에선 두 모델 차 <0.5cm.)
+# **2026-07-27 리그 마운트 재캘리 — 오프셋으로 정정.** 카메라 각도를 표준값으로
+# 고정하고 Nova 수평을 다시 잡은 뒤 박스 정면을 정조준해 3점을 쟀다:
 #
-# ⚠️ Nova가 카메라보다 ~1.15cm 앞이라 이 스케일은 카메라 기준 거리에 맞춰져 있다.
-# 마운트·조준이 바뀌면 --calibrate로 재확인할 것.
-DEFAULT_SCALE = 1.033   # = 1 / 0.968
+#   실제(cm)   140     181     210
+#   원값(cm)   137.0   178.0   207.0
+#   차이(cm)   −3.0    −3.0    −3.0     ← 일정 = 오프셋
+#   원값/실제  0.979   0.983   0.986    ← 거리마다 달라짐 = 비율 아님
+#
+# 차이가 전 구간 −3.0cm로 일정하므로 **비율이 아니라 고정 오프셋**이다. 원인은
+# Nova 렌즈가 카메라 기준면보다 앞에 있는 것(줄자는 카메라 기준으로 잰다).
+# 그래서 실제 = 원값 × SCALE + OFFSET 으로 계산하고, 리그에서는 SCALE=1.0을 쓴다.
+#
+# ⚠️ 07-23 탁상 마운트 5점(55~200cm)에서는 차이가 −2→−6cm로 커져 비율(0.968)로
+# 봤었다. 오늘 데이터는 셋업 정비 후 std 0.12~0.23으로 훨씬 안정적이라 이쪽을 채택.
+# **스케일·오프셋 모두 마운트에 따라 달라진다 — 리그를 옮기면 반드시 재캘리.**
+DEFAULT_SCALE = 1.0
+DEFAULT_OFFSET_CM = 3.0   # 리그 마운트 실측(2026-07-27). 실제 = 원값 + 3.0
 
 
 class MeasurementUnreliable(Exception):
@@ -144,14 +153,15 @@ def aggregate(
     min_confidence: int = DEFAULT_MIN_CONFIDENCE,
     min_frames: int = DEFAULT_MIN_FRAMES,
     scale: float = 1.0,
+    offset_cm: float = 0.0,
 ) -> Measurement:
     """프레임 묶음에서 거리 하나를 낸다.
 
     측정 실패(65535)와 저신뢰 프레임을 버린 뒤 **중앙값**을 쓴다. 평균은 순간
     튐(사람이 지나감, 반사면)에 끌려가지만 중앙값은 버틴다.
 
-    ``scale``은 캘리브레이션으로 구한 비율 보정 계수다. 원값에 곱한다
-    (센서가 거리에 비례해 과소하게 읽어서 — 모듈 상단 참고).
+    보정은 ``실제 = 원값 × scale + offset_cm``. 마운트에 따라 계통 오차가 비율로도
+    오프셋으로도 나타나므로 둘 다 지원한다 — 리그 마운트는 오프셋이 맞다(모듈 상단).
     """
     usable = [f for f in frames if f.valid and f.confidence >= min_confidence]
     if len(usable) < min_frames:
@@ -163,7 +173,7 @@ def aggregate(
 
     distances = [f.distance_cm for f in usable]
     return Measurement(
-        distance_cm=statistics.median(distances) * scale,
+        distance_cm=statistics.median(distances) * scale + offset_cm,
         std_cm=statistics.pstdev(distances),
         frames_used=len(usable),
         frames_seen=len(frames),
@@ -206,10 +216,12 @@ class TfNova:
         duration_s: float = 0.25,
         min_confidence: int = DEFAULT_MIN_CONFIDENCE,
         scale: float = DEFAULT_SCALE,
+        offset_cm: float = DEFAULT_OFFSET_CM,
     ) -> Measurement:
         """짧게 수집해 거리 하나를 낸다. 기본 0.25초 ≈ 50프레임."""
         return aggregate(
-            self.collect(duration_s), min_confidence=min_confidence, scale=scale
+            self.collect(duration_s), min_confidence=min_confidence,
+            scale=scale, offset_cm=offset_cm,
         )
 
 
@@ -223,8 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scale", type=float, default=DEFAULT_SCALE,
                         help=f"캘리브레이션 비율 계수 (기본 {DEFAULT_SCALE:g}, "
                              "원값에 곱한다)")
+    parser.add_argument("--offset", type=float, default=DEFAULT_OFFSET_CM,
+                        metavar="CM",
+                        help=f"고정 오프셋 보정 (기본 {DEFAULT_OFFSET_CM:g}cm, "
+                             "scale 적용 후 더한다)")
     parser.add_argument("--calibrate", type=float, metavar="TRUE_CM",
-                        help="자로 잰 실제 거리. 지정하면 비율 계수를 계산해 준다")
+                        help="자로 잰 실제 거리. 지정하면 오프셋·비율을 둘 다 계산해 준다")
     args = parser.parse_args(argv)
 
     import serial
@@ -250,7 +266,8 @@ def main(argv: list[str] | None = None) -> int:
           f"온도 {frames[-1].temperature_c}°C")
 
     try:
-        m = aggregate(frames, min_confidence=args.min_confidence, scale=args.scale)
+        m = aggregate(frames, min_confidence=args.min_confidence,
+                      scale=args.scale, offset_cm=args.offset)
     except MeasurementUnreliable as e:
         print(f"측정 불가: {e}", file=sys.stderr)
         return 1
@@ -258,12 +275,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"거리: {m}")
 
     if args.calibrate is not None:
-        raw_median = m.distance_cm / args.scale        # 스케일 적용 전 원값
-        suggested = args.calibrate / raw_median
+        raw_median = (m.distance_cm - args.offset) / args.scale   # 보정 전 원값
+        diff = args.calibrate - raw_median
+        ratio = args.calibrate / raw_median
         print(f"\n[캘리브레이션] 실제 {args.calibrate:g}cm, 센서 원값 {raw_median:.1f}cm")
-        print(f"  → 권장 비율: {suggested:.4f}  (이후 --scale {suggested:.4f} 로 사용)")
-        print("  여러 거리에서 반복해 비율이 일정한지 확인할 것 — 거리와 무관하게"
-              " 일정해야 스케일 보정이 맞다.")
+        print(f"  → 오프셋 모델: {diff:+.1f}cm   (--offset {diff:.1f} --scale 1.0)")
+        print(f"  → 비율 모델  : {ratio:.4f}     (--scale {ratio:.4f} --offset 0)")
+        print("  **여러 거리에서 반복해 둘 중 어느 쪽이 일정한지 볼 것** — 차이(cm)가"
+              " 일정하면 오프셋, 비율이 일정하면 스케일이다.")
+        print(f"  현재 설정(scale {args.scale:g}, offset {args.offset:+g}) 적용값"
+              f" {m.distance_cm:.1f}cm → 실제 대비 {m.distance_cm - args.calibrate:+.1f}cm")
 
     return 0
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+import math
+
 from perception.load_balance import BBox, Detection
 from perception.tfnova import Measurement
-from station import measure
+from station import measure, tilt
 from station.config import StationConfig
 from station.pipeline import build_payload, hull
 
@@ -22,6 +24,47 @@ def test_높이_공식은_문서_예시와_일치한다() -> None:
 
 def test_가로_공식은_fx를_쓴다() -> None:
     assert measure.width_cm(600, 100, 2025.17) == pytest.approx(29.63, abs=0.01)
+
+
+# --- 카메라 롤 보정 (station.tilt) ---
+
+def test_deskew는_기울지_않으면_그대로_돌려준다() -> None:
+    assert tilt.deskew_size(500, 300, 0.0) == (500, 300)
+
+
+def test_deskew는_기울어_부풀려진_bbox를_원래대로_되돌린다() -> None:
+    """AABB_w = w·cosθ + h·sinθ, AABB_h = w·sinθ + h·cosθ 의 역산."""
+    w, h, theta = 500.0, 300.0, math.radians(2.0)
+    aabb_w = w * math.cos(theta) + h * math.sin(theta)
+    aabb_h = w * math.sin(theta) + h * math.cos(theta)
+    got_w, got_h = tilt.deskew_size(aabb_w, aabb_h, 2.0)
+    assert got_w == pytest.approx(w, abs=0.5)
+    assert got_h == pytest.approx(h, abs=0.5)
+
+
+def test_deskew는_부호와_무관하다() -> None:
+    """롤이 왼쪽이든 오른쪽이든 bbox가 커지는 정도는 같다."""
+    assert tilt.deskew_size(510, 320, 2.0) == tilt.deskew_size(510, 320, -2.0)
+
+
+def test_deskew는_45도_근처에서_역산을_포기한다() -> None:
+    """cos(2θ)→0이라 해가 발산한다. 입력을 그대로 돌려주는 게 안전하다."""
+    assert tilt.deskew_size(500, 300, 44.9) == (500, 300)
+
+
+def test_보정각이_없으면_치수는_보정_전과_같다() -> None:
+    detections = [
+        Detection("box", BBox(100, 100, 500, 300), 0.9),
+        Detection("pallet", BBox(50, 400, 900, 200), 0.9),
+    ]
+    distance = Measurement(distance_cm=180.0, std_cm=0.1, frames_used=50, frames_seen=50)
+    plain = build_payload(detections, distance, CFG)
+    assert plain["dimensions"]["tilt_deg"] is None
+
+    tilted = build_payload(detections, distance, CFG, tilt_deg=2.0)
+    # 같은 bbox라도 기울었다고 보면 실제 물체는 더 작다
+    assert tilted["dimensions"]["width_cm"] < plain["dimensions"]["width_cm"]
+    assert tilted["dimensions"]["tilt_deg"] == 2.0
 
 
 # --- hull ---

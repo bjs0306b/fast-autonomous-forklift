@@ -26,6 +26,7 @@ from perception.tfnova import Measurement, MeasurementUnreliable, TfNova  # noqa
 from station.config import StationConfig  # noqa: E402
 from station.detector import OnnxDetector  # noqa: E402
 from station.pipeline import build_payload  # noqa: E402
+from station.tilt import estimate_roll_deg  # noqa: E402
 
 
 def capture(cfg: StationConfig) -> "cv2.typing.MatLike":
@@ -53,7 +54,8 @@ def capture(cfg: StationConfig) -> "cv2.typing.MatLike":
 def read_distance(cfg: StationConfig) -> Measurement | None:
     try:
         with TfNova(cfg.tfnova_port) as sensor:
-            return sensor.measure(cfg.tfnova_seconds, scale=cfg.tfnova_scale)
+            return sensor.measure(cfg.tfnova_seconds, scale=cfg.tfnova_scale,
+                                  offset_cm=cfg.tfnova_offset_cm)
     except MeasurementUnreliable as e:
         print(f"[거리 측정 불가] {e}", file=sys.stderr)
         return None
@@ -118,7 +120,20 @@ def main(argv: list[str] | None = None) -> int:
         cfg.class_names, cfg.norm_mean, cfg.norm_std,
     )
     detections = detector.detect(frame)
-    payload = build_payload(detections, distance, cfg)
+
+    # 카메라 롤 추정 — 파렛트 상판이 실제 수평이라는 점을 기준면으로 쓴다.
+    # 파렛트가 없거나 추정이 불안정하면 None이고, 그러면 치수 보정을 건너뛴다.
+    pallets = [d for d in detections
+               if d.label == "pallet" and d.score >= cfg.score_threshold]
+    tilt_deg = None
+    if pallets:
+        best = max(pallets, key=lambda d: d.score)
+        # 박스가 상판을 가리는 구간은 제외한다 — 안 그러면 편심 배치에서 각도가 뒤집힌다
+        occluders = [d.box for d in detections
+                     if d.label == "box" and d.score >= cfg.score_threshold]
+        tilt_deg = estimate_roll_deg(frame, best.box, occluders=occluders)
+
+    payload = build_payload(detections, distance, cfg, tilt_deg=tilt_deg)
 
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     print(text)

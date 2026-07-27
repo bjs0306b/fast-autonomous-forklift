@@ -26,6 +26,7 @@ from station.config import StationConfig  # noqa: E402
 from station.detector import OnnxDetector  # noqa: E402
 from station.pipeline import build_payload  # noqa: E402
 from station.serve import capture, read_distance  # noqa: E402
+from station.tilt import estimate_roll_deg  # noqa: E402
 
 BOX_COLOR = (80, 200, 80)      # BGR — 박스: 초록
 PALLET_COLOR = (60, 140, 255)  # 파렛트: 주황
@@ -61,21 +62,25 @@ def annotate(frame: np.ndarray, payload: dict) -> np.ndarray:
         lines.append(f"distance: {payload['distance']['front_cm']} cm")
     if payload.get("dimensions"):
         d = payload["dimensions"]
-        lines.append(f"W {d['width_cm']} x H {d['height_cm']} cm"
-                     f"  (mini {d['miniature_width_mm']} x {d['miniature_height_mm']} mm)")
+        line = (f"W {d['width_cm']} x H {d['height_cm']} cm"
+                f"  (mini {d['miniature_width_mm']} x {d['miniature_height_mm']} mm)")
+        if d.get("tilt_deg"):        # 파렛트 수평 기준 롤 보정이 걸린 경우
+            line += f"   roll {d['tilt_deg']:+.1f} deg corrected"
+        lines.append(line)
     if payload.get("load_balance"):
         lb = payload["load_balance"]
         lines.append(f"load: {'ECCENTRIC ' + '/'.join(lb['direction']) if lb['eccentric'] else 'BALANCED'}"
                      f"  (ratio_x {lb['ratio_x']})")
 
+    # 패널은 **상단**에 그린다 — 파렛트는 카메라가 낮아 늘 프레임 하단에 잡히므로
+    # 하단 패널은 파렛트 bbox를 가린다(발표에서 보여줘야 할 바로 그 부분).
     font, fs, ft, pad, lh = cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2, 14, 42
     panel_h = pad * 2 + lh * len(lines)
     overlay = img.copy()
-    cv2.rectangle(overlay, (0, img.shape[0] - panel_h), (img.shape[1], img.shape[0]),
-                  PANEL_BG, -1)
+    cv2.rectangle(overlay, (0, 0), (img.shape[1], panel_h), PANEL_BG, -1)
     img = cv2.addWeighted(overlay, 0.75, img, 0.25, 0)
     for i, line in enumerate(lines):
-        cv2.putText(img, line, (pad, img.shape[0] - panel_h + pad + lh * (i + 1) - 10),
+        cv2.putText(img, line, (pad, pad + lh * (i + 1) - 10),
                     font, fs, (240, 240, 240), ft)
     return img
 
@@ -102,7 +107,16 @@ def main(argv: list[str] | None = None) -> int:
     distance = (Measurement(distance_cm=args.distance, std_cm=0.0,
                             frames_used=1, frames_seen=1)
                 if args.distance is not None else read_distance(cfg))
-    payload = build_payload(detections, distance, cfg)
+
+    # serve.py와 같은 배선 — 파렛트 상판을 수평 기준면으로 카메라 롤 보정
+    pallets = [d for d in detections
+               if d.label == "pallet" and d.score >= cfg.score_threshold]
+    occluders = [d.box for d in detections
+                 if d.label == "box" and d.score >= cfg.score_threshold]
+    tilt_deg = (estimate_roll_deg(frame, max(pallets, key=lambda d: d.score).box,
+                                  occluders=occluders)
+                if pallets else None)
+    payload = build_payload(detections, distance, cfg, tilt_deg=tilt_deg)
 
     # cv2.imwrite는 Windows에서 비ASCII 경로에 조용히 실패한다 → imencode+tofile
     ok, buf = cv2.imencode(args.out.suffix or ".png", annotate(frame, payload))

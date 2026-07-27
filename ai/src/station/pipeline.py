@@ -20,7 +20,7 @@ import itertools
 from perception.load_balance import BBox, Detection, assess_load
 from perception.tfnova import Measurement
 
-from station import measure
+from station import measure, tilt
 from station.config import StationConfig
 
 SCHEMA_VERSION = "1.0"
@@ -42,6 +42,7 @@ def build_payload(
     distance: Measurement | None,
     cfg: StationConfig,
     now: _dt.datetime | None = None,
+    tilt_deg: float | None = None,
 ) -> dict:
     """감지·거리 → 측정 결과 페이로드.
 
@@ -78,8 +79,13 @@ def build_payload(
                 "distance": None, "dimensions": None, "load_balance": None}
 
     load = hull(boxes)
-    height = measure.height_cm(load.h, distance.distance_cm, cfg.calib.fy)
-    width = measure.width_cm(load.w, distance.distance_cm, cfg.calib.fx)
+    # 카메라 롤 보정 — bbox는 축 정렬이라 기울면 부풀려진다. 파렛트 상판을 수평
+    # 기준면으로 각도를 재 역산한다(station.tilt). 각도가 없으면 원래 크기 그대로.
+    load_w, load_h = load.w, load.h
+    if tilt_deg:
+        load_w, load_h = tilt.deskew_size(load.w, load.h, tilt_deg)
+    height = measure.height_cm(load_h, distance.distance_cm, cfg.calib.fy)
+    width = measure.width_cm(load_w, distance.distance_cm, cfg.calib.fx)
     dimensions = {
         "height_cm": round(height, 1),
         "width_cm": round(width, 1),
@@ -87,6 +93,8 @@ def build_payload(
         "miniature_scale": cfg.miniature_scale,
         "miniature_height_mm": round(height * 10 / cfg.miniature_scale, 1),
         "miniature_width_mm": round(width * 10 / cfg.miniature_scale, 1),
+        # 적용된 롤 보정각(도). null이면 보정 안 함(파렛트 없음·추정 실패·범위 초과).
+        "tilt_deg": round(tilt_deg, 2) if tilt_deg else None,
     }
 
     if pallet is None:   # 파렛트 없음 → 치수만, 편하중은 판정 불가
