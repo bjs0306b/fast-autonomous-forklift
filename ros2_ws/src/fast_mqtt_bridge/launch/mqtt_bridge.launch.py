@@ -20,6 +20,8 @@ def generate_launch_description():
         "mqtt_username": "",
         "mqtt_password_env": "MQTT_PASSWORD",
         "mqtt_qos": "1",
+        "mqtt_tls_enabled": "false",
+        "mqtt_ca_cert": "",
         "ros_namespace": "",
         "status_topic": "",
         "location_topic": "",
@@ -49,7 +51,7 @@ def generate_launch_description():
                         "mqtt_qos",
                         "location_publish_interval_ms",
                         "heartbeat_interval_ms",
-                    } else str,
+                    } else bool if name == "mqtt_tls_enabled" else str,
                 )
                 for name in arguments
             },

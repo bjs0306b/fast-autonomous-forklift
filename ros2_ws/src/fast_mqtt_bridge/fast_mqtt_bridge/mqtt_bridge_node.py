@@ -19,6 +19,7 @@ from fast_mqtt_bridge.dto import (
     quaternion_to_heading,
 )
 from fast_mqtt_bridge.mqtt_policy import (
+    configure_tls,
     publish_vehicle_message,
     subscribe_vehicle_command,
 )
@@ -35,6 +36,8 @@ class MqttBridgeNode(Node):
         "mqtt_client_id": "fast-mqtt-bridge",
         "mqtt_keepalive": 60,
         "mqtt_qos": 1,
+        "mqtt_tls_enabled": False,
+        "mqtt_ca_cert": "",
         "ros_namespace": "",
         "status_topic": "",
         "location_topic": "",
@@ -112,6 +115,11 @@ class MqttBridgeNode(Node):
                 self._config.mqtt_username,
                 self._config.mqtt_password or None,
             )
+        configure_tls(
+            self._mqtt,
+            self._config.mqtt_tls_enabled,
+            self._config.mqtt_ca_cert,
+        )
         self._mqtt.reconnect_delay_set(min_delay=1, max_delay=60)
         self._mqtt.on_connect = self._on_connect
         self._mqtt.on_disconnect = self._on_disconnect
@@ -138,7 +146,8 @@ class MqttBridgeNode(Node):
         topic = self._topics["command"]
         subscribe_vehicle_command(client, topic)
         self.get_logger().info(
-            f"[MQTT] connected broker={self._config.mqtt_host}:{self._config.mqtt_port}"
+            f"[MQTT] connected broker={self._config.mqtt_host}:{self._config.mqtt_port} "
+            f"tls={'enabled' if self._config.mqtt_tls_enabled else 'disabled'}"
         )
         self.get_logger().info(f"[MQTT] subscribed topic={topic} qos=1")
 
