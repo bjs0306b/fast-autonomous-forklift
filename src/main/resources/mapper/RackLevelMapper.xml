@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fast.backend.storage.mapper.RackLevelMapper">
+
+    <resultMap id="rackLevelResultMap" type="com.fast.backend.storage.domain.RackLevel">
+        <id property="id" column="id"/>
+        <result property="rackId" column="rack_id"/>
+        <result property="levelNumber" column="level_number"/>
+        <result property="clearWidth" column="clear_width"/>
+        <result property="clearLength" column="clear_length"/>
+        <result property="clearHeight" column="clear_height"/>
+        <result property="forkHeight" column="fork_height"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fast.backend.storage.domain.RackLevel"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO rack_level (rack_id, level_number, clear_width, clear_length, clear_height, fork_height,
+                                created_at, updated_at)
+        VALUES (#{rackId}, #{levelNumber}, #{clearWidth}, #{clearLength}, #{clearHeight}, #{forkHeight},
+                #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findById" resultMap="rackLevelResultMap">
+        SELECT id, rack_id, level_number, clear_width, clear_length, clear_height, fork_height,
+               created_at, updated_at
+        FROM rack_level WHERE id = #{id}
+    </select>
+
+</mapper>

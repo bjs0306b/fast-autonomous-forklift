@@ -85,6 +85,12 @@ vehicle:
 # WebSocket (prompt20.md, answer20.md) — 차량 상태·위치·명령 결과 실시간 전송
 # ---------------------------------------------------------------
 
+# 운반 작업 MQTT 디스패치(prompt48.md 19장). 기본 false — 실제 차량 명령이 실수로 발행되지 않도록 한다.
+# ROS2와 TRANSPORT 명령 규격이 확정되고 실환경 검증이 끝난 뒤에만 true로 켠다.
+dispatch:
+  mqtt:
+    enabled: ${DISPATCH_MQTT_ENABLED:false}
+
 websocket:
   # STOMP 엔드포인트(/ws)의 허용 Origin. 프론트엔드 배포 주소가 아직 확정되지 않아 기존과 동일하게
   # "*"(전체 허용)를 기본값으로 둔다. 운영 환경에서는 반드시 실제 프론트 Origin으로 좁혀야 한다.

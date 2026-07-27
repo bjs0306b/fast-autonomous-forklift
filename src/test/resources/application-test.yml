@@ -72,3 +72,9 @@ vehicle:
 
 websocket:
   allowed-origin-patterns: "*"
+
+# 테스트에서는 실제 MQTT 발행을 하지 않는다(prompt48.md 19·20장). 디스패치 성공/실패 경로는 mock
+# publisher로 검증한다.
+dispatch:
+  mqtt:
+    enabled: false

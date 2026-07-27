@@ -14,6 +14,12 @@ spring:
 server:
   port: 8080
 
+# 적재 위치 추천 설정(prompt46.md 6장). height-clearance는 화물 높이 위에 확보할 여유 높이(m).
+# 값을 지정하지 않으면 0(여유 없음)이며, 실제 운영 여유값은 팀 협의 대상이다(prompt46.md 20장).
+storage:
+  placement:
+    height-clearance: 0.05
+
 logging:
   level:
     root: INFO

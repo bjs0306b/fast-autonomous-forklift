@@ -263,3 +263,145 @@ CREATE TABLE IF NOT EXISTS embedded_error_history (
     created_at     DATETIME NOT NULL,
     INDEX idx_embedded_error_history_forklift_occurred (forklift_id, occurred_at DESC)
 );
+
+-- =====================================================================================
+-- 화물 크기 기반 적재 위치 추천 및 운반 작업(prompt46.md 핵심 로직 → prompt47.md 영속 슬라이스).
+-- 좌표·크기 단위는 m, heading은 degree로 기존 차량 위치 규격(prompt32.md 1장 5번)과 동일하다.
+-- 기존 방식과 동일하게 ENGINE/CHARSET 절은 넣지 않고(H2 MySQL 호환 모드에서 그대로 실행 가능),
+-- 인덱스는 CREATE TABLE 인라인으로 둔다(mode=always 재실행 시 "이미 존재" 오류 방지).
+-- =====================================================================================
+
+CREATE TABLE IF NOT EXISTS cargo (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    cargo_id   VARCHAR(50)  NOT NULL,
+    width      DOUBLE       NOT NULL,
+    length     DOUBLE       NOT NULL,
+    height     DOUBLE       NOT NULL,
+    volume     DOUBLE       NOT NULL,
+    created_at DATETIME     NOT NULL,
+    updated_at DATETIME     NOT NULL,
+    CONSTRAINT uk_cargo_cargo_id UNIQUE (cargo_id)
+);
+
+CREATE TABLE IF NOT EXISTS pallet (
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+    pallet_id      VARCHAR(50) NOT NULL,
+    cargo_id       VARCHAR(50) NOT NULL,
+    pickup_x       DOUBLE      NULL,
+    pickup_y       DOUBLE      NULL,
+    pickup_heading DOUBLE      NULL,
+    status         VARCHAR(20) NOT NULL,
+    created_at     DATETIME    NOT NULL,
+    updated_at     DATETIME    NOT NULL,
+    CONSTRAINT uk_pallet_pallet_id UNIQUE (pallet_id),
+    CONSTRAINT fk_pallet_cargo FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
+);
+
+CREATE TABLE IF NOT EXISTS rack (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rack_code  VARCHAR(50)  NOT NULL,
+    rack_name  VARCHAR(100) NULL,
+    position_x DOUBLE       NULL,
+    position_y DOUBLE       NULL,
+    created_at DATETIME     NOT NULL,
+    updated_at DATETIME     NOT NULL,
+    CONSTRAINT uk_rack_rack_code UNIQUE (rack_code)
+);
+
+CREATE TABLE IF NOT EXISTS rack_level (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rack_id      BIGINT   NOT NULL,
+    level_number INT      NOT NULL,
+    clear_width  DOUBLE   NOT NULL,
+    clear_length DOUBLE   NOT NULL,
+    clear_height DOUBLE   NOT NULL,
+    fork_height  DOUBLE   NULL,
+    created_at   DATETIME NOT NULL,
+    updated_at   DATETIME NOT NULL,
+    CONSTRAINT uk_rack_level_rack_level UNIQUE (rack_id, level_number),
+    CONSTRAINT fk_rack_level_rack FOREIGN KEY (rack_id) REFERENCES rack (id)
+);
+
+CREATE TABLE IF NOT EXISTS storage_slot (
+    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    slot_code           VARCHAR(50) NOT NULL,
+    rack_level_id       BIGINT      NOT NULL,
+    width               DOUBLE      NOT NULL,
+    length              DOUBLE      NOT NULL,
+    height              DOUBLE      NOT NULL,
+    destination_x       DOUBLE      NULL,
+    destination_y       DOUBLE      NULL,
+    destination_heading DOUBLE      NULL,
+    status              VARCHAR(20) NOT NULL DEFAULT 'EMPTY',
+    reserved_task_id    VARCHAR(50) NULL,
+    stored_cargo_id     VARCHAR(50) NULL,
+    created_at          DATETIME    NOT NULL,
+    updated_at          DATETIME    NOT NULL,
+    CONSTRAINT uk_storage_slot_slot_code UNIQUE (slot_code),
+    CONSTRAINT fk_storage_slot_rack_level FOREIGN KEY (rack_level_id) REFERENCES rack_level (id),
+    INDEX idx_storage_slot_status (status),
+    INDEX idx_storage_slot_rack_level (rack_level_id),
+    INDEX idx_storage_slot_reserved_task (reserved_task_id)
+);
+
+CREATE TABLE IF NOT EXISTS transport_task (
+    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_code           VARCHAR(50) NOT NULL,
+    cargo_id            VARCHAR(50) NOT NULL,
+    pallet_id           VARCHAR(50) NOT NULL,
+    vehicle_id          VARCHAR(50) NULL,
+    source_x            DOUBLE      NULL,
+    source_y            DOUBLE      NULL,
+    source_heading      DOUBLE      NULL,
+    destination_slot_id BIGINT      NULL,
+    destination_x       DOUBLE      NULL,
+    destination_y       DOUBLE      NULL,
+    destination_heading DOUBLE      NULL,
+    fork_height         DOUBLE      NULL,
+    cargo_orientation   VARCHAR(20) NULL,
+    status              VARCHAR(20) NOT NULL,
+    assigned_at         DATETIME    NULL,
+    started_at          DATETIME    NULL,
+    picked_up_at        DATETIME    NULL,
+    completed_at        DATETIME    NULL,
+    failed_at           DATETIME    NULL,
+    created_at          DATETIME    NOT NULL,
+    updated_at          DATETIME    NOT NULL,
+    CONSTRAINT uk_transport_task_task_code UNIQUE (task_code),
+    CONSTRAINT fk_transport_task_cargo FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id),
+    CONSTRAINT fk_transport_task_pallet FOREIGN KEY (pallet_id) REFERENCES pallet (pallet_id),
+    CONSTRAINT fk_transport_task_slot FOREIGN KEY (destination_slot_id) REFERENCES storage_slot (id),
+    INDEX idx_transport_task_status (status),
+    INDEX idx_transport_task_vehicle (vehicle_id),
+    INDEX idx_transport_task_pallet (pallet_id),
+    INDEX idx_transport_task_slot (destination_slot_id),
+    INDEX idx_transport_task_created (created_at DESC)
+);
+
+-- 차량에 실제 발행한 MQTT 운반 명령 단위(prompt48.md 3·5장). TransportTask(업무 단위) 1 : N TransportCommand.
+-- 하나의 Task에 재시도로 여러 command가 붙을 수 있어 Task와 분리한다. command_id로 command-result를 역추적한다.
+-- task_id(BIGINT)와 task_code(VARCHAR)를 함께 보관해 조회 편의를 준다. stage는 ROS2가 단계 결과를 줄 때만
+-- 채워지며(현재 규격 미확정) nullable로 두고 강제하지 않는다.
+CREATE TABLE IF NOT EXISTS transport_command (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    command_id      VARCHAR(50)   NOT NULL,
+    task_id         BIGINT        NOT NULL,
+    task_code       VARCHAR(50)   NOT NULL,
+    vehicle_id      VARCHAR(50)   NOT NULL,
+    command_type    VARCHAR(30)   NOT NULL,
+    stage           VARCHAR(30)   NULL,
+    status          VARCHAR(20)   NOT NULL,
+    payload         VARCHAR(2000) NULL,
+    failure_reason  VARCHAR(500)  NULL,
+    published_at    DATETIME      NULL,
+    acknowledged_at DATETIME      NULL,
+    completed_at    DATETIME      NULL,
+    created_at      DATETIME      NOT NULL,
+    updated_at      DATETIME      NOT NULL,
+    CONSTRAINT uk_transport_command_command_id UNIQUE (command_id),
+    CONSTRAINT fk_transport_command_task FOREIGN KEY (task_id) REFERENCES transport_task (id),
+    INDEX idx_transport_command_task (task_id),
+    INDEX idx_transport_command_vehicle (vehicle_id),
+    INDEX idx_transport_command_status (status),
+    INDEX idx_transport_command_created (created_at DESC)
+);

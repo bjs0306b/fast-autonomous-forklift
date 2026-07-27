@@ -8,6 +8,7 @@ import com.fast.backend.config.mqtt.MqttTopics;
 import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedErrorService;
 import com.fast.backend.station.service.StationMeasurementService;
+import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
 import com.fast.backend.forklift.service.ForkliftLocationService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
@@ -40,6 +41,7 @@ class MqttMessageRouterTest {
     private EmbeddedForkStatusService embeddedForkStatusService;
     private EmbeddedErrorService embeddedErrorService;
     private StationMeasurementService stationMeasurementService;
+    private TransportCommandResultService transportCommandResultService;
 
     @BeforeEach
     void setUp() {
@@ -64,11 +66,12 @@ class MqttMessageRouterTest {
         embeddedForkStatusService = mock(EmbeddedForkStatusService.class);
         embeddedErrorService = mock(EmbeddedErrorService.class);
         stationMeasurementService = mock(StationMeasurementService.class);
+        transportCommandResultService = mock(TransportCommandResultService.class);
         router = new MqttMessageRouter(
                 objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService, aiCargoAnalysisService,
                 isaacForkliftLocationService, isaacForkliftStatusService, isaacForkliftPathService,
                 vehicleCommandResultService, embeddedForkStatusService, embeddedErrorService,
-                stationMeasurementService);
+                stationMeasurementService, transportCommandResultService);
     }
 
     @Test

@@ -24,6 +24,7 @@ import com.fast.backend.isaac.service.IsaacForkliftPathService;
 import com.fast.backend.isaac.service.IsaacForkliftStatusService;
 import com.fast.backend.station.dto.StationMeasurementMessage;
 import com.fast.backend.station.service.StationMeasurementService;
+import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -56,6 +57,7 @@ public class MqttMessageRouter {
     private final EmbeddedForkStatusService embeddedForkStatusService;
     private final EmbeddedErrorService embeddedErrorService;
     private final StationMeasurementService stationMeasurementService;
+    private final TransportCommandResultService transportCommandResultService;
 
     public MqttMessageRouter(ObjectMapper objectMapper, MqttTopics mqttTopics,
             ForkliftStatusService forkliftStatusService, ForkliftLocationService forkliftLocationService,
@@ -66,7 +68,8 @@ public class MqttMessageRouter {
             VehicleCommandResultService vehicleCommandResultService,
             EmbeddedForkStatusService embeddedForkStatusService,
             EmbeddedErrorService embeddedErrorService,
-            StationMeasurementService stationMeasurementService) {
+            StationMeasurementService stationMeasurementService,
+            TransportCommandResultService transportCommandResultService) {
         this.objectMapper = objectMapper;
         this.mqttTopics = mqttTopics;
         this.forkliftStatusService = forkliftStatusService;
@@ -79,6 +82,7 @@ public class MqttMessageRouter {
         this.embeddedForkStatusService = embeddedForkStatusService;
         this.embeddedErrorService = embeddedErrorService;
         this.stationMeasurementService = stationMeasurementService;
+        this.transportCommandResultService = transportCommandResultService;
     }
 
     public void route(String topic, String payload) {
@@ -219,7 +223,11 @@ public class MqttMessageRouter {
             if (!isVehicleIdConsistentWithTopic(topic, message.vehicleId())) {
                 return;
             }
+            // 같은 결과 토픽을 차량 명령(embedded_vehicle_command)과 운반 명령(transport_command)이 공유한다.
+            // 각 서비스는 자기 commandId만 처리하고 나머지는 조용히 무시하므로, 둘 다 호출해도 안전하다
+            // (운반 명령 commandId는 TCMD- 접두어라 서로 충돌하지 않는다, prompt48.md 12장).
             vehicleCommandResultService.handleResult(message);
+            transportCommandResultService.handleResult(message);
         } catch (JsonProcessingException e) {
             log.error("Failed to parse vehicle command result message: topic={}, error={}", topic, e.getMessage());
         } catch (RuntimeException e) {
