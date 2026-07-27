@@ -37,7 +37,8 @@ class IsaacForkliftLocationServiceTest {
     void setUp() {
         vehicleMapper = mock(VehicleMapper.class);
         broadcaster = mock(VehicleWebSocketBroadcaster.class);
-        service = new IsaacForkliftLocationService(vehicleMapper, broadcaster);
+        service = new IsaacForkliftLocationService(vehicleMapper, broadcaster,
+                new com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider());
     }
 
     @Test

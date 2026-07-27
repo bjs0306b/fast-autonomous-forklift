@@ -23,6 +23,9 @@ public interface TransportCommandMapper {
 
     List<TransportCommand> findByTaskId(Long taskId);
 
+    /** taskId별 가장 최근 command 1건(created_at DESC). 대시보드 최신 command 상태 표시용(prompt50.md 11장). */
+    Optional<TransportCommand> findLatestByTaskId(Long taskId);
+
     /** 진행 중(CREATED/PUBLISHED/ACKNOWLEDGED) command가 있는지 — 중복 디스패치 차단용. */
     boolean existsActiveByTaskId(Long taskId);
 

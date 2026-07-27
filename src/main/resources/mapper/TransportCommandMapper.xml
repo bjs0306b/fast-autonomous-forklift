@@ -48,6 +48,12 @@
         ORDER BY created_at DESC, id DESC
     </select>
 
+    <select id="findLatestByTaskId" resultMap="transportCommandResultMap">
+        SELECT <include refid="allColumns"/> FROM transport_command WHERE task_id = #{taskId}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    </select>
+
     <select id="existsActiveByTaskId" resultType="boolean">
         SELECT COUNT(*) > 0 FROM transport_command
         WHERE task_id = #{taskId} AND status IN ('CREATED', 'PUBLISHED', 'ACKNOWLEDGED')

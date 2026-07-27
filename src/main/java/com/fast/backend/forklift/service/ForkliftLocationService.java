@@ -2,6 +2,8 @@ package com.fast.backend.forklift.service;
 
 import com.fast.backend.forklift.dto.ForkliftLocationMessage;
 import com.fast.backend.vehicle.domain.VehicleStatus;
+import com.fast.backend.vehicle.location.LatestVehicleLocationProvider;
+import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import com.fast.backend.vehicle.websocket.VehicleLocationEventData;
 import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
@@ -44,12 +46,20 @@ public class ForkliftLocationService {
      */
     private static final Set<String> ALLOWED_FRAME_IDS = Set.of("map", "odom");
 
+    /** ROS2 실물 위치의 출처 태그(prompt50.md 6·14장). */
+    private static final String SOURCE_REAL = "REAL";
+
     private final VehicleMapper vehicleMapper;
     private final VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster;
+    private final LatestVehicleLocationProvider latestVehicleLocationProvider;
 
-    public ForkliftLocationService(VehicleMapper vehicleMapper, VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster) {
+    public ForkliftLocationService(
+            VehicleMapper vehicleMapper,
+            VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster,
+            LatestVehicleLocationProvider latestVehicleLocationProvider) {
         this.vehicleMapper = vehicleMapper;
         this.vehicleWebSocketBroadcaster = vehicleWebSocketBroadcaster;
+        this.latestVehicleLocationProvider = latestVehicleLocationProvider;
     }
 
     public void handleLocation(ForkliftLocationMessage message) {
@@ -71,6 +81,8 @@ public class ForkliftLocationService {
             }
 
             OffsetDateTime receivedAt = CommunicationTime.nowOffset();
+            // 최신 위치 1건만 메모리에 유지(DB 저장 없음, stale 가드는 Provider가 담당) — 대시보드 REST용.
+            latestVehicleLocationProvider.update(toSnapshot(message, receivedAt));
             VehicleLocationEventData data = toEventData(message, receivedAt);
             vehicleWebSocketBroadcaster.broadcastLocation(message.vehicleId(), data, message.messageAt());
         } catch (RuntimeException e) {
@@ -167,6 +179,19 @@ public class ForkliftLocationService {
 
     private boolean isFinite(double value) {
         return !Double.isNaN(value) && !Double.isInfinite(value);
+    }
+
+    private VehicleLocationSnapshot toSnapshot(ForkliftLocationMessage message, OffsetDateTime receivedAt) {
+        return new VehicleLocationSnapshot(
+                message.vehicleId(),
+                SOURCE_REAL,
+                message.position().x(),
+                message.position().y(),
+                normalizeHeading(message.heading()),
+                message.speed(),
+                normalizeFrameId(message.position().frameId()),
+                message.messageAt(),
+                receivedAt);
     }
 
     private VehicleLocationEventData toEventData(ForkliftLocationMessage message, OffsetDateTime receivedAt) {
