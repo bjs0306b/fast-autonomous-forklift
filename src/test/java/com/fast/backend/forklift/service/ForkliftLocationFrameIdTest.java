@@ -39,7 +39,8 @@ class ForkliftLocationFrameIdTest {
     void setUp() {
         vehicleMapper = mock(VehicleMapper.class);
         broadcaster = mock(VehicleWebSocketBroadcaster.class);
-        service = new ForkliftLocationService(vehicleMapper, broadcaster);
+        service = new ForkliftLocationService(vehicleMapper, broadcaster,
+                new com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider());
         when(vehicleMapper.existsByVehicleId("REAL-F01")).thenReturn(true);
     }
 

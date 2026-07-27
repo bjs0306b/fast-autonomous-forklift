@@ -2,6 +2,8 @@ package com.fast.backend.isaac.service;
 
 import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.isaac.dto.IsaacForkliftLocationMessage;
+import com.fast.backend.vehicle.location.LatestVehicleLocationProvider;
+import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import com.fast.backend.vehicle.websocket.IsaacVehicleLocationEventData;
 import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
@@ -26,12 +28,21 @@ public class IsaacForkliftLocationService {
 
     private static final Logger log = LoggerFactory.getLogger(IsaacForkliftLocationService.class);
 
+    /** Isaac Sim 위치의 출처 태그(prompt50.md 6·14장). frameId는 map을 기본값으로 둔다(Isaac 메시지엔 frameId 없음). */
+    private static final String SOURCE_SIM = "SIM";
+    private static final String DEFAULT_FRAME_ID = "map";
+
     private final VehicleMapper vehicleMapper;
     private final VehicleWebSocketBroadcaster broadcaster;
+    private final LatestVehicleLocationProvider latestVehicleLocationProvider;
 
-    public IsaacForkliftLocationService(VehicleMapper vehicleMapper, VehicleWebSocketBroadcaster broadcaster) {
+    public IsaacForkliftLocationService(
+            VehicleMapper vehicleMapper,
+            VehicleWebSocketBroadcaster broadcaster,
+            LatestVehicleLocationProvider latestVehicleLocationProvider) {
         this.vehicleMapper = vehicleMapper;
         this.broadcaster = broadcaster;
+        this.latestVehicleLocationProvider = latestVehicleLocationProvider;
     }
 
     public void handleLocation(IsaacForkliftLocationMessage message) {
@@ -51,11 +62,16 @@ public class IsaacForkliftLocationService {
             }
 
             OffsetDateTime receivedAt = CommunicationTime.nowOffset();
+            double normalizedHeading = normalizeHeading(message.heading());
+            // 최신 위치 1건만 메모리에 유지(DB 저장 없음, stale 가드는 Provider가 담당).
+            latestVehicleLocationProvider.update(new VehicleLocationSnapshot(
+                    message.forkliftId(), SOURCE_SIM, message.x(), message.y(), normalizedHeading,
+                    message.speed(), DEFAULT_FRAME_ID, message.timestamp(), receivedAt));
             IsaacVehicleLocationEventData data = new IsaacVehicleLocationEventData(
                     message.forkliftId(),
                     message.x(),
                     message.y(),
-                    normalizeHeading(message.heading()),
+                    normalizedHeading,
                     message.speed(),
                     message.timestamp(),
                     receivedAt);

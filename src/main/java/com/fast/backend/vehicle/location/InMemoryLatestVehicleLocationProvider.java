@@ -26,11 +26,23 @@ public class InMemoryLatestVehicleLocationProvider implements LatestVehicleLocat
         return List.copyOf(latestByVehicleId.values());
     }
 
+    /**
+     * vehicleId별 최신값을 덮어쓴다. 단, <b>오래된 메시지가 최신 위치를 덮어쓰지 않도록</b> messageAt을
+     * 비교한다(prompt50.md 7장): 기존값이 있고 두 messageAt이 모두 있으면 새 메시지가 더 최신일 때만 교체한다.
+     * 비교할 messageAt이 없으면(둘 중 하나라도 null) 최신 수신을 신뢰해 그대로 덮어쓴다.
+     * {@link ConcurrentHashMap#compute}로 원자적으로 수행해 동시 수신에도 안전하다.
+     */
     @Override
     public void update(VehicleLocationSnapshot snapshot) {
         if (snapshot == null || snapshot.vehicleId() == null) {
             return;
         }
-        latestByVehicleId.put(snapshot.vehicleId(), snapshot);
+        latestByVehicleId.compute(snapshot.vehicleId(), (id, existing) -> {
+            if (existing != null && existing.messageAt() != null && snapshot.messageAt() != null
+                    && !snapshot.messageAt().isAfter(existing.messageAt())) {
+                return existing; // 오래되었거나 동일한 시각 → 유지
+            }
+            return snapshot;
+        });
     }
 }
