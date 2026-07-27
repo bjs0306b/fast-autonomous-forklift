@@ -75,3 +75,11 @@ class StationConfig:
     calib: CameraCalib = field(default_factory=CameraCalib)
     miniature_scale: int = 10          # 실물 ÷10 = 미니어처 (명세 §2.1)
     eccentric_threshold: float = 0.3   # 편하중 임계 (load_balance 기본과 동일)
+
+    def threshold_for(self, label: str) -> float:
+        """클래스별 검출 임계 — detector와 하류(판정·tilt)가 같은 값을 써야 한다.
+
+        detector가 이미 이 임계로 걸러 넘기지만, pipeline·serve가 판정용으로 다시
+        거를 때 전역 0.5를 쓰면 파렛트 0.4~0.5 검출이 감지에는 보이는데 load_balance
+        에선 사라지는 이중 게이트가 생긴다. 그래서 같은 헬퍼로 통일한다."""
+        return self.class_score_thresholds.get(label, self.score_threshold)
