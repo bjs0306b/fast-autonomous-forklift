@@ -118,19 +118,20 @@ def main(argv: list[str] | None = None) -> int:
     detector = OnnxDetector(
         cfg.model_path, cfg.input_size, cfg.score_threshold,
         cfg.class_names, cfg.norm_mean, cfg.norm_std,
+        class_thresholds=cfg.class_score_thresholds,
     )
     detections = detector.detect(frame)
 
     # 카메라 롤 추정 — 파렛트 상판이 실제 수평이라는 점을 기준면으로 쓴다.
     # 파렛트가 없거나 추정이 불안정하면 None이고, 그러면 치수 보정을 건너뛴다.
     pallets = [d for d in detections
-               if d.label == "pallet" and d.score >= cfg.score_threshold]
+               if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
     tilt_deg = None
     if pallets:
         best = max(pallets, key=lambda d: d.score)
         # 박스가 상판을 가리는 구간은 제외한다 — 안 그러면 편심 배치에서 각도가 뒤집힌다
         occluders = [d.box for d in detections
-                     if d.label == "box" and d.score >= cfg.score_threshold]
+                     if d.label == "box" and d.score >= cfg.threshold_for("box")]
         tilt_deg = estimate_roll_deg(frame, best.box, occluders=occluders)
 
     payload = build_payload(detections, distance, cfg, tilt_deg=tilt_deg)

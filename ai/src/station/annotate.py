@@ -102,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         model_path=cfg.model_path, input_size=cfg.input_size,
         score_threshold=cfg.score_threshold, class_names=cfg.class_names,
         norm_mean=cfg.norm_mean, norm_std=cfg.norm_std,
+        class_thresholds=cfg.class_score_thresholds,
     )
     detections = detector.detect(frame)
     distance = (Measurement(distance_cm=args.distance, std_cm=0.0,
@@ -110,9 +111,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # serve.py와 같은 배선 — 파렛트 상판을 수평 기준면으로 카메라 롤 보정
     pallets = [d for d in detections
-               if d.label == "pallet" and d.score >= cfg.score_threshold]
+               if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
     occluders = [d.box for d in detections
-                 if d.label == "box" and d.score >= cfg.score_threshold]
+                 if d.label == "box" and d.score >= cfg.threshold_for("box")]
     tilt_deg = (estimate_roll_deg(frame, max(pallets, key=lambda d: d.score).box,
                                   occluders=occluders)
                 if pallets else None)

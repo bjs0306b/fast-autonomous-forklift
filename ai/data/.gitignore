@@ -2,3 +2,10 @@
 # 내려받는 방법은 ai/README.md 참고.
 *
 !.gitignore
+
+# 예외: 리그 평가셋 정답 라벨 (S15P11A304-148).
+# 사람이 맨눈으로 그린 KPI 채점 기준이라 재생성이 불가능하고, 용량도 수십 KB다.
+# 이미지는 여전히 제외 — 라벨만으로도 채점 재현과 규약 확인이 된다.
+!processed/
+processed/*
+!processed/eval_20260727_independent.json

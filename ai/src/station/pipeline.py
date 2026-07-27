@@ -64,9 +64,9 @@ def build_payload(
     }
 
     boxes = [d.box for d in detections
-             if d.label == "box" and d.score >= cfg.score_threshold]
+             if d.label == "box" and d.score >= cfg.threshold_for("box")]
     pallets = [d for d in detections
-               if d.label == "pallet" and d.score >= cfg.score_threshold]
+               if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
     pallet = max(pallets, key=lambda d: d.score).box if pallets else None
     detection_block = _detection_block(detections, pallet)
 

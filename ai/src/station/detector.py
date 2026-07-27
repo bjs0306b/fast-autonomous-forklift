@@ -44,6 +44,7 @@ class OnnxDetector:
         class_names: tuple[str, ...] = ("box", "pallet"),
         norm_mean: tuple[float, float, float] = (103.53, 116.28, 123.675),
         norm_std: tuple[float, float, float] = (57.375, 57.12, 58.395),
+        class_thresholds: dict[str, float] | None = None,
     ) -> None:
         import onnxruntime as ort
 
@@ -54,6 +55,11 @@ class OnnxDetector:
         self.input_size = input_size
         self.score_threshold = score_threshold
         self.class_names = class_names
+        # 클래스별 임계 — 지정한 클래스만 덮어쓰고 나머지는 score_threshold를 쓴다.
+        # 파렛트가 박스보다 낮은 점수로 잡히기 때문이다 (검은 플라스틱 + 격자 구조라
+        # 박스처럼 큰 단색면이 없다). 평가셋 실측: 파렛트는 0.4에서 재현율 100%,
+        # 0.5로 올리면 1개를 놓친다. 박스는 0.5에서 정밀도 93.9%로 유지가 낫다.
+        self.class_thresholds = dict(class_thresholds or {})
         self._mean = np.array(norm_mean, dtype=np.float32)   # BGR 순서 그대로
         self._std = np.array(norm_std, dtype=np.float32)
 
@@ -82,12 +88,13 @@ class OnnxDetector:
     ) -> list[Detection]:
         out: list[Detection] = []
         for (x1, y1, x2, y2, score), label in zip(dets, labels):
-            if score < self.score_threshold:
+            name = self.class_names[int(label)]
+            if score < self.class_thresholds.get(name, self.score_threshold):
                 continue  # dets는 score 내림차순이지만 mmdeploy가 0점 패딩을 섞는다
             x1, y1, x2, y2 = x1 / scale, y1 / scale, x2 / scale, y2 / scale
             out.append(
                 Detection(
-                    label=self.class_names[int(label)],
+                    label=name,
                     box=BBox(x=float(x1), y=float(y1),
                              w=float(x2 - x1), h=float(y2 - y1)),
                     score=float(score),
