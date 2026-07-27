@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fast.backend.storage.mapper.StorageSlotMapper">
+
+    <resultMap id="storageSlotResultMap" type="com.fast.backend.storage.domain.StorageSlot">
+        <id property="id" column="id"/>
+        <result property="slotCode" column="slot_code"/>
+        <result property="rackLevelId" column="rack_level_id"/>
+        <result property="width" column="width"/>
+        <result property="length" column="length"/>
+        <result property="height" column="height"/>
+        <result property="destinationX" column="destination_x"/>
+        <result property="destinationY" column="destination_y"/>
+        <result property="destinationHeading" column="destination_heading"/>
+        <result property="status" column="status"/>
+        <result property="reservedTaskId" column="reserved_task_id"/>
+        <result property="storedCargoId" column="stored_cargo_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <resultMap id="placementRowResultMap" type="com.fast.backend.storage.mapper.StorageSlotPlacementRow">
+        <id property="slotId" column="slot_id"/>
+        <result property="slotCode" column="slot_code"/>
+        <result property="rackId" column="rack_id"/>
+        <result property="rackCode" column="rack_code"/>
+        <result property="rackLevelId" column="rack_level_id"/>
+        <result property="levelNumber" column="level_number"/>
+        <result property="slotWidth" column="slot_width"/>
+        <result property="slotLength" column="slot_length"/>
+        <result property="slotHeight" column="slot_height"/>
+        <result property="destinationX" column="destination_x"/>
+        <result property="destinationY" column="destination_y"/>
+        <result property="destinationHeading" column="destination_heading"/>
+        <result property="forkHeight" column="fork_height"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fast.backend.storage.domain.StorageSlot"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO storage_slot (slot_code, rack_level_id, width, length, height,
+                                  destination_x, destination_y, destination_heading, status,
+                                  reserved_task_id, stored_cargo_id, created_at, updated_at)
+        VALUES (#{slotCode}, #{rackLevelId}, #{width}, #{length}, #{height},
+                #{destinationX}, #{destinationY}, #{destinationHeading}, #{status},
+                #{reservedTaskId}, #{storedCargoId}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findById" resultMap="storageSlotResultMap">
+        SELECT id, slot_code, rack_level_id, width, length, height,
+               destination_x, destination_y, destination_heading, status,
+               reserved_task_id, stored_cargo_id, created_at, updated_at
+        FROM storage_slot WHERE id = #{id}
+    </select>
+
+    <select id="findAllEmptySlotsForPlacement" resultMap="placementRowResultMap">
+        SELECT s.id            AS slot_id,
+               s.slot_code     AS slot_code,
+               r.id            AS rack_id,
+               r.rack_code     AS rack_code,
+               rl.id           AS rack_level_id,
+               rl.level_number AS level_number,
+               s.width         AS slot_width,
+               s.length        AS slot_length,
+               s.height        AS slot_height,
+               s.destination_x AS destination_x,
+               s.destination_y AS destination_y,
+               s.destination_heading AS destination_heading,
+               rl.fork_height  AS fork_height,
+               s.status        AS status
+        FROM storage_slot s
+        JOIN rack_level rl ON s.rack_level_id = rl.id
+        JOIN rack r ON rl.rack_id = r.id
+        WHERE s.status = 'EMPTY'
+        ORDER BY s.slot_code
+    </select>
+
+    <select id="findPlacementRowById" resultMap="placementRowResultMap">
+        SELECT s.id            AS slot_id,
+               s.slot_code     AS slot_code,
+               r.id            AS rack_id,
+               r.rack_code     AS rack_code,
+               rl.id           AS rack_level_id,
+               rl.level_number AS level_number,
+               s.width         AS slot_width,
+               s.length        AS slot_length,
+               s.height        AS slot_height,
+               s.destination_x AS destination_x,
+               s.destination_y AS destination_y,
+               s.destination_heading AS destination_heading,
+               rl.fork_height  AS fork_height,
+               s.status        AS status
+        FROM storage_slot s
+        JOIN rack_level rl ON s.rack_level_id = rl.id
+        JOIN rack r ON rl.rack_id = r.id
+        WHERE s.id = #{slotId}
+    </select>
+
+    <update id="reserveIfEmpty">
+        UPDATE storage_slot
+        SET status = 'RESERVED',
+            reserved_task_id = #{reservedTaskId},
+            updated_at = #{updatedAt}
+        WHERE id = #{slotId}
+          AND status = 'EMPTY'
+    </update>
+
+    <update id="markOccupied">
+        UPDATE storage_slot
+        SET status = 'OCCUPIED',
+            stored_cargo_id = #{storedCargoId},
+            updated_at = #{updatedAt}
+        WHERE id = #{slotId}
+          AND status = 'RESERVED'
+    </update>
+
+    <update id="releaseReservation">
+        UPDATE storage_slot
+        SET status = 'EMPTY',
+            reserved_task_id = NULL,
+            stored_cargo_id = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{slotId}
+          AND status = 'RESERVED'
+    </update>
+
+    <update id="updateStoredCargo">
+        UPDATE storage_slot
+        SET stored_cargo_id = #{storedCargoId},
+            updated_at = #{updatedAt}
+        WHERE id = #{slotId}
+    </update>
+
+</mapper>
