@@ -1,7 +1,8 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import type { MockVehicle } from "@/types/monitoring"
+import { toShortLabel } from "@/lib/vehicleStatus"
+import type { DashboardVehicle } from "@/types/monitoring"
 import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
 
 /**
@@ -21,23 +22,25 @@ export function MiniMapVehicleMarker({
   selected,
   onSelect,
 }: {
-  vehicle: MockVehicle
+  vehicle: DashboardVehicle
   left: number
   top: number
   selected: boolean
   onSelect?: (vehicleId: string) => void
 }) {
-  const color = VEHICLE_STATUS_COLOR[vehicle.status]
+  const color = VEHICLE_STATUS_COLOR[vehicle.status] ?? VEHICLE_STATUS_COLOR.UNKNOWN
   const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? vehicle.status
   const isSim = vehicle.source === "SIMULATION"
+  const shortLabel = toShortLabel(vehicle.vehicleId)
+  const heading = vehicle.location?.heading ?? null
 
   return (
     <button
       type="button"
       onClick={() => onSelect?.(vehicle.vehicleId)}
-      className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 focus:outline-none"
+      className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 transition-[left,top] duration-500 ease-out focus:outline-none"
       style={{ left: `${left}%`, top: `${top}%` }}
-      aria-label={`${vehicle.shortLabel} · ${vehicle.source === "REAL" ? "실제" : "시뮬레이션"} · ${statusLabel}${selected ? " (선택됨)" : ""}`}
+      aria-label={`${shortLabel} · ${isSim ? "시뮬레이션" : "실제"} · ${statusLabel}${selected ? " (선택됨)" : ""}`}
       aria-pressed={selected}
     >
       {/* ID 라벨 */}
@@ -48,7 +51,7 @@ export function MiniMapVehicleMarker({
         )}
         style={{ backgroundColor: "rgba(15,23,42,0.9)", color: color.border }}
       >
-        {vehicle.shortLabel}
+        {shortLabel}
       </span>
 
       <span className="relative flex items-center justify-center">
@@ -62,11 +65,11 @@ export function MiniMapVehicleMarker({
         ) : null}
 
         {/* heading 방향 화살표. TODO(coordinate): 0도 기준축/회전 방향 미확정 */}
-        {typeof vehicle.heading === "number" ? (
+        {typeof heading === "number" ? (
           <span
-            className="absolute -top-1.5 size-0"
+            className="absolute -top-1.5 size-0 transition-transform duration-500 ease-out"
             style={{
-              transform: `rotate(${vehicle.heading}deg)`,
+              transform: `rotate(${heading}deg)`,
               transformOrigin: "center 12px",
               borderLeft: "3px solid transparent",
               borderRight: "3px solid transparent",

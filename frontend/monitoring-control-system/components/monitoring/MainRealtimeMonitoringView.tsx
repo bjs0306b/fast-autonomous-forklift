@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { SelectedVehicleSummary, StreamConnectionStatus } from "@/types/monitoring"
+import type {
+  RealtimeConnectionStatus,
+  SelectedVehicleSummary,
+  StreamConnectionStatus,
+} from "@/types/monitoring"
 import { ConnectionStatusBadge } from "./ConnectionStatusBadge"
 import { DigitalTwinVideoLayer } from "./DigitalTwinVideoLayer"
 import { FullscreenButton } from "./FullscreenButton"
+import { RealtimeConnectionBadge } from "./RealtimeConnectionBadge"
 import { SelectedVehicleOverlay } from "./SelectedVehicleOverlay"
 
 /**
@@ -25,6 +30,8 @@ export interface MainRealtimeMonitoringViewProps {
   onRetryConnection?: () => void
   /** 화면 위에 작게 표시할 선택 차량 요약 (선택 안 됐으면 null) */
   selectedVehicle?: SelectedVehicleSummary | null
+  /** 관제 실시간(STOMP) 연결 상태. 영상 스트림 상태와는 별개 축이다. */
+  realtimeStatus?: RealtimeConnectionStatus
   className?: string
 }
 
@@ -32,6 +39,7 @@ export function MainRealtimeMonitoringView({
   streamStatus = "idle",
   onRetryConnection,
   selectedVehicle = null,
+  realtimeStatus = "connecting",
   className,
 }: MainRealtimeMonitoringViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,6 +84,7 @@ export function MainRealtimeMonitoringView({
       {/* 상단 우측: 상태 배지 + 전체 화면 버튼 + 선택 차량 오버레이 */}
       <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
         <div className="flex items-center gap-2">
+          <RealtimeConnectionBadge status={realtimeStatus} />
           <ConnectionStatusBadge status={streamStatus} />
           <FullscreenButton isFullscreen={isFullscreen} onToggle={toggleFullscreen} />
         </div>

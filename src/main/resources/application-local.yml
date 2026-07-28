@@ -91,6 +91,13 @@ dispatch:
   mqtt:
     enabled: ${DISPATCH_MQTT_ENABLED:false}
 
+# REST API CORS 허용 Origin(개발 환경). 브라우저 프론트(Next.js dev server)가
+# http://localhost:3000 에서 http://localhost:8080 을 호출하므로 이 Origin을 허용해야
+# preflight(OPTIONS)가 403으로 막히지 않는다. 여러 개면 쉼표로 구분한다.
+# 값을 비우면 CORS 자체가 비활성화된다(WebCorsConfig 참고).
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
 websocket:
   # STOMP 엔드포인트(/ws)의 허용 Origin. 프론트엔드 배포 주소가 아직 확정되지 않아 기존과 동일하게
   # "*"(전체 허용)를 기본값으로 둔다. 운영 환경에서는 반드시 실제 프론트 Origin으로 좁혀야 한다.
