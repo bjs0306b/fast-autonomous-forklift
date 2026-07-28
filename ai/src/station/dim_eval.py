@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -57,6 +58,102 @@ def candidates() -> list[tuple[str, float, float]]:
     return out
 
 
+def _measure_frame(row, args, cfg, detector):
+    """한 프레임 → payload. 거리 이상치·읽기 실패면 (None, 사유)."""
+    raw = row.get("distance_cm", "")
+    if not raw:
+        return None, "거리 없음"
+    dist_cm, std = float(raw), float(row.get("distance_std") or 0)
+    if dist_cm > MAX_VALID_DISTANCE_CM or std > MAX_VALID_STD_CM:
+        return None, f"거리 이상치 {dist_cm:g}cm — 빔 빗나감"
+    frame = cv2.imread(str(args.dir / row["file"]))
+    if frame is None:
+        return None, "이미지 없음"
+
+    dets = detector.detect(frame)
+    pallets = [d for d in dets
+               if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
+    tilt_deg = None
+    if pallets:
+        occ = [d.box for d in dets
+               if d.label == "box" and d.score >= cfg.threshold_for("box")]
+        tilt_deg = estimate_roll_deg(
+            frame, max(pallets, key=lambda d: d.score).box, occluders=occ)
+    return build_payload(
+        dets, Measurement(distance_cm=dist_cm, std_cm=std, frames_used=1,
+                          frames_seen=1), cfg, tilt_deg=tilt_deg), dist_cm
+
+
+def _config(args) -> StationConfig:
+    """--box-score가 있으면 그 임계로 바꾼 config를 준다 (detector·판정 모두 적용)."""
+    cfg = StationConfig()
+    if args.box_score is None:
+        return cfg
+    return replace(cfg, class_score_thresholds={**cfg.class_score_thresholds,
+                                                "box": args.box_score})
+
+
+def _per_box(args) -> int:
+    """박스별 개별 측정 채점 — 다중 박스 프레임 평가용.
+
+    각 박스를 실측 정답 18조합 중 최근접에 매칭한다. 잔차가 크면 실제 박스가 아니라
+    **배경 오탐**으로 보고 따로 집계한다 (실측: 배경 물체가 score 0.5~0.7로 섞인다)."""
+    rows = list(csv.DictReader((args.dir / "session.csv").open(encoding="utf-8")))
+    cfg = _config(args)
+    detector = OnnxDetector(cfg.model_path, cfg.input_size, cfg.score_threshold,
+                            cfg.class_names, cfg.norm_mean, cfg.norm_std,
+                            class_thresholds=cfg.class_score_thresholds)
+    cands = candidates()
+
+    matched, suspects, frames = [], [], 0
+    for row in rows:
+        payload, info = _measure_frame(row, args, cfg, detector)
+        if payload is None or not payload.get("box_measurements"):
+            continue
+        frames += 1
+        num = row["file"].rsplit("_", 1)[-1].split(".")[0]
+        for b in payload["box_measurements"]:
+            mh, mw = b["height_cm"] * 10, b["width_cm"] * 10
+            name, eh, ew = min(cands, key=lambda c: abs(mh - c[1]) + abs(mw - c[2]))
+            dh, dw = (mh - eh) / 10, (mw - ew) / 10
+            rec = {"num": num, "dist": info, "score": b["score"], "match": name,
+                   "mh": mh, "mw": mw, "eh": eh, "ew": ew, "dh": dh, "dw": dw}
+            (suspects if max(abs(dh), abs(dw)) > args.fp_threshold_mm
+             else matched).append(rec)
+
+    print(f"프레임 {frames}장 / 박스 감지 {len(matched) + len(suspects)}개\n")
+    print(f"{'num':>5s} {'dist':>5s} {'sc':>5s} {'박스·방향':22s} "
+          f"{'측정 H×W(mm)':>17s} {'기대':>11s} {'오차(mm)':>16s}")
+    print("-" * 92)
+    for r in matched:
+        flag = "" if max(abs(r["dh"]), abs(r["dw"])) <= args.tolerance_mm else "  <-- 초과"
+        print(f"{r['num']:>5s} {r['dist']:5.0f} {r['score']:5.2f} {r['match']:22s} "
+              f"{r['mh']:7.0f} x{r['mw']:7.0f} {r['eh']:5.0f}x{r['ew']:5.0f} "
+              f"{r['dh']:+7.2f} {r['dw']:+7.2f}{flag}")
+
+    if matched:
+        hs = [abs(r["dh"]) for r in matched]
+        ws = [abs(r["dw"]) for r in matched]
+        ok = sum(1 for r in matched
+                 if max(abs(r["dh"]), abs(r["dw"])) <= args.tolerance_mm)
+        print("\n=== 실제 박스로 매칭된 것 (미니어처 mm) ===")
+        print(f"  높이 평균 {sum(hs)/len(hs):.2f} 최대 {max(hs):.2f} / "
+              f"너비 평균 {sum(ws)/len(ws):.2f} 최대 {max(ws):.2f}")
+        print(f"  KPI(≤{args.tolerance_mm:g}mm) 통과: {ok}/{len(matched)} "
+              f"({ok/len(matched):.1%})")
+
+    if suspects:
+        print(f"\n=== 배경 오탐 의심 {len(suspects)}개 "
+              f"(어느 정답과도 {args.fp_threshold_mm:g}mm 넘게 어긋남) ===")
+        for r in suspects:
+            print(f"  {r['num']:>5s} score {r['score']:.2f}  "
+                  f"측정 {r['mh']:.0f}x{r['mw']:.0f}mm  (최근접 {r['match']})")
+        lo = sum(1 for r in suspects if r["score"] < 0.7)
+        print(f"  → score<0.7 이 {lo}/{len(suspects)}개. "
+              f"박스 임계를 올리면 대부분 걸러진다.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="치수 정확도 평가")
     parser.add_argument("--dir", type=Path, required=True, help="촬영 폴더")
@@ -67,10 +164,23 @@ def main(argv: list[str] | None = None) -> int:
     # 기준이라 기본적으로 n=1만 채점한다. 다중 박스 정확도는 box_measurements로 따로 본다.
     parser.add_argument("--all-frames", action="store_true",
                         help="박스 2개 이상 프레임도 포함 (기본: 단일 박스만 채점)")
+    # 다중 박스는 hull이 아니라 **박스별**로 재야 한다. --per-box는 프레임의 박스를
+    # 하나씩 실측 정답에 매칭해 채점한다(실측 검증: 진짜 박스는 KPI 안, 배경 오탐만 벗어남).
+    parser.add_argument("--per-box", action="store_true",
+                        help="박스별 개별 측정(box_measurements)을 채점 — 다중 박스 평가용")
+    parser.add_argument("--fp-threshold-mm", type=float, default=8.0,
+                        help="이 이상 빗나가면 배경 오탐으로 보고 따로 집계 (기본 8mm)")
+    # 배경 오탐(실측 score 0.50~0.68)과 진짜 박스(0.77~0.93)가 점수로 갈린다.
+    # 다중 박스 측정에서는 임계를 올려 오탐을 빼는 편이 낫다.
+    parser.add_argument("--box-score", type=float,
+                        help="박스 검출 임계 override (기본: config 값)")
     args = parser.parse_args(argv)
 
+    if args.per_box:
+        return _per_box(args)
+
     rows = list(csv.DictReader((args.dir / "session.csv").open(encoding="utf-8")))
-    cfg = StationConfig()
+    cfg = _config(args)
     detector = OnnxDetector(cfg.model_path, cfg.input_size, cfg.score_threshold,
                             cfg.class_names, cfg.norm_mean, cfg.norm_std,
                             class_thresholds=cfg.class_score_thresholds)

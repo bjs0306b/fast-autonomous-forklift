@@ -28,6 +28,57 @@ SCHEMA_VERSION = "1.0"
 _counter = itertools.count(1)
 
 
+# 파렛트에 직접 얹힌 판정: 박스 하단이 파렛트 bbox 상단보다 이만큼 위까지는 허용.
+# 파렛트 bbox 상단은 **뒤쪽 데크 모서리**이고 화물은 그보다 앞(=이미지에서 아래)에
+# 놓이므로, 실제로 얹힌 박스의 하단은 파렛트 상단보다 아래에 온다(실측 +86px).
+# 배경 물체는 반대로 위에 뜬다(실측 −42px). 그 사이를 가르는 여유값.
+ON_PALLET_TOLERANCE_PX = 20
+# 적층 판정: 위 박스 하단과 아래 박스 상단의 간격 허용치 (실측 15~17px).
+STACK_TOLERANCE_PX = 60
+
+
+def _x_overlap(a: BBox, b: BBox) -> float:
+    return min(a.x + a.w, b.x + b.w) - max(a.x, b.x)
+
+
+def on_pallet(boxes: list[BBox], pallet: BBox | None) -> list[BBox]:
+    """파렛트에서 위로 **연쇄로 지지되는** 박스만 남긴다 — 배경 물체 제거.
+
+    실측(2026-07-28 치수 평가)에서 **벽에 있는 물체가 score 0.5~0.75로 박스로 잡혀**
+    hull과 박스별 측정을 오염시켰다. 점수를 올려 거르면 진짜 박스 재현율이 같이
+    떨어지므로(0.5→0.7에서 95.5%→91.1%), **기하로 거른다**: 화물은 파렛트에 닿거나
+    아래 박스에 얹혀 있고, 배경 물체는 공중에 떠 있다.
+
+    지지 연결을 전파한다 — 파렛트에 직접 닿은 박스에서 시작해, 그 위에 얹힌 박스를
+    반복해서 추가한다. (단순히 "가장 높은 지지면보다 아래"로 보면 위쪽 박스가 지지면을
+    올려버려 그 아래 배경 물체까지 통과한다 — 실측에서 확인된 함정.)
+
+    파렛트가 없으면 판정 근거가 없어 그대로 둔다(치수만 내는 경로).
+    """
+    if pallet is None or not boxes:
+        return boxes
+
+    # 1) 파렛트에 직접 얹힌 것
+    kept = [b for b in boxes
+            if _x_overlap(b, pallet) > 0
+            and b.y + b.h >= pallet.y - ON_PALLET_TOLERANCE_PX]
+
+    # 2) 그 위에 얹힌 것을 더 이상 늘지 않을 때까지 전파
+    rest = [b for b in boxes if b not in kept]
+    changed = True
+    while changed:
+        changed = False
+        for b in list(rest):
+            for k in kept:
+                if (_x_overlap(b, k) > 0
+                        and abs((b.y + b.h) - k.y) <= STACK_TOLERANCE_PX):
+                    kept.append(b)
+                    rest.remove(b)
+                    changed = True
+                    break
+    return kept
+
+
 def hull(boxes: list[BBox]) -> BBox:
     """박스들을 모두 감싸는 외곽 — 적재물 전체 영역 (FR-103-2b: 전체 영역 기준)."""
     left = min(b.x for b in boxes)
@@ -68,6 +119,8 @@ def build_payload(
     pallets = [d for d in detections
                if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
     pallet = max(pallets, key=lambda d: d.score).box if pallets else None
+    # 파렛트 위 화물만 남긴다 — 배경 물체가 치수·편하중을 오염시키지 않게(on_pallet).
+    boxes = on_pallet(boxes, pallet)
     detection_block = _detection_block(detections, pallet)
 
     if not boxes:
@@ -101,18 +154,19 @@ def build_payload(
     # `dimensions`는 전체 적재물 외곽(hull) 하나지만, 데모는 박스를 개별로 옮기므로
     # 박스마다 치수를 낸다. ⚠️ 거리는 TF-Nova 단일값이라 **모든 박스가 카메라에서
     # 비슷한 거리(같은 앞면)** 여야 정확하다 — 앞뒤로 벌어지면 그 박스는 오차가 커진다.
+    # 점수는 감지 목록에서 되찾는다(on_pallet은 BBox만 다룸)
+    score_of = {(_px(d.box)[0], _px(d.box)[1], _px(d.box)[2], _px(d.box)[3]): d.score
+                for d in detections if d.label == "box"}
     box_measurements = []
-    for d in sorted((x for x in detections
-                     if x.label == "box" and x.score >= cfg.threshold_for("box")),
-                    key=lambda x: x.box.y):   # 위에서 아래로
-        bw, bh = d.box.w, d.box.h
+    for b in sorted(boxes, key=lambda x: x.y):   # 위에서 아래로
+        bw, bh = b.w, b.h
         if tilt_deg:
             bw, bh = tilt.deskew_size(bw, bh, tilt_deg)
         h_cm = measure.height_cm(bh, distance.distance_cm, cfg.calib.fy)
         w_cm = measure.width_cm(bw, distance.distance_cm, cfg.calib.fx)
         box_measurements.append({
-            "bbox_px": _px(d.box),
-            "score": round(d.score, 2),
+            "bbox_px": _px(b),
+            "score": round(score_of.get(tuple(_px(b)), 0.0), 2),
             "height_cm": round(h_cm, 1),
             "width_cm": round(w_cm, 1),
             "miniature_height_mm": round(h_cm * 10 / cfg.miniature_scale, 1),
