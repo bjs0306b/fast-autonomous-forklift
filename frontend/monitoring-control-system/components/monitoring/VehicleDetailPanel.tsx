@@ -15,17 +15,21 @@ import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL, isAlertStatus } from "./veh
  * 표시 값은 전부 props 로 내려온 selectedVehicle 에서만 읽는다 —
  * 상태/위치 WebSocket 이벤트가 도착하면 상위 상태가 갱신되어 이 패널도 자동으로 다시 그려진다.
  *
- * NOTE(FR-402-1): STOP / EMERGENCY STOP 버튼은 아직 실제 API 에 연결하지 않는다(이번 범위 밖).
+ * NOTE(FR-503): EMERGENCY STOP 버튼은 실제 API 에 연결돼 있다.
+ * STOP 버튼은 이번 범위 밖이라 아직 연결하지 않았다.
  */
 export function VehicleDetailPanel({
   vehicle,
   onStop,
   onEmergencyStop,
+  emergencyStopPending = false,
   className,
 }: {
   vehicle: DashboardVehicle | null
   onStop?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
+  /** 이 차량의 비상정지 요청이 진행 중인지(중복 클릭 방지) */
+  emergencyStopPending?: boolean
   className?: string
 }) {
   return (
@@ -46,6 +50,7 @@ export function VehicleDetailPanel({
           vehicle={vehicle}
           onStop={onStop}
           onEmergencyStop={onEmergencyStop}
+          emergencyStopPending={emergencyStopPending}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -62,15 +67,27 @@ function VehicleDetailContent({
   vehicle,
   onStop,
   onEmergencyStop,
+  emergencyStopPending,
 }: {
   vehicle: DashboardVehicle
   onStop?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
+  emergencyStopPending: boolean
 }) {
   const color = VEHICLE_STATUS_COLOR[vehicle.status] ?? VEHICLE_STATUS_COLOR.UNKNOWN
   const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? vehicle.status
   const loc = vehicle.location
   const task = vehicle.currentTask
+
+  // 이미 ESTOP 상태면 재발행을 막는다. 이 판단은 오직 차량이 보고한 status 로만 한다 —
+  // 명령 발행 성공(PUBLISHED)으로는 절대 ESTOP 으로 간주하지 않는다.
+  const alreadyEstopped = vehicle.status === "ESTOP"
+  const estopDisabled = alreadyEstopped || emergencyStopPending
+  const estopLabel = emergencyStopPending
+    ? "명령 전송 중..."
+    : alreadyEstopped
+      ? "비상정지 상태"
+      : `${vehicle.vehicleId} 비상정지`
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -112,6 +129,9 @@ function VehicleDetailContent({
               "text-sm font-medium",
               isAlertStatus(vehicle.status) ? "text-red-300" : "text-slate-100",
             )}
+            // 차량이 보고한 상태만 노출한다(명령 발행 결과와 분리). 검증에서 버튼 문구와 혼동하지 않도록 식별자를 둔다.
+            data-testid="vehicle-status-label"
+            data-status={vehicle.status}
           >
             {statusLabel}
           </span>
@@ -187,10 +207,19 @@ function VehicleDetailContent({
         <button
           type="button"
           onClick={() => onEmergencyStop?.(vehicle.vehicleId)}
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-500 focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:outline-none"
+          disabled={estopDisabled}
+          aria-busy={emergencyStopPending}
+          data-testid="vehicle-estop-button"
+          className={cn(
+            "inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-white transition-colors focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:outline-none",
+            estopDisabled
+              ? "cursor-not-allowed bg-red-900/60 text-red-200/70"
+              : "bg-red-600 hover:bg-red-500",
+          )}
+          title={alreadyEstopped ? "이미 비상정지 상태입니다" : undefined}
         >
           <OctagonAlert className="size-4" aria-hidden="true" />
-          EMERGENCY STOP
+          {estopLabel}
         </button>
       </div>
     </div>

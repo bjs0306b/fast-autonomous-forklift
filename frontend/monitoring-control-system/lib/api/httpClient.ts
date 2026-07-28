@@ -31,11 +31,49 @@ export function apiUrl(path: string): string {
  * 실패는 전부 ApiRequestError 로 통일해 던지며, 호출 취소(AbortError)는 그대로 통과시킨다.
  */
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, { method: "GET" }, signal)
+}
+
+/**
+ * POST 후 ApiResponse 봉투를 벗겨 data 를 돌려준다.
+ *
+ * {@code body} 가 undefined 면 <b>본문 없이</b> 보낸다 — 백엔드 안전 명령 API 는
+ * {@code @RequestBody(required = false)} 라 빈 {@code {}} 를 굳이 보낼 필요가 없다.
+ *
+ * <b>주의</b>: 여기서 성공을 판정하는 것은 HTTP status 와 ApiResponse.success 까지다.
+ * 안전 명령의 "발행 성공" 여부는 응답 본문의 {@code data.status}(PUBLISHED / PUBLISH_FAILED)로
+ * 호출자가 따로 판단해야 한다 — PUBLISH_FAILED 도 HTTP 201 로 내려온다.
+ */
+export async function postJson<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const hasBody = body !== undefined && body !== null
+  return requestJson<T>(
+    path,
+    {
+      method: "POST",
+      headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+      body: hasBody ? JSON.stringify(body) : undefined,
+    },
+    signal,
+  )
+}
+
+interface RequestOptions {
+  method: "GET" | "POST"
+  headers?: Record<string, string>
+  body?: string
+}
+
+async function requestJson<T>(
+  path: string,
+  options: RequestOptions,
+  signal?: AbortSignal,
+): Promise<T> {
   let response: Response
   try {
     response = await fetch(apiUrl(path), {
-      method: "GET",
-      headers: { Accept: "application/json" },
+      method: options.method,
+      headers: { Accept: "application/json", ...(options.headers ?? {}) },
+      body: options.body,
       signal,
     })
   } catch (error) {
