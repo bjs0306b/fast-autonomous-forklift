@@ -54,6 +54,21 @@
         LIMIT 1
     </select>
 
+    <!--
+        대시보드 N+1 제거용 일괄 조회(prompt56.md 10장). taskId별 "최신 1건"은 Service가 그룹의 첫 행을
+        집어 결정한다 — 윈도우 함수 없이 MySQL/H2 양쪽에서 동일하게 동작하도록 정렬만 SQL에 맡겼다.
+        taskIds가 비어 있으면 IN ()으로 문법 오류가 나므로 호출자가 빈 목록을 걸러야 한다.
+    -->
+    <select id="findByTaskIds" resultMap="transportCommandResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM transport_command
+        WHERE task_id IN
+        <foreach item="taskId" collection="taskIds" open="(" separator="," close=")">
+            #{taskId}
+        </foreach>
+        ORDER BY task_id, created_at DESC, id DESC
+    </select>
+
     <select id="existsActiveByTaskId" resultType="boolean">
         SELECT COUNT(*) > 0 FROM transport_command
         WHERE task_id = #{taskId} AND status IN ('CREATED', 'PUBLISHED', 'ACKNOWLEDGED')

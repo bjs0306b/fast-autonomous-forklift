@@ -56,10 +56,19 @@ public class VehicleCommandController {
         return ApiResponse.success(commandService.findByCommandId(vehicleId, commandId));
     }
 
+    /**
+     * 차량별 최근 명령 목록.
+     *
+     * <p>{@code category}는 <b>선택</b> 필터다(prompt56.md 12장). 생략하면 기존과 동일하게 모든 분류를
+     * 반환하므로 이 파라미터 추가는 기존 호출을 깨지 않는다. 관제 화면이 "최근 안전 명령"을 물을 때는
+     * {@code ?limit=1&category=SAFETY}로 호출해 MOVE/FORK 명령이 섞이지 않게 한다.
+     */
     @GetMapping("/commands")
     public ApiResponse<List<VehicleCommandResponse>> listCommands(
-            @PathVariable String vehicleId, @RequestParam(defaultValue = "50") int limit) {
-        return ApiResponse.success(commandService.findRecentByVehicleId(vehicleId, limit));
+            @PathVariable String vehicleId,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) String category) {
+        return ApiResponse.success(commandService.findRecentByVehicleId(vehicleId, limit, category));
     }
 
     /**
@@ -89,7 +98,9 @@ public class VehicleCommandController {
     @Deprecated(forRemoval = true)
     @GetMapping("/embedded-commands")
     public ApiResponse<List<VehicleCommandResponse>> listCommandsLegacy(
-            @PathVariable String vehicleId, @RequestParam(defaultValue = "50") int limit) {
-        return listCommands(vehicleId, limit);
+            @PathVariable String vehicleId,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) String category) {
+        return listCommands(vehicleId, limit, category);
     }
 }

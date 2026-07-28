@@ -26,6 +26,24 @@ public interface TransportCommandMapper {
     /** taskId별 가장 최근 command 1건(created_at DESC). 대시보드 최신 command 상태 표시용(prompt50.md 11장). */
     Optional<TransportCommand> findLatestByTaskId(Long taskId);
 
+    /**
+     * 여러 taskId의 command를 <b>한 번의 쿼리로</b> 가져온다(prompt56.md 10장 N+1 방지).
+     *
+     * <p>이전에는 대시보드가 task 100건마다 {@link #findLatestByTaskId}를 호출해 최대 100회의 추가 쿼리가
+     * 발생했다. 이 메서드는 그 100회를 1회로 줄인다.
+     *
+     * <p><b>"latest 1건"을 SQL이 아니라 Java에서 고르는 이유</b>: taskId별 상위 1건만 뽑으려면 윈도우 함수나
+     * 상관 서브쿼리가 필요한데, 이 프로젝트는 MySQL(운영)과 H2 MySQL 모드(테스트) 양쪽에서 같은 SQL이
+     * 돌아야 한다. 그래서 정렬만 SQL에 맡기고({@code task_id, created_at DESC, id DESC}) 그룹의 첫 행을
+     * 호출자가 집도록 했다 — 두 DB 모두에서 동작이 보장되는 가장 단순한 방법이다.
+     *
+     * <p><b>주의</b>: {@code taskIds}가 비어 있으면 {@code IN ()}이 되어 SQL 문법 오류가 나므로,
+     * 호출 전에 빈 목록을 걸러야 한다.
+     *
+     * @return {@code task_id} 오름차순, 같은 task 안에서는 최신순으로 정렬된 전체 command
+     */
+    List<TransportCommand> findByTaskIds(@Param("taskIds") List<Long> taskIds);
+
     /** 진행 중(CREATED/PUBLISHED/ACKNOWLEDGED) command가 있는지 — 중복 디스패치 차단용. */
     boolean existsActiveByTaskId(Long taskId);
 

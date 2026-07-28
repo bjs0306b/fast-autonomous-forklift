@@ -76,10 +76,17 @@
         WHERE command_id = #{commandId}
     </select>
 
+    <!--
+        commandCategory는 선택 필터다(prompt56.md 12장 A안). null이면 조건 자체가 붙지 않아 기존 동작
+        (전체 분류 조회)이 그대로 유지되므로, 이 파라미터 추가는 하위 호환을 깨지 않는다.
+    -->
     <select id="findRecentByVehicleId" resultMap="vehicleCommandResultMap">
         SELECT <include refid="commandColumns"/>
         FROM embedded_vehicle_command
         WHERE forklift_id = #{vehicleId}
+        <if test="commandCategory != null">
+            AND command_category = #{commandCategory}
+        </if>
         ORDER BY issued_at DESC, id DESC
         LIMIT #{limit}
     </select>
