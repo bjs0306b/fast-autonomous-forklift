@@ -262,18 +262,45 @@ public class VehicleCommandService {
         return toResponse(entity);
     }
 
+    /** 분류 필터 없이 최근 명령을 조회한다(기존 호출 계약 유지). */
     @Transactional(readOnly = true)
     public List<VehicleCommandResponse> findRecentByVehicleId(String vehicleId, int limit) {
+        return findRecentByVehicleId(vehicleId, limit, null);
+    }
+
+    /**
+     * 차량별 최근 명령 조회. {@code rawCategory}가 주어지면 해당 {@link VehicleCommandCategory}만 반환한다
+     * (prompt56.md 12장 A안).
+     *
+     * <p>이 필터를 둔 이유: 관제 화면이 "최근 안전 명령 상태"를 보여줄 때 필터 없이 최신 1건을 뽑으면
+     * 직전에 발행된 {@code MOVE}/{@code FORK} 명령이 안전 명령인 것처럼 표시된다. {@code category=SAFETY}로
+     * 물으면 STOP/EMERGENCY_STOP/RESET_ESTOP만 걸러진다.
+     *
+     * <p>알 수 없는 분류 문자열은 조용히 무시하지 않고 400으로 거부한다 — 오타 하나 때문에 "전체 명령"이
+     * 반환되면 호출자가 잘못된 값을 안전 명령으로 오해할 수 있기 때문이다.
+     */
+    @Transactional(readOnly = true)
+    public List<VehicleCommandResponse> findRecentByVehicleId(String vehicleId, int limit, String rawCategory) {
         if (limit < MIN_LIMIT || limit > MAX_LIMIT) {
             throw new BusinessException(ErrorCode.COMMAND_LIMIT_INVALID,
                     "limit은 " + MIN_LIMIT + "~" + MAX_LIMIT + " 범위여야 합니다: " + limit);
         }
+        VehicleCommandCategory category = resolveFilterCategory(rawCategory);
         vehicleMapper.findByVehicleId(vehicleId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.VEHICLE_NOT_FOUND,
                         "등록되지 않은 차량입니다: " + vehicleId));
-        return commandMapper.findRecentByVehicleId(vehicleId, limit).stream()
+        return commandMapper.findRecentByVehicleId(vehicleId, limit, category).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    private VehicleCommandCategory resolveFilterCategory(String rawCategory) {
+        if (rawCategory == null || rawCategory.isBlank()) {
+            return null; // 필터 없음 = 전체 분류
+        }
+        return VehicleCommandCategory.fromRaw(rawCategory)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COMMAND_COMBINATION_INVALID,
+                        "알 수 없는 commandCategory입니다: " + rawCategory));
     }
 
     private VehicleCommandResponse toResponse(VehicleCommand entity) {

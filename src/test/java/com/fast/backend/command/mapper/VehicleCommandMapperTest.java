@@ -110,7 +110,7 @@ class VehicleCommandMapperTest {
         insertAt("CMD-M-011", "REAL-F01", base.minusMinutes(1));
         insertAt("CMD-M-012", "SIM-F01", base);
 
-        List<VehicleCommand> rows = commandMapper.findRecentByVehicleId("REAL-F01", 10);
+        List<VehicleCommand> rows = commandMapper.findRecentByVehicleId("REAL-F01", 10, null);
 
         assertThat(rows).extracting(VehicleCommand::getCommandId)
                 .containsExactly("CMD-M-011", "CMD-M-010");
@@ -123,7 +123,7 @@ class VehicleCommandMapperTest {
         insertAt("CMD-M-021", "REAL-F02", base.minusMinutes(2));
         insertAt("CMD-M-022", "REAL-F02", base.minusMinutes(1));
 
-        assertThat(commandMapper.findRecentByVehicleId("REAL-F02", 2)).hasSize(2);
+        assertThat(commandMapper.findRecentByVehicleId("REAL-F02", 2, null)).hasSize(2);
     }
 
     @Test

@@ -12,6 +12,8 @@ public enum ErrorCode {
 
     VEHICLE_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 차량입니다."),
     VEHICLE_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 등록된 vehicleId입니다."),
+    VEHICLE_INACTIVE(HttpStatus.CONFLICT, "비활성 차량에는 명령을 발행할 수 없습니다."),
+    INVALID_VEHICLE_ID(HttpStatus.BAD_REQUEST, "vehicleId 형식이 올바르지 않습니다."),
     VEHICLE_BATTERY_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "battery는 0~100 범위여야 합니다."),
     VEHICLE_STATUS_HISTORY_LIMIT_INVALID(HttpStatus.BAD_REQUEST, "limit은 1~200 범위여야 합니다."),
 
