@@ -1,56 +1,131 @@
-// 관제 프론트 스캐폴딩용 최소 타입 정의
-// 실제 백엔드 계약(enum/필드)은 연동 단계에서 다시 확정한다.
+// 관제 화면 도메인 타입.
+//
+// FR-402-1 연동 단계에서 스캐폴딩용 Mock 타입을 걷어내고
+// 실제 백엔드 계약(GET /api/monitoring/dashboard)에 맞춰 재정의했다.
 
-/** 차량 상태 (백엔드 VehicleStatus enum은 연동 단계에서 확정) */
+/**
+ * 차량 상태. 백엔드 com.fast.backend.vehicle.domain.VehicleStatus enum 10종과 정확히 일치한다.
+ *
+ * 스캐폴딩 시절의 WORKING / STOPPED 는 백엔드에 존재하지 않아 제거했고,
+ * 백엔드에만 있던 ACTIVE / LIFTING / LOADING / UNLOADING / ERROR 를 추가했다.
+ */
 export type VehicleStatus =
-  | "IDLE"
-  | "MOVING"
-  | "WORKING"
-  | "STOPPED"
-  | "ESTOP"
-  | "OFFLINE"
   | "UNKNOWN"
+  | "IDLE"
+  | "ACTIVE"
+  | "MOVING"
+  | "LIFTING"
+  | "LOADING"
+  | "UNLOADING"
+  | "ESTOP"
+  | "ERROR"
+  | "OFFLINE"
 
-/** 차량 출처 (REAL / SIMULATION) */
+/**
+ * 차량 등록 출처. 백엔드 VehicleSource enum.
+ *
+ * 주의: 위치 스냅샷의 출처 태그({@link LocationSource})와 값 집합이 다르다.
+ * 두 타입을 하나로 합치지 않는다.
+ */
 export type VehicleSource = "REAL" | "SIMULATION"
 
 /**
- * 디지털 트윈 영상 스트림 연결 상태.
- * 스캐폴딩 단계에서는 실제 스트림을 연결하지 않고 상태만 표현한다.
- * - idle:       아직 연결 시도 전 / 영상 미연결
- * - connecting: 연결 시도 중 (로딩)
- * - connected:  스트림 표시 가능 (실제 URL/프로토콜은 미확정)
- * - error:      연결 실패
+ * 위치 메시지 출처 태그. ROS2 경로는 "REAL", Isaac Sim 경로는 "SIM" 이다.
+ * 차량 등록 정보인 {@link VehicleSource}("SIMULATION")와 값이 다르므로 별도 타입으로 유지한다.
  */
-export type StreamConnectionStatus = "idle" | "connecting" | "connected" | "error"
+export type LocationSource = "REAL" | "SIM"
 
-/** 창고 월드 좌표. 단위/원점은 연동 단계에서 확정한다. */
-export interface VehicleLocation {
-  x: number
-  y: number
+/** 운반 작업 상태. 백엔드 TaskStatus enum. */
+export type TaskStatus =
+  | "PENDING"
+  | "ASSIGNED"
+  | "MOVING_TO_PICKUP"
+  | "PICKING_UP"
+  | "TRANSPORTING"
+  | "PLACING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED"
+
+/** 운반 명령 상태. 백엔드 TransportCommandStatus enum. */
+export type TransportCommandStatus =
+  | "CREATED"
+  | "PUBLISHED"
+  | "ACKNOWLEDGED"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "PUBLISH_FAILED"
+  | "TIMEOUT"
+
+/**
+ * 차량 최신 위치. 위치를 한 번도 수신하지 못한 차량은 이 객체 전체가 null 이다
+ * (개별 필드만 null 인 경우와 구분해야 한다).
+ *
+ * 단위: x/y = m, heading = degree([0,360)), speed = m/s.
+ * 좌표 원점과 heading 0도 기준축은 백엔드가 정의하지 않는다(ROS2/Isaac 협의 대상).
+ */
+export interface DashboardLocation {
+  x: number | null
+  y: number | null
+  heading: number | null
+  speed: number | null
+  /** "map" | "odom" */
+  frameId: string | null
+  /** 차량이 메시지를 만든 시각 (ISO-8601 +09:00) */
+  messageAt: string | null
+  /** 백엔드가 메시지를 수신한 시각 (ISO-8601 +09:00) */
+  receivedAt: string | null
+  source: LocationSource
+}
+
+/** 차량이 현재 수행 중인 작업 요약. 진행 중 작업이 없으면 null. */
+export interface DashboardCurrentTask {
+  /** 백엔드 taskCode */
+  taskId: string
+  status: TaskStatus
+  /** 아직 운반 명령이 발행되지 않았으면 null */
+  commandStatus: TransportCommandStatus | null
+  updatedAt: string | null
+}
+
+/** GET /api/monitoring/dashboard 의 vehicles[] 항목. */
+export interface DashboardVehicle {
+  vehicleId: string
+  name: string
+  source: VehicleSource
+  /** 현재 dashboard 는 활성 차량만 반환하므로 항상 true 다(계약 명시용 필드). */
+  active: boolean
+  status: VehicleStatus
+  /** 위치 미수신이면 null */
+  location: DashboardLocation | null
+  /** 진행 중 작업이 없으면 null */
+  currentTask: DashboardCurrentTask | null
+  /** 상태 messageAt ?? receivedAt */
+  lastUpdatedAt: string | null
+}
+
+/** GET /api/monitoring/dashboard 의 tasks[] 항목(최근 100건). */
+export interface DashboardTask {
+  taskId: string
+  vehicleId: string | null
+  status: TaskStatus | null
+  commandStatus: TransportCommandStatus | null
+  updatedAt: string | null
+}
+
+export interface DashboardResponse {
+  vehicles: DashboardVehicle[]
+  tasks: DashboardTask[]
 }
 
 /**
- * Mock 디지털 트윈 화면에 배치되는 차량 정보.
- * 실제 API/WebSocket 연동 전, 시각적 관제 화면 표현을 위한 형태다.
+ * 디지털 트윈 영상 스트림 연결 상태.
+ * 실제 스트림은 아직 연결하지 않고 상태만 표현한다(FR-402-1 범위 밖).
  */
-export interface MockVehicle {
-  vehicleId: string
-  /** 사람이 읽는 차량명 (예: 지게차 F01) */
-  name?: string | null
-  /** 마커 위에 표시할 짧은 라벨 (예: F01, S01) */
-  shortLabel: string
-  status: VehicleStatus
-  source: VehicleSource
-  /** 창고 내 월드 좌표. null 이면 위치 미수신 → 미니맵에 표시하지 않는다. */
-  location: VehicleLocation | null
-  /** 진행 방향(도). 실제 기준축/회전 방향은 미확정. */
-  heading?: number | null
-  /** 속도 (단위 미확정, 예: m/s). null 이면 미수신 */
-  speed?: number | null
-  /** 현재 작업 라벨 (있을 때만 표시) */
-  currentTask?: string | null
-}
+export type StreamConnectionStatus = "idle" | "connecting" | "connected" | "error"
+
+/** 관제 실시간(WebSocket) 연결 상태. 영상 스트림 상태와는 별개다. */
+export type RealtimeConnectionStatus = "connecting" | "connected" | "disconnected" | "error"
 
 /** 실시간 관제 화면 오버레이에 표시할 선택 차량 요약 정보 */
 export interface SelectedVehicleSummary {

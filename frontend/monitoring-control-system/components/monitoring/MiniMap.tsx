@@ -2,18 +2,26 @@
 
 import { cn } from "@/lib/utils"
 import { worldToPercent, type WorldBounds } from "@/lib/coordinate"
-import type { MockVehicle } from "@/types/monitoring"
+import type { DashboardVehicle } from "@/types/monitoring"
 import { MiniMapVehicleMarker } from "./MiniMapVehicleMarker"
+
+/** 미니맵에 그릴 수 있는 차량(위치 객체와 x/y가 모두 있는 차량)인지 판별한다. */
+export function isVehicleWithRenderableLocation(
+  vehicle: DashboardVehicle,
+): vehicle is DashboardVehicle & { location: { x: number; y: number } & DashboardVehicle["location"] } {
+  const location = vehicle.location
+  return location != null && typeof location.x === "number" && typeof location.y === "number"
+}
 
 /**
  * MiniMap
  *
  * 축소된 평면 관제 지도. 창고 랙/통로/작업 구역 구조 위에 차량 마커를 배치한다.
- * (원래 MockDigitalTwinView 에 있던 평면도 + 좌표 배치 로직을 이곳으로 이동)
  *
- * - location 이 null 인 차량은 표시하지 않는다.
+ * - location 이 null 이거나 x/y 가 null 인 차량은 표시하지 않는다.
  * - 마커 클릭 시 팝업 없이 onSelectVehicle(vehicleId) 만 호출한다.
  * - STOP / 배터리 등은 표시하지 않는다.
+ * - 위치 이벤트가 도착하면 마커가 자동으로 이동한다(좌표는 props 로만 내려온다).
  */
 export function MiniMap({
   vehicles,
@@ -22,13 +30,13 @@ export function MiniMap({
   bounds,
   className,
 }: {
-  vehicles: MockVehicle[]
+  vehicles: DashboardVehicle[]
   selectedVehicleId?: string | null
   onSelectVehicle?: (vehicleId: string) => void
   bounds?: WorldBounds
   className?: string
 }) {
-  const placedVehicles = vehicles.filter((v) => v.location != null)
+  const placedVehicles = vehicles.filter(isVehicleWithRenderableLocation)
 
   return (
     <section
@@ -40,7 +48,9 @@ export function MiniMap({
     >
       <header className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
         <span className="text-xs font-semibold text-slate-100">미니맵</span>
-        <span className="text-[10px] text-slate-400">Warehouse Map</span>
+        <span className="text-[10px] text-slate-400">
+          위치 수신 {placedVehicles.length}/{vehicles.length}
+        </span>
       </header>
 
       <div className="relative min-h-0 flex-1">
@@ -63,7 +73,7 @@ export function MiniMap({
 
           {/* 차량 마커 */}
           {placedVehicles.map((vehicle) => {
-            const pos = worldToPercent(vehicle.location!.x, vehicle.location!.y, bounds)
+            const pos = worldToPercent(vehicle.location.x, vehicle.location.y, bounds)
             return (
               <MiniMapVehicleMarker
                 key={vehicle.vehicleId}
