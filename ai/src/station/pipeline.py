@@ -97,10 +97,33 @@ def build_payload(
         "tilt_deg": round(tilt_deg, 2) if tilt_deg else None,
     }
 
+    # 박스별 개별 치수 (다중 박스 동시 측정 — 각 박스를 따로 배치할 때 씀).
+    # `dimensions`는 전체 적재물 외곽(hull) 하나지만, 데모는 박스를 개별로 옮기므로
+    # 박스마다 치수를 낸다. ⚠️ 거리는 TF-Nova 단일값이라 **모든 박스가 카메라에서
+    # 비슷한 거리(같은 앞면)** 여야 정확하다 — 앞뒤로 벌어지면 그 박스는 오차가 커진다.
+    box_measurements = []
+    for d in sorted((x for x in detections
+                     if x.label == "box" and x.score >= cfg.threshold_for("box")),
+                    key=lambda x: x.box.y):   # 위에서 아래로
+        bw, bh = d.box.w, d.box.h
+        if tilt_deg:
+            bw, bh = tilt.deskew_size(bw, bh, tilt_deg)
+        h_cm = measure.height_cm(bh, distance.distance_cm, cfg.calib.fy)
+        w_cm = measure.width_cm(bw, distance.distance_cm, cfg.calib.fx)
+        box_measurements.append({
+            "bbox_px": _px(d.box),
+            "score": round(d.score, 2),
+            "height_cm": round(h_cm, 1),
+            "width_cm": round(w_cm, 1),
+            "miniature_height_mm": round(h_cm * 10 / cfg.miniature_scale, 1),
+            "miniature_width_mm": round(w_cm * 10 / cfg.miniature_scale, 1),
+        })
+
     if pallet is None:   # 파렛트 없음 → 치수만, 편하중은 판정 불가
         return {**base, "status": "dimensions_only", "detection": detection_block,
                 "distance": _distance_block(distance),
-                "dimensions": dimensions, "load_balance": None}
+                "dimensions": dimensions, "box_measurements": box_measurements,
+                "load_balance": None}
 
     # 편하중: assess_load(중심 단순 평균 + hull 정규화) 재사용하되 좌우(x)만 채택
     # (모듈 도크스트링 참고). 부호 → 방향 코드.
@@ -114,6 +137,7 @@ def build_payload(
         "detection": detection_block,
         "distance": _distance_block(distance),
         "dimensions": dimensions,
+        "box_measurements": box_measurements,
         "load_balance": {
             "eccentric": eccentric,
             "direction": direction,
