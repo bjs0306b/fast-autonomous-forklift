@@ -139,12 +139,19 @@ def build_payload(
         load_w, load_h = tilt.deskew_size(load.w, load.h, tilt_deg)
     height = measure.height_cm(load_h, distance.distance_cm, cfg.calib.fy)
     width = measure.width_cm(load_w, distance.distance_cm, cfg.calib.fx)
+    # 화물은 항상 파렛트 위에 실려 운반되므로, 적재 위치 산출(FR-202)이 쓸 값은
+    # **파렛트를 포함한 총높이**다. 화물만의 높이(height_cm)도 같이 남긴다 —
+    # 소비자가 무엇을 쓰는지 분명하도록 둘을 구분해 낸다.
+    total_height = height + cfg.pallet_height_cm
     dimensions = {
-        "height_cm": round(height, 1),
+        "height_cm": round(height, 1),          # 화물만
+        "total_height_cm": round(total_height, 1),   # 화물 + 파렛트 (적재 판단용)
+        "pallet_height_cm": cfg.pallet_height_cm,
         "width_cm": round(width, 1),
         "depth_cm": None,   # 정면 카메라로 측정 불가 — 항상 null (규격 v1.0)
         "miniature_scale": cfg.miniature_scale,
         "miniature_height_mm": round(height * 10 / cfg.miniature_scale, 1),
+        "miniature_total_height_mm": round(total_height * 10 / cfg.miniature_scale, 1),
         "miniature_width_mm": round(width * 10 / cfg.miniature_scale, 1),
         # 적용된 롤 보정각(도). null이면 보정 안 함(파렛트 없음·추정 실패·범위 초과).
         "tilt_deg": round(tilt_deg, 2) if tilt_deg else None,
