@@ -20,6 +20,7 @@ public class MqttTopics {
     private final Pattern forkStatusTopicPattern;
     private final Pattern errorTopicPattern;
     private final Pattern stationMeasurementTopicPattern;
+    private final Pattern loadSafetyTopicPattern;
 
     public MqttTopics(MqttProperties mqttProperties) {
         this.topics = mqttProperties.topics();
@@ -30,6 +31,7 @@ public class MqttTopics {
         this.forkStatusTopicPattern = toSubscribePattern(topics.forkliftForkStatus());
         this.errorTopicPattern = toSubscribePattern(topics.forkliftError());
         this.stationMeasurementTopicPattern = toSubscribePattern(topics.stationMeasurement());
+        this.loadSafetyTopicPattern = toSubscribePattern(topics.forkliftLoadSafety());
     }
 
     public String forkliftStatusSubscribeTopic() {
@@ -62,6 +64,11 @@ public class MqttTopics {
 
     public String stationMeasurementSubscribeTopic() {
         return topics.stationMeasurement();
+    }
+
+    /** 적재 화물 안전 상태 구독 토픽 {@code forklift/+/load-safety}(prompt63.md 4장). */
+    public String forkliftLoadSafetySubscribeTopic() {
+        return topics.forkliftLoadSafety();
     }
 
     /**
@@ -110,6 +117,10 @@ public class MqttTopics {
         return topic != null && stationMeasurementTopicPattern.matcher(topic).matches();
     }
 
+    public boolean isForkliftLoadSafetyTopic(String topic) {
+        return topic != null && loadSafetyTopicPattern.matcher(topic).matches();
+    }
+
     /**
      * {@code fast/station/{station_id}/measurement}에서 station_id를 추출한다. isStationMeasurementTopic이
      * 이미 true로 확인된 토픽에서만 호출되므로 매칭은 항상 성공한다.
@@ -152,6 +163,10 @@ public class MqttTopics {
         Matcher errorMatcher = errorTopicPattern.matcher(topic);
         if (errorMatcher.matches()) {
             return errorMatcher.group(1);
+        }
+        Matcher loadSafetyMatcher = loadSafetyTopicPattern.matcher(topic);
+        if (loadSafetyMatcher.matches()) {
+            return loadSafetyMatcher.group(1);
         }
         throw new IllegalArgumentException("Cannot extract forkliftId from topic: " + topic);
     }

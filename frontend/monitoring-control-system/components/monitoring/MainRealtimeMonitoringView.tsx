@@ -32,6 +32,11 @@ export interface MainRealtimeMonitoringViewProps {
   selectedVehicle?: SelectedVehicleSummary | null
   /** 관제 실시간(STOMP) 연결 상태. 영상 스트림 상태와는 별개 축이다. */
   realtimeStatus?: RealtimeConnectionStatus
+  /**
+   * 영상 위에 겹칠 경고 오버레이(적재 위험 등). 이 컴포넌트는 무엇을 띄울지 판단하지 않고
+   * 자리만 내어 준다 — 표시 조건은 오버레이 컴포넌트가 스스로 정한다.
+   */
+  overlay?: React.ReactNode
   className?: string
 }
 
@@ -40,6 +45,7 @@ export function MainRealtimeMonitoringView({
   onRetryConnection,
   selectedVehicle = null,
   realtimeStatus = "connecting",
+  overlay = null,
   className,
 }: MainRealtimeMonitoringViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -90,6 +96,10 @@ export function MainRealtimeMonitoringView({
         </div>
         {selectedVehicle ? <SelectedVehicleOverlay vehicle={selectedVehicle} /> : null}
       </div>
+
+      {/* 적재 위험 등 경고 오버레이. 연결 중/실패 오버레이(z-30)보다 먼저 두어
+          영상이 정상 표시될 때 하단에 겹쳐 보이게 한다. */}
+      {overlay}
 
       {/* 연결 중(로딩) 오버레이 */}
       {streamStatus === "connecting" ? (

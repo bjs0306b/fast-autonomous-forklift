@@ -21,7 +21,8 @@ class MqttTopicsTest {
                 "forklift/+/error",
                 "cargo/detected",
                 "forklift/%s/command",
-                "fast/station/+/measurement");
+                "fast/station/+/measurement",
+                "forklift/+/load-safety");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
                 "fast-backend-inbound", "fast-backend-outbound",

@@ -7,6 +7,7 @@ import { MiniMap } from "@/components/monitoring/MiniMap"
 import { VehicleDetailPanel } from "@/components/monitoring/VehicleDetailPanel"
 import { GlobalEmergencyStopBar } from "@/components/monitoring/GlobalEmergencyStopBar"
 import { CommandNotice, type CommandNoticeState } from "@/components/monitoring/CommandNotice"
+import { LoadSafetyOverlay } from "@/components/monitoring/LoadSafetyOverlay"
 import { useMonitoringDashboard } from "@/hooks/useMonitoringDashboard"
 import { useMonitoringSocket } from "@/hooks/useMonitoringSocket"
 import { emergencyStopAll, emergencyStopVehicle } from "@/lib/api/commandApi"
@@ -34,6 +35,9 @@ export default function MonitoringPage() {
     loadDashboard,
     applyStatusEvent,
     applyLocationEvent,
+    selectedLoadSafety,
+    loadSafetyByVehicleId,
+    applyLoadSafetyEvent,
   } = useMonitoringDashboard()
 
   const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("idle")
@@ -92,6 +96,7 @@ export default function MonitoringPage() {
     enabled: loadState !== "error",
     onStatusEvent: applyStatusEvent,
     onLocationEvent: applyLocationEvent,
+    onLoadSafetyEvent: applyLoadSafetyEvent,
     onConnected: handleSocketConnected,
   })
 
@@ -240,21 +245,30 @@ export default function MonitoringPage() {
           </p>
         </div>
 
-        {/* 개발 전용 스트림 상태 컨트롤 (실제 관제 화면에는 포함되지 않음) */}
-        <label className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="hidden sm:inline">dev · 영상 상태</span>
-          <select
-            value={streamStatus}
-            onChange={(e) => setStreamStatus(e.target.value as StreamConnectionStatus)}
-            className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-          >
-            {STREAM_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/*
+          개발 전용 스트림 상태 컨트롤.
+
+          운영 빌드에서는 DOM 에 포함되지 않는다(prompt67.md 7장) — Next.js 가 NODE_ENV 를 빌드 시점에
+          인라인하므로 production 빌드에서 이 분기는 통째로 제거된다. 운영 화면에서 조작자가 영상 상태를
+          connected/error 로 임의 변경할 수 있으면, 실제 스트림이 없는데도 "연결됨"으로 보이게 되어
+          가짜 상태를 만든다. 개발 중 각 상태의 렌더링을 확인하는 용도로만 남긴다.
+        */}
+        {process.env.NODE_ENV === "development" ? (
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="hidden sm:inline">dev · 영상 상태</span>
+            <select
+              value={streamStatus}
+              onChange={(e) => setStreamStatus(e.target.value as StreamConnectionStatus)}
+              className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+            >
+              {STREAM_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </header>
 
       {/* 초기 조회 실패 배너. 마지막으로 받은 차량 데이터는 지우지 않는다. */}
@@ -281,6 +295,13 @@ export default function MonitoringPage() {
             onRetryConnection={() => setStreamStatus("connecting")}
             selectedVehicle={selectedSummary}
             realtimeStatus={realtimeStatus}
+            // 적재 위험 경고는 WARNING/DANGER 일 때만 스스로 렌더된다(정상이면 null).
+            overlay={
+              <LoadSafetyOverlay
+                loadSafety={selectedLoadSafety}
+                vehicleLabel={selectedVehicle?.name ?? selectedVehicleId}
+              />
+            }
           />
         </div>
 
@@ -291,12 +312,13 @@ export default function MonitoringPage() {
           ) : (
             <VehicleDetailPanel
               vehicle={selectedVehicle}
-              // STOP 은 FR-503 범위 밖이라 아직 실제 API 에 연결하지 않았다.
-              onStop={(id) => console.log("[monitoring] stop (미연결)", id)}
+              // STOP 은 아직 프론트 연결 계약이 없어 패널 내부에서 비활성으로 표시된다.
+              // 여기서 Mock 핸들러를 넘기지 않는다 — 호출되지 않는 핸들러는 오해만 남긴다.
               onEmergencyStop={(id) => void handleEmergencyStopVehicle(id)}
               emergencyStopPending={
                 selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] != null : false
               }
+              loadSafety={selectedLoadSafety}
             />
           )}
 
@@ -309,6 +331,8 @@ export default function MonitoringPage() {
               vehicles={vehicles}
               selectedVehicleId={selectedVehicleId}
               onSelectVehicle={setSelectedVehicleId}
+              // 선택하지 않은 차량의 적재 위험도 마커로 인지할 수 있게 한다.
+              loadSafetyByVehicleId={loadSafetyByVehicleId}
             />
           )}
         </div>

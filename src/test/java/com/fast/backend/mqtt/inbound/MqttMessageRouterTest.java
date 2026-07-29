@@ -7,6 +7,7 @@ import com.fast.backend.config.mqtt.MqttProperties;
 import com.fast.backend.config.mqtt.MqttTopics;
 import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedErrorService;
+import com.fast.backend.loadsafety.service.LoadSafetyService;
 import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
@@ -42,6 +43,7 @@ class MqttMessageRouterTest {
     private EmbeddedErrorService embeddedErrorService;
     private StationMeasurementService stationMeasurementService;
     private TransportCommandResultService transportCommandResultService;
+    private LoadSafetyService loadSafetyService;
 
     @BeforeEach
     void setUp() {
@@ -49,7 +51,8 @@ class MqttMessageRouterTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command",                 "fast/station/+/measurement");
+                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "forklift/+/load-safety");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
                 "fast-backend-inbound", "fast-backend-outbound",
@@ -67,11 +70,12 @@ class MqttMessageRouterTest {
         embeddedErrorService = mock(EmbeddedErrorService.class);
         stationMeasurementService = mock(StationMeasurementService.class);
         transportCommandResultService = mock(TransportCommandResultService.class);
+        loadSafetyService = mock(LoadSafetyService.class);
         router = new MqttMessageRouter(
                 objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService, aiCargoAnalysisService,
                 isaacForkliftLocationService, isaacForkliftStatusService, isaacForkliftPathService,
                 vehicleCommandResultService, embeddedForkStatusService, embeddedErrorService,
-                stationMeasurementService, transportCommandResultService);
+                stationMeasurementService, transportCommandResultService, loadSafetyService);
     }
 
     @Test
@@ -462,5 +466,39 @@ class MqttMessageRouterTest {
         router.route("forklift/REAL01/error", "not-a-json");
 
         verifyNoInteractions(embeddedErrorService);
+    }
+
+    // ---------- 적재 화물 안전 (prompt63.md 4장) ----------
+
+    @Test
+    void route_loadSafetyTopic_dispatchesToLoadSafetyService() {
+        String payload = "{\"vehicleId\":\"REAL-F01\",\"cargoId\":\"CARGO-001\",\"forkHeight\":0.86,"
+                + "\"cargoHeight\":1.42,\"roll\":7.4,\"pitch\":3.1,\"loadOffsetX\":-0.18,\"loadOffsetY\":0.04,"
+                + "\"riskLevel\":\"WARNING\",\"riskCode\":\"LOAD_TILT_EXCEEDED\","
+                + "\"message\":\"화물이 좌측으로 과도하게 기울었습니다.\",\"source\":\"VISION\","
+                + "\"detectedAt\":\"2026-07-29T10:30:00+09:00\"}";
+
+        router.route("forklift/REAL-F01/load-safety", payload);
+
+        verify(loadSafetyService, times(1)).handleLoadSafety(any());
+        verifyNoInteractions(forkliftStatusService, embeddedForkStatusService, vehicleCommandResultService);
+    }
+
+    @Test
+    void route_loadSafetyTopic_vehicleIdMismatch_skipsService() {
+        // 다른 차량의 적재 안전 상태를 덮어쓰면 안 되므로 토픽/payload 불일치는 폐기한다.
+        String payload = "{\"vehicleId\":\"REAL-F02\",\"riskLevel\":\"DANGER\","
+                + "\"detectedAt\":\"2026-07-29T10:30:00+09:00\"}";
+
+        router.route("forklift/REAL-F01/load-safety", payload);
+
+        verifyNoInteractions(loadSafetyService);
+    }
+
+    @Test
+    void route_loadSafetyTopic_invalidJson_doesNotThrow() {
+        router.route("forklift/REAL-F01/load-safety", "not-a-json");
+
+        verifyNoInteractions(loadSafetyService);
     }
 }

@@ -88,6 +88,8 @@ class RealtimeEventTest {
                 RealtimeEventType.VEHICLE_FORK_STATUS_UPDATED,
                 RealtimeEventType.VEHICLE_ERROR_OCCURRED,
                 RealtimeEventType.AI_CARGO_ANALYSIS_COMPLETED,
-                RealtimeEventType.STATION_MEASUREMENT_COMPLETED);
+                RealtimeEventType.STATION_MEASUREMENT_COMPLETED,
+                // prompt63.md 3장 3번으로 추가된 적재 화물 안전 이벤트.
+                RealtimeEventType.VEHICLE_LOAD_SAFETY_UPDATED);
     }
 }

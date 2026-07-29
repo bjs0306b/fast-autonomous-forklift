@@ -6,13 +6,19 @@ import SockJS from "sockjs-client"
 import { API_BASE_URL } from "@/lib/api/httpClient"
 import { parseRealtimeEvent } from "@/lib/realtimeEvent"
 import type { RealtimeEvent } from "@/types/websocket"
-import { TOPIC_VEHICLE_LOCATION, TOPIC_VEHICLE_STATUS } from "@/types/websocket"
+import {
+  TOPIC_VEHICLE_LOAD_SAFETY,
+  TOPIC_VEHICLE_LOCATION,
+  TOPIC_VEHICLE_STATUS,
+} from "@/types/websocket"
 
 export interface UseMonitoringSocketOptions {
   /** false 면 연결하지 않는다(초기 로딩 실패 등으로 연결을 미룰 때 사용). */
   enabled: boolean
   onStatusEvent: (event: RealtimeEvent<unknown>) => void
   onLocationEvent: (event: RealtimeEvent<unknown>) => void
+  /** 적재 화물 안전 상태 이벤트(prompt63.md 3장 3번). */
+  onLoadSafetyEvent: (event: RealtimeEvent<unknown>) => void
   /** STOMP 연결이 성립할 때마다 호출된다(최초 연결 포함). */
   onConnected?: () => void | Promise<void>
   onDisconnected?: () => void
@@ -42,6 +48,7 @@ export function useMonitoringSocket({
   enabled,
   onStatusEvent,
   onLocationEvent,
+  onLoadSafetyEvent,
   onConnected,
   onDisconnected,
   onError,
@@ -54,14 +61,18 @@ export function useMonitoringSocket({
   const subscriptionsRef = useRef<StompSubscription[]>([])
 
   // 콜백 안정화용 ref
-  const handlersRef = useRef({ onStatusEvent, onLocationEvent, onConnected, onDisconnected, onError })
+  const handlersRef = useRef({
+    onStatusEvent, onLocationEvent, onLoadSafetyEvent, onConnected, onDisconnected, onError,
+  })
   useEffect(() => {
-    handlersRef.current = { onStatusEvent, onLocationEvent, onConnected, onDisconnected, onError }
-  }, [onStatusEvent, onLocationEvent, onConnected, onDisconnected, onError])
+    handlersRef.current = {
+      onStatusEvent, onLocationEvent, onLoadSafetyEvent, onConnected, onDisconnected, onError,
+    }
+  }, [onStatusEvent, onLocationEvent, onLoadSafetyEvent, onConnected, onDisconnected, onError])
 
   /** 메시지 한 건이 잘못돼도 구독 전체가 죽지 않도록 전부 감싼다. */
   const handleMessage = useCallback(
-    (message: IMessage, kind: "status" | "location") => {
+    (message: IMessage, kind: "status" | "location" | "load-safety") => {
       try {
         const event = parseRealtimeEvent(message.body)
         if (!event) {
@@ -70,8 +81,10 @@ export function useMonitoringSocket({
         }
         if (kind === "status") {
           handlersRef.current.onStatusEvent(event)
-        } else {
+        } else if (kind === "location") {
           handlersRef.current.onLocationEvent(event)
+        } else {
+          handlersRef.current.onLoadSafetyEvent(event)
         }
       } catch (error) {
         console.error("[monitoring] 실시간 메시지 처리 실패:", error)
@@ -118,6 +131,9 @@ export function useMonitoringSocket({
       subscriptionsRef.current = [
         client.subscribe(TOPIC_VEHICLE_STATUS, (message) => handleMessage(message, "status")),
         client.subscribe(TOPIC_VEHICLE_LOCATION, (message) => handleMessage(message, "location")),
+        client.subscribe(TOPIC_VEHICLE_LOAD_SAFETY, (message) =>
+          handleMessage(message, "load-safety"),
+        ),
       ]
 
       void handlersRef.current.onConnected?.()

@@ -37,7 +37,8 @@ class VehicleCommandPublisherTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement");
+                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "forklift/+/load-safety");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null, "in", "out",
                 10, 30, true, true, 1, 5000L, 5000L, topics);

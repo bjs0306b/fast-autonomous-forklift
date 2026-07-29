@@ -109,7 +109,8 @@ public class MqttConfig {
                 mqttTopics.forkliftForkStatusSubscribeTopic(),
                 mqttTopics.forkliftErrorSubscribeTopic(),
                 mqttTopics.cargoDetectedTopic(),
-                mqttTopics.stationMeasurementSubscribeTopic()
+                mqttTopics.stationMeasurementSubscribeTopic(),
+                mqttTopics.forkliftLoadSafetySubscribeTopic()
         };
         int[] qosLevels = new int[topics.length];
         Arrays.fill(qosLevels, mqttProperties.defaultQos());
