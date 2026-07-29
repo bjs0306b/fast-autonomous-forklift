@@ -134,8 +134,8 @@ CREATE TABLE IF NOT EXISTS ai_cargo_detection_box (
         FOREIGN KEY (analysis_id) REFERENCES ai_cargo_analysis (id)
 );
 
--- 측정 스테이션 측정 결과 v1.0 (prompt16.md, MR !36, FR-101-5). 스테이션 PC가 추론·판정을 마친 결과를
--- fast/station/{station_id}/measurement 토픽으로 발행하고 EC2 백엔드는 결과만 저장한다. 기존
+-- 측정 스테이션 측정 결과 v1.1 (prompt16.md, MR !36, FR-101-5). 스테이션 PC가 추론·판정을 마친 결과를
+-- fast/station/{station_id}/measurement 토픽으로 발행하고 백엔드는 결과만 저장한다. 기존
 -- ai_cargo_analysis(cargo/detected)와 규격(snake_case 키, OffsetDateTime, pallet 별도 의미, miniature/
 -- eccentric/magnitude/threshold 등)이 달라 무리하게 확장하지 않고 별도 도메인 테이블로 분리했다.
 --
@@ -173,6 +173,19 @@ CREATE TABLE IF NOT EXISTS station_measurement (
     magnitude                  DOUBLE       NULL,
     threshold                  DOUBLE       NULL,
     load_message               VARCHAR(500) NULL,
+    -- 전복 위험(tipping, FR-103) — 규격 v1.1에서 추가. 편하중(load_balance)과 다른 질문에
+    -- 답한다: 편하중은 "무게중심이 치우쳤나", 전복은 "무게중심이 지지면(파렛트)을 벗어났나".
+    -- 컬럼에 tipping_ 접두사를 붙이는 이유는 direction/message가 위 load_* 와 이름이 겹치기
+    -- 때문이다. 전 컬럼 nullable — status가 dimensions_only면 판정 자체를 못 한다.
+    tipping_assessable         BOOLEAN      NULL,
+    tipping_level              VARCHAR(20)  NULL,  -- safe | warning | danger
+    tipping_static_stable      BOOLEAN      NULL,  -- 정지 상태에서 넘어지는가(등급과 구분)
+    tipping_support_offset     DOUBLE       NULL,  -- 1.0 = 무게중심이 파렛트 끝(물리적 한계)
+    tipping_margin             DOUBLE       NULL,
+    tipping_direction          VARCHAR(20)  NULL,  -- left | right | null
+    tipping_aspect_ratio       DOUBLE       NULL,
+    tipping_overhang           DOUBLE       NULL,  -- 화물이 파렛트 밖으로 나간 비율
+    tipping_message            VARCHAR(500) NULL,
     received_at                DATETIME     NOT NULL,
     created_at                 DATETIME     NOT NULL,
     CONSTRAINT uk_station_measurement_measurement_id UNIQUE (measurement_id),

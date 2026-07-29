@@ -4,14 +4,28 @@
 (FR-202, S15P11A304-34)이 이 값을 입력으로 쓴다.
 
 - 생산자: `ai/src/station/serve.py` (모델·거리계 배선) → `station/pipeline.build_payload`
-- 소비자: 적재 공간 인식·최적 위치 산출 (전지웅)
-- 규격 버전: `schema_version: "1.0"`
+- 소비자: 적재 공간 인식·최적 위치 산출 (전지웅) / 백엔드 저장·관제 (김재원)
+- 규격 버전: `schema_version: "1.1"`
+
+## 변경 이력
+
+| 버전 | 날짜 | 변경 |
+|---|---|---|
+| 1.0 | 2026-07-24 | 최초 규격 (dimensions · box_measurements · load_balance) |
+| **1.1** | **2026-07-29** | **`tipping` 블록 추가** (전복 위험, FR-103) |
+
+> ⚠️ **필드를 추가하면 버전을 반드시 올린다.**
+> `tipping`은 실제로는 2026-07-28(MR !75)에 payload에 들어갔는데 `schema_version`을 1.0에
+> 둔 채였다. 호환을 깨는 변경이 아니라 추가라서 넘어갔지만, **소비자에게는 규격이 바뀐 것을
+> 알 수단이 없었다.** 그 결과 백엔드는 `tipping`을 모른 채로 두었고, Spring Boot가 모르는
+> JSON 필드를 기본으로 무시하는 탓에(`FAIL_ON_UNKNOWN_PROPERTIES=false`) **에러도 로그도 없이
+> 조용히 버려졌다.** 발견까지 하루가 걸렸다.
 
 ## 한눈에
 
 ```jsonc
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "measurement_id": "station-1-20260729-093509-0001",
   "station_id": "station-1",
   "measured_at": "2026-07-29T09:35:09+09:00",

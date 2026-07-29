@@ -23,7 +23,11 @@ from perception.tfnova import Measurement
 from station import measure, tilt, tipping
 from station.config import StationConfig
 
-SCHEMA_VERSION = "1.0"
+# 1.1 (2026-07-29): tipping 블록 추가. 실제로는 07-28(MR !75)에 payload에 들어갔는데
+# 버전을 올리지 않아 백엔드가 규격 변경을 감지하지 못했고, Spring Boot가 모르는 필드를
+# 무시하는 탓에 tipping이 에러 없이 버려졌다. **필드를 추가하면 버전을 올린다.**
+# 변경 이력은 docs/ai/station-measurement-handoff.md.
+SCHEMA_VERSION = "1.1"
 
 _counter = itertools.count(1)
 
