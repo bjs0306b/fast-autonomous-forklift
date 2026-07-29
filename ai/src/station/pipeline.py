@@ -20,7 +20,7 @@ import itertools
 from perception.load_balance import BBox, Detection, assess_load
 from perception.tfnova import Measurement
 
-from station import measure, tilt
+from station import measure, tilt, tipping
 from station.config import StationConfig
 
 SCHEMA_VERSION = "1.0"
@@ -199,6 +199,11 @@ def build_payload(
         "distance": _distance_block(distance),
         "dimensions": dimensions,
         "box_measurements": box_measurements,
+        # 전복 위험 — 편하중과 별개 질문(무게중심이 지지면을 벗어나는가). 롤 보정까지
+        # 끝난 실측 치수로 종횡비를 본다(픽셀 종횡비는 원근 때문에 실제와 다르다).
+        "tipping": tipping.assess_tipping(
+            boxes, pallet,
+            height_cm=dimensions["height_cm"], width_cm=dimensions["width_cm"]),
         "load_balance": {
             "eccentric": eccentric,
             "direction": direction,
