@@ -75,8 +75,12 @@ public class ForkliftLocationService {
             }
 
             if (!vehicleMapper.existsByVehicleId(message.vehicleId())) {
-                log.warn("Vehicle location broadcast skipped, vehicle not registered: vehicleId={}",
-                        message.vehicleId());
+                // 폐기 사유와 messageAt을 함께 남긴다(prompt73 3.3장) — "왜 화면에 안 뜨지"를 추적할 때
+                // vehicleId만으로는 등록 누락인지 다른 원인인지 구분되지 않는다.
+                // topic/topicVehicleId는 MqttMessageRouter가 대조 단계에서 이미 남긴다.
+                log.warn("Vehicle location discarded: reason=vehicle not registered, "
+                                + "payloadVehicleId={}, messageAt={}",
+                        message.vehicleId(), message.messageAt());
                 return;
             }
 
