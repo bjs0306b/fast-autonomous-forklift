@@ -87,6 +87,8 @@ class MqttPropertiesBindingTest {
         assertThat(componentNames).doesNotContain("forkliftEmergency");
         assertThat(componentNames).containsExactlyInAnyOrder(
                 "forkliftStatus", "forkliftLocation", "forkliftPath", "forkliftCommandResult",
-                "forkliftForkStatus", "forkliftError", "cargoDetected", "forkliftCommand", "stationMeasurement");
+                "forkliftForkStatus", "forkliftError", "cargoDetected", "forkliftCommand", "stationMeasurement",
+                // prompt63.md 4장으로 추가된 적재 화물 안전 구독 토픽.
+                "forkliftLoadSafety");
     }
 }

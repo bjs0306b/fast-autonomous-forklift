@@ -38,7 +38,9 @@ public record MqttProperties(
             String forkliftError,
             String cargoDetected,
             String forkliftCommand,
-            String stationMeasurement
+            String stationMeasurement,
+            /** 적재 화물 안전 상태 수신 토픽(prompt63.md 4장). 구독 전용이며 백엔드는 발행하지 않는다. */
+            String forkliftLoadSafety
     ) {
     }
 }

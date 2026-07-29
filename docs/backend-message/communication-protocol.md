@@ -66,6 +66,7 @@ Frontend/REST → VehicleCommandController → VehicleCommandService → Vehicle
 | 임베디드 오류 | `forklift/+/error` (구독) | `EmbeddedErrorMessage` | `EmbeddedErrorService` | `embedded_error_history` insert | `/topic/vehicles/errors`(+`/{id}`) | EmbeddedErrorServiceTest, MapperTest(H2) |
 | AI 화물 분석 | `cargo/detected` (구독) | `AiCargoAnalysisMessage` | `AiCargoAnalysisService` | `ai_cargo_analysis` + `ai_cargo_detection_box` | `/topic/ai/cargo-analysis`(+`/{cargoId}`) | AiCargoAnalysisServiceTest, IntegrationTest(H2) |
 | 측정 스테이션 | `fast/station/+/measurement` (구독) | `StationMeasurementMessage` | `StationMeasurementService` | `station_measurement` + `station_measurement_box` | `/topic/stations/measurements`, `/topic/stations/{id}/measurements` | StationMeasurementIntegrationTest(H2), **StationMeasurementBroadcasterTest** |
+| **적재 화물 안전** | `forklift/+/load-safety` (구독) | `LoadSafetyMessage` | `LoadSafetyService` | `vehicle_load_safety` upsert(차량당 1행) | `/topic/vehicles/load-safety`(+`/{id}`) | LoadSafetyServiceIntegrationTest(H2), LoadSafetyRiskLevelTest |
 
 ---
 
@@ -86,14 +87,15 @@ Frontend/REST → VehicleCommandController → VehicleCommandService → Vehicle
 | `forklift/+/error` | Embedded → Backend | 임베디드(REAL) | `routeEmbeddedError` | `EmbeddedErrorMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 | `cargo/detected` | AI → Backend | AI | `routeCargoDetected` | `AiCargoAnalysisMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 | `fast/station/+/measurement` | Station → Backend | 측정 스테이션 PC | `routeStationMeasurement` | `StationMeasurementMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
+| `forklift/+/load-safety` | Vision/Sensor → Backend | 비전·센서 노드 | `routeLoadSafety` | `LoadSafetyMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 
 ### 백엔드가 실제로 보장하는 범위 vs 외부 연동 확인 필요
 
 | 구분 | 내용 |
 |---|---|
 | **① 백엔드 발행 시 보장** | `forklift/{vehicleId}/command` 발행은 **MQTT QoS 1, retained false**를 코드 상수로 고정 보장한다(`VehicleCommandPublisherTest`로 회귀 검증). |
-| **② 백엔드 구독 시 사용** | 8개 인바운드 토픽 전부 `mqtt.default-qos`(현재 1) 하나를 균등 적용한다(`MqttConfigTest`로 회귀 검증). retained는 구독자가 정하는 값이 아니라 발행자가 정하므로 백엔드가 보장할 수 없다. |
-| **③ 외부 발행 측이 맞춰야 함(백엔드 코드만으로 보장 불가)** | ROS2/Isaac/임베디드가 상태·위치·경로·명령 결과를 실제로 MQTT QoS 1로 발행하는지, AI/스테이션이 `cargo/detected`/`fast/station/.../measurement`를 QoS 1·retained false로 발행하는지 — **외부 연동 확인 필요**. |
+| **② 백엔드 구독 시 사용** | **9개** 인바운드 토픽 전부 `mqtt.default-qos`(현재 1) 하나를 균등 적용한다(`MqttConfigTest`로 회귀 검증 — `forklift/+/load-safety` 추가로 8 → 9개). retained는 구독자가 정하는 값이 아니라 발행자가 정하므로 백엔드가 보장할 수 없다. |
+| **③ 외부 발행 측이 맞춰야 함(백엔드 코드만으로 보장 불가)** | ROS2/Isaac/임베디드가 상태·위치·경로·명령 결과를 실제로 MQTT QoS 1로 발행하는지, AI/스테이션이 `cargo/detected`/`fast/station/.../measurement`를 QoS 1·retained false로 발행하는지 — **외부 연동 확인 필요**. `forklift/+/load-safety`는 **발행 주체 자체가 아직 없다**(§8.3). |
 
 **QoS/retained의 실제 실행 시 적용값(코드 근거)**: `MqttConfig.mqttOutboundHandler()`는
 `handler.setDefaultQos(mqttProperties.defaultQos())` / `handler.setDefaultRetained(false)`로 **폴백 기본값**을
@@ -301,6 +303,55 @@ JSON 키 = record 컴포넌트 이름(카멜케이스). 값 검증은 각 Servic
 이전 버전과 규격이 동일하다(시각 필드는 이 도메인 내부에서 `LocalDateTime`을 유지). 상세는 이전 문서
 내용과 같으며 변경된 것은 **WebSocket 출력이 공통 envelope로 감싸진다**는 점뿐이다(§5.2).
 
+### 3.10 적재 화물 안전 — `forklift/+/load-safety` → `LoadSafetyMessage`
+
+```json
+{
+  "vehicleId": "REAL-F01",
+  "cargoId": "CARGO-001",
+  "forkHeight": 0.86,
+  "cargoHeight": 1.42,
+  "roll": 7.4,
+  "pitch": 3.1,
+  "loadOffsetX": -0.18,
+  "loadOffsetY": 0.04,
+  "riskLevel": "WARNING",
+  "riskCode": "LOAD_TILT_EXCEEDED",
+  "message": "화물이 좌측으로 과도하게 기울었습니다.",
+  "source": "VISION",
+  "detectedAt": "2026-07-29T10:30:00+09:00"
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `vehicleId` | string | **필수** | `forkliftId` alias로도 수신 가능(기존 실물/Isaac 메시지 호환). 정식 키는 `vehicleId` |
+| `cargoId` | string | 선택 | 화물 미인식이면 null |
+| `forkHeight` | number | 선택 | 포크 높이(m) |
+| `cargoHeight` | number | 선택 | 화물 높이(m) |
+| `roll` | number | 선택 | 좌우 기울기(degree). DB 컬럼명은 `roll_deg` |
+| `pitch` | number | 선택 | 앞뒤 기울기(degree). DB 컬럼명은 `pitch_deg` |
+| `loadOffsetX` / `loadOffsetY` | number | 선택 | 화물 중심 편향(m) |
+| `riskLevel` | string | **필수** | §6.12 참고. **백엔드는 이 값을 계산하지 않고 그대로 저장한다** |
+| `riskCode` | string | 선택 | 예: `LOAD_TILT_EXCEEDED` |
+| `message` | string | 선택 | 사람이 읽는 경고 문구 |
+| `source` | string | 선택 | §6.13 참고. 없으면 `UNKNOWN` |
+| `detectedAt` | OffsetDateTime | **필수** | 센서 감지 시각(+09:00) |
+
+처리: `LoadSafetyService` → `vehicle_load_safety` **upsert(차량당 1행)** + `broadcastLoadSafety`.
+
+**검증·폐기 규칙**
+- 필수 3종(`vehicleId`/`riskLevel`/`detectedAt`) 누락 → 경고 로그 후 폐기
+- 미등록 차량 → 폐기(차량을 임의로 생성하지 않음)
+- 토픽 `{id}`와 payload `vehicleId` 불일치 → 폐기(다른 차량 상태를 덮어쓰지 않기 위함)
+- **정의되지 않은 `riskLevel`** → `UNKNOWN`으로 저장하되 **메시지는 버리지 않는다**(높이·기울기 등
+  나머지 측정값은 여전히 유효하다). 계약 불일치를 드러내기 위해 경고 로그를 남긴다
+
+> **⚠ 이 규격은 팀 확정 규격이 아니다.** prompt63.md가 §5 payload 예시 중간에서 잘려 필드별 필수/선택·
+> 단위·값 집합 표가 존재하지 않는다. 위 표의 필수/선택 구분, 단위(m·degree), `riskLevel`/`source` 값
+> 집합은 **백엔드 구현이 현재 채택한 값**이며 비전·센서 팀과 확정이 필요하다(answer63.md §9·§13 참고).
+> 또한 **이 토픽을 발행하는 코드는 아직 이 저장소에 없다** — 현재는 수신 준비만 된 상태다.
+
 ---
 
 ## 4. 아웃바운드(발행) 명령 규격 — `forklift/{vehicleId}/command`
@@ -453,6 +504,7 @@ AI는 봉투 자체가 없었다.
 | `/topic/vehicles/result` / `…/{id}` | `VEHICLE_COMMAND_RESULT_UPDATED` | `VehicleCommandResultEventData` | 필수 |
 | `/topic/vehicles/fork-status` / `…/{id}` | `VEHICLE_FORK_STATUS_UPDATED` | `EmbeddedForkStatusEventData` | 필수 |
 | `/topic/vehicles/errors` / `…/{id}` | `VEHICLE_ERROR_OCCURRED` | `EmbeddedErrorEventData` | 필수 |
+| `/topic/vehicles/load-safety` / `…/{id}` | `VEHICLE_LOAD_SAFETY_UPDATED` | `LoadSafetyResponse` | 필수 |
 | `/topic/ai/cargo-analysis` / `…/{cargoId}` | `AI_CARGO_ANALYSIS_COMPLETED` | `AiCargoAnalysisResponse` | **nullable** |
 | `/topic/stations/measurements`, `/topic/stations/{stationId}/measurements` | `STATION_MEASUREMENT_COMPLETED` | `StationMeasurementResponse` | **항상 null** |
 
@@ -462,7 +514,13 @@ AI는 봉투 자체가 없었다.
 
 `VEHICLE_STATUS_UPDATED`, `VEHICLE_LOCATION_UPDATED`, `VEHICLE_PATH_UPDATED`,
 `VEHICLE_COMMAND_RESULT_UPDATED`, `VEHICLE_FORK_STATUS_UPDATED`, `VEHICLE_ERROR_OCCURRED`,
-`AI_CARGO_ANALYSIS_COMPLETED`, `STATION_MEASUREMENT_COMPLETED`
+`VEHICLE_LOAD_SAFETY_UPDATED`, `AI_CARGO_ANALYSIS_COMPLETED`, `STATION_MEASUREMENT_COMPLETED`
+
+`RealtimeEventTest.eventType_coversEveryConfirmedDomainEvent`가 이 목록 전체를 회귀 검증한다.
+
+**적재 안전 이벤트의 `occurredAt`**: 서버 처리 시각이 아니라 **센서 감지 시각(`detectedAt`)**을 담는다.
+화면이 "이 값이 얼마나 오래된 것인가"를 판단하는 근거이기 때문이다
+(`LoadSafetyServiceIntegrationTest.broadcast_usesDetectedAtAsOccurredAt`).
 
 ---
 
@@ -510,6 +568,25 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
 ### 6.11 AiAnalysisStatus / DimensionScale / LoadBalanceDirection
 `OK, NO_DETECTION, UNRELIABLE` / `REAL, MINIATURE` / `LEFT, RIGHT, FRONT, BACK`
 
+### 6.12 LoadSafetyRiskLevel (**팀 확정 전**)
+`NORMAL, CAUTION, WARNING, DANGER, UNKNOWN`
+
+- **백엔드도 프론트도 이 값을 계산하지 않는다.** 비전·센서가 판정해 보낸 값을 그대로 저장·표시한다.
+- `fromRaw()`는 대소문자·앞뒤 공백만 흡수하고, **정의되지 않은 값을 다른 단계로 흡수하지 않는다** —
+  전부 `UNKNOWN`이다. 미정의 값이 `NORMAL`로 떨어지면 위험 상태가 화면에 정상으로 표시된다
+  (`LoadSafetyRiskLevelTest.unknownValues_neverBecomeNormal`).
+- `isAlerting()` = `WARNING` 또는 `DANGER`. 프론트 경고 오버레이 표시 기준과 동일하다.
+  `UNKNOWN`은 경보가 **아니다**(판정 불가를 위험으로 승격하면 오탐이 쏟아진다).
+- ⚠ 이 4단계 사다리는 prompt63.md가 잘려 확정되지 않았다 — §5 예시에 `"WARNING"` 하나만 있었다.
+  비전 팀이 다른 값 집합을 쓰면 enum에 값을 추가해야 하며, 그때까지 미정의 값은 `UNKNOWN`으로
+  안전하게 수신된다.
+
+### 6.13 LoadSafetySource (**팀 확정 전**)
+`VISION, SENSOR, ROS2, UNKNOWN`
+
+같은 차량에 대해 비전과 센서가 서로 다른 주기로 값을 보낼 수 있어 출처를 보존한다.
+미정의 값은 `UNKNOWN`(흡수하지 않음). ⚠ 값 집합 미확정 — §5 예시에 `"VISION"`만 있었다.
+
 ---
 
 ## 7. REST API 요약 (통신 관련)
@@ -528,6 +605,8 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
 | **GET** | **`/api/vehicles/{vehicleId}/commands`** / **`/{commandId}`** | **명령 조회** | 항상 |
 | POST/GET | `/api/vehicles/{vehicleId}/embedded-commands`(+`/{commandId}`) | 위 API의 **deprecated alias** | 항상 |
 | GET | `/api/vehicles/{forkliftId}/fork-status` | 포크 현재 상태 | 항상 |
+| **GET** | **`/api/vehicles/load-safety/latest`** | **활성 차량 전체 최신 적재 안전**(미수신 차량은 목록에 없음) | 항상 |
+| **GET** | **`/api/vehicles/{vehicleId}/load-safety/latest`** | **차량 최신 적재 안전**(미수신 시 `data:null`) | 항상 |
 | GET | `/api/vehicles/{forkliftId}/embedded-errors?limit=` | 오류 이력 | 항상 |
 | GET | `/api/ai/cargo-analysis/{analysisId}` | 분석 단건 | 항상 |
 | GET | `/api/cargos/{cargoId}/ai-analysis/latest` | 최신 분석 | 항상 |
@@ -540,6 +619,13 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
 **명령 관련 ErrorCode**: `COMMAND_TYPE_INVALID`(400), `COMMAND_COMBINATION_INVALID`(400),
 `COMMAND_DESTINATION_INVALID`(400), `COMMAND_NOT_FOUND`(404), `COMMAND_LIMIT_INVALID`(400),
 `COMMAND_ID_DUPLICATED`(409), `VEHICLE_NOT_FOUND`(404).
+
+**적재 안전 조회 정책**: 적재 안전 데이터를 한 번도 수신하지 못한 차량은 **오류가 아니라
+200 + `data:null`**이다(기존 `GET /api/vehicles/{id}/location/latest`와 같은 방침 — 미수신은 정상적인
+초기 상태다). 반면 **등록되지 않은 차량**은 `VEHICLE_NOT_FOUND`(404)로 거부한다 — 오타 난 vehicleId에
+"데이터 없음"을 돌려주면 호출자가 차량이 조용한 것인지 존재하지 않는 것인지 구분할 수 없다.
+**쓰기 API는 없다** — 이 도메인의 쓰기 경로는 MQTT 하나뿐이며, 화면이나 외부 도구가 위험 단계를 임의로
+써넣을 수 있으면 "비전이 판정한 값"이라는 계약이 깨진다.
 
 ---
 
@@ -565,6 +651,17 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
    제공하고 값 변환은 하지 않는다.
 3. Isaac 브리지의 차량 ID 표기(`SIM_F01` 언더스코어) vs 백엔드 등록 차량(`SIM-F01` 하이픈) 불일치 —
    백엔드 밖 문제이지만 이대로면 모든 시뮬 메시지가 미등록 차량으로 폐기된다.
+4. **`forklift/+/load-safety` 규격 전반(§3.10) — `팀 확인 필요`.** 이 기능을 지시한 prompt63.md가
+   payload 예시 중간에서 잘려 필드 표가 존재하지 않는다. 다음이 전부 **백엔드 구현이 채택한 값**이며
+   비전·센서 팀 확정이 필요하다:
+   - `riskLevel` 값 집합(현재 4단계 + UNKNOWN, §6.12)
+   - `source` 값 집합(§6.13)
+   - 단위(높이 m, roll/pitch degree, offset m) — 예시 값 크기로 추정했다
+   - 필수/선택 구분(현재 `vehicleId`/`riskLevel`/`detectedAt`만 필수)
+   - **센서 발행 주기** — 프론트의 "오래된 데이터" 임계값(현재 15초)이 이 값에 의존한다.
+     주기가 임계값보다 길면 정상 데이터에 상시 경고가 붙는다.
+   - 이력 보관 필요 여부(현재 차량당 최신 1행만 유지, 이력 테이블 없음)
+   - 차량 `OFFLINE` 시 마지막 적재 안전 값의 표시 정책(현재 값이 남고 stale 표시로만 완화)
 
 ### 8.3 외부 연동 확인 필요 (저장소만으로 검증 불가)
 
@@ -579,6 +676,9 @@ enum 선언 순서가 곧 상태 집계 응답(`GET /api/vehicles/status-counts`
   fail-safe·중복 명령 정책.
 - 임베디드·ROS2가 통합 `command-result` envelope를 회신하는지.
 - 프론트엔드(React, 현재 저장소에 없음)의 STOMP 구독·수신.
+- **`forklift/{id}/load-safety`를 실제로 발행하는 주체가 아직 없다.** 비전·센서·ROS2 어디에도 이 토픽을
+  발행하는 코드가 이 저장소에 존재하지 않는다 — 백엔드·프론트는 **수신 준비만 된 상태**이며 화면에는
+  "적재 안전 데이터 미수신"이 표시된다. 송신 측 구현 후 end-to-end 확인이 필요하다.
 
 ### 8.4 ROS2 MQTT bridge 구현 상태 (prompt34)
 

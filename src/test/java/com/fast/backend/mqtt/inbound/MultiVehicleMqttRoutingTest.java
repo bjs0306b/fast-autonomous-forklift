@@ -16,6 +16,7 @@ import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftStatusService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
+import com.fast.backend.loadsafety.service.LoadSafetyService;
 import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +50,8 @@ class MultiVehicleMqttRoutingTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement");
+                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "forklift/+/load-safety");
         MqttTopics mqttTopics = new MqttTopics(new MqttProperties(
                 "tcp://localhost:1883", null, null, "in", "out",
                 10, 30, true, true, 1, 5000L, 5000L, topics));
@@ -65,7 +67,7 @@ class MultiVehicleMqttRoutingTest {
                 mock(IsaacForkliftStatusService.class), mock(IsaacForkliftPathService.class),
                 vehicleCommandResultService, mock(EmbeddedForkStatusService.class),
                 mock(EmbeddedErrorService.class), mock(StationMeasurementService.class),
-                transportCommandResultService);
+                transportCommandResultService, mock(LoadSafetyService.class));
     }
 
     private static String status(String forkliftId) {

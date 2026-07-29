@@ -249,6 +249,33 @@ CREATE TABLE IF NOT EXISTS vehicle_fork_current_status (
     updated_at    DATETIME NOT NULL
 );
 
+-- 적재 화물 안전 상태 1행/차량(prompt63.md 3장). vehicle_fork_current_status와 같은 "차량당 최신 1행"
+-- upsert 구조다 — 관제 화면이 필요로 하는 것은 "지금 이 차량의 적재가 안전한가"이며, prompt63.md는
+-- 이력 보관을 요구하지 않았다(필요해지면 vehicle_status_history 패턴으로 별도 이력 테이블을 만든다).
+--
+-- 측정값 컬럼이 전부 NULL 허용인 이유: 비전이 화물을 찾지 못했거나 IMU가 없는 차량도 "위험 아님"을
+-- 보고할 수 있어야 한다. 값이 없다는 사실을 0으로 위조하지 않는다.
+-- roll/pitch는 단위를 컬럼명에 드러내고 예약어 충돌도 피하려고 roll_deg/pitch_deg로 둔다.
+-- risk_level은 백엔드가 계산하지 않는다 — 비전·센서가 판정해 보낸 값을 그대로 저장한다.
+CREATE TABLE IF NOT EXISTS vehicle_load_safety (
+    vehicle_id     VARCHAR(50)  NOT NULL PRIMARY KEY,
+    cargo_id       VARCHAR(50)  NULL,
+    fork_height    DOUBLE       NULL,
+    cargo_height   DOUBLE       NULL,
+    roll_deg       DOUBLE       NULL,
+    pitch_deg      DOUBLE       NULL,
+    load_offset_x  DOUBLE       NULL,
+    load_offset_y  DOUBLE       NULL,
+    risk_level     VARCHAR(20)  NOT NULL,
+    risk_code      VARCHAR(50)  NULL,
+    message        VARCHAR(255) NULL,
+    source         VARCHAR(20)  NOT NULL,
+    detected_at    DATETIME     NOT NULL,
+    received_at    DATETIME     NOT NULL,
+    updated_at     DATETIME     NOT NULL,
+    INDEX idx_vehicle_load_safety_risk (risk_level)
+);
+
 -- 실물 임베디드 오류 이력(prompt29.md 17장). 상태처럼 누적 기록이 필요해 이력 테이블로 분리했다
 -- (vehicle_status_history와 동일한 설계 패턴).
 CREATE TABLE IF NOT EXISTS embedded_error_history (

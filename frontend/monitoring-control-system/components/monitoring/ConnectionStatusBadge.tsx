@@ -4,14 +4,17 @@ import type { StreamConnectionStatus } from "@/types/monitoring"
 
 /**
  * 영상 연결 상태를 화면을 가리지 않는 작은 배지로 표시한다.
- * 연결 전(idle)에는 "영상 연동 대기 / Mock Digital Twin" 뉘앙스를 준다.
+ * 연결 전(idle)에는 "영상 연동 대기" 상태임을 알린다.
+ *
+ * 라벨에서 "Mock" 표기를 뺐다(prompt67.md 7장) — 조작자에게 보이는 문구에 Mock 이 들어가면
+ * "가짜 데이터가 흐르고 있다"는 오해를 준다. 실제 상태는 "아직 연결되지 않음"이므로 그대로 쓴다.
  */
 const BADGE: Record<
   StreamConnectionStatus,
   { label: string; icon: typeof Wifi; dot: string; className: string }
 > = {
   idle: {
-    label: "영상 연동 대기 · Mock",
+    label: "영상 연동 대기",
     icon: Radio,
     dot: "bg-amber-400",
     className: "bg-slate-900/80 text-slate-200 ring-1 ring-white/10",

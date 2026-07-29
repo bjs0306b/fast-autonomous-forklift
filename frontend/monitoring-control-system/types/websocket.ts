@@ -19,10 +19,19 @@ export interface RealtimeEvent<T = unknown> {
 
 export const VEHICLE_STATUS_EVENT_TYPE = "VEHICLE_STATUS_UPDATED"
 export const VEHICLE_LOCATION_EVENT_TYPE = "VEHICLE_LOCATION_UPDATED"
+export const VEHICLE_LOAD_SAFETY_EVENT_TYPE = "VEHICLE_LOAD_SAFETY_UPDATED"
 
 /** 구독 대상 공통 토픽. 차량별 토픽(/{vehicleId})은 중복 수신이 되므로 구독하지 않는다. */
 export const TOPIC_VEHICLE_STATUS = "/topic/vehicles/status"
 export const TOPIC_VEHICLE_LOCATION = "/topic/vehicles/location"
+/**
+ * 적재 화물 안전 상태(prompt63.md 4장). 백엔드가 공통+차량별 두 토픽에 같은 이벤트를 보내므로
+ * 여기서도 공통 토픽만 구독한다.
+ *
+ * 이 이벤트는 상태/위치와 동일한 RealtimeEvent 봉투를 쓴다 — 안전 명령(/topic/vehicles/commands)
+ * 계열의 평면 payload 와 다르다.
+ */
+export const TOPIC_VEHICLE_LOAD_SAFETY = "/topic/vehicles/load-safety"
 
 /**
  * 위치 이벤트를 화면에서 쓰기 좋게 정규화한 형태.

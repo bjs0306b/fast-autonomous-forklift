@@ -4,7 +4,9 @@ import { Ban, OctagonAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatClockTime, formatNumber } from "@/lib/format"
 import type { DashboardVehicle } from "@/types/monitoring"
+import type { LoadSafetyState } from "@/types/loadSafety"
 import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL, isAlertStatus } from "./vehicle-status"
+import { LoadSafetyPanel } from "./LoadSafetyPanel"
 
 /**
  * VehicleDetailPanel
@@ -16,20 +18,26 @@ import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL, isAlertStatus } from "./veh
  * 상태/위치 WebSocket 이벤트가 도착하면 상위 상태가 갱신되어 이 패널도 자동으로 다시 그려진다.
  *
  * NOTE(FR-503): EMERGENCY STOP 버튼은 실제 API 에 연결돼 있다.
- * STOP 버튼은 이번 범위 밖이라 아직 연결하지 않았다.
+ *
+ * NOTE(STOP): 일반 STOP 은 백엔드 API(`POST /api/vehicles/{id}/commands/stop`)가 존재하지만
+ * 프론트 연결 계약이 확정되지 않아 <b>비활성</b>으로 둔다. 이전에는 활성 버튼이 console.log 만
+ * 실행해 "눌렀으니 정지했다"는 오해를 줄 수 있었다. onStop prop 자체를 두지 않는 이유는,
+ * 호출되지 않는 prop 이 남아 있으면 다음 사람이 "연결돼 있다"고 오해하기 때문이다.
+ * STOP 을 EMERGENCY STOP API 로 대체 연결하지 않는다 — 통상 정지와 비상 정지는 별개 명령이다.
  */
 export function VehicleDetailPanel({
   vehicle,
-  onStop,
   onEmergencyStop,
   emergencyStopPending = false,
+  loadSafety = null,
   className,
 }: {
   vehicle: DashboardVehicle | null
-  onStop?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
   /** 이 차량의 비상정지 요청이 진행 중인지(중복 클릭 방지) */
   emergencyStopPending?: boolean
+  /** 이 차량의 최신 적재 안전 상태(prompt63.md 3장 4번). 미수신이면 null */
+  loadSafety?: LoadSafetyState | null
   className?: string
 }) {
   return (
@@ -48,9 +56,9 @@ export function VehicleDetailPanel({
       {vehicle ? (
         <VehicleDetailContent
           vehicle={vehicle}
-          onStop={onStop}
           onEmergencyStop={onEmergencyStop}
           emergencyStopPending={emergencyStopPending}
+          loadSafety={loadSafety}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -65,14 +73,14 @@ export function VehicleDetailPanel({
 
 function VehicleDetailContent({
   vehicle,
-  onStop,
   onEmergencyStop,
   emergencyStopPending,
+  loadSafety,
 }: {
   vehicle: DashboardVehicle
-  onStop?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
   emergencyStopPending: boolean
+  loadSafety: LoadSafetyState | null
 }) {
   const color = VEHICLE_STATUS_COLOR[vehicle.status] ?? VEHICLE_STATUS_COLOR.UNKNOWN
   const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? vehicle.status
@@ -176,6 +184,9 @@ function VehicleDetailContent({
         )}
       </div>
 
+      {/* 적재 화물 안전 (prompt63.md 3장 4번) */}
+      <LoadSafetyPanel loadSafety={loadSafety} />
+
       {/* 현재 작업 */}
       <div>
         <div className="mb-1 text-[10px] font-medium tracking-wide text-slate-400 uppercase">
@@ -196,14 +207,23 @@ function VehicleDetailContent({
 
       {/* 제어 버튼 */}
       <div className="mt-auto flex flex-col gap-2 pt-1">
+        {/* 일반 STOP: 실제 API 가 없어 비활성이다.
+            onClick 핸들러를 아예 두지 않는다 — disabled 만으로도 클릭·키보드 실행이 막히지만,
+            "누르면 무언가 실행된다"는 오해를 코드 수준에서도 남기지 않기 위해서다. */}
         <button
           type="button"
-          onClick={() => onStop?.(vehicle.vehicleId)}
-          className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+          disabled
+          aria-disabled="true"
+          data-testid="vehicle-stop-button"
+          className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-md border border-slate-700 bg-slate-800/50 px-3 py-2 text-sm font-medium text-slate-400 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+          title="일반 정지 기능은 아직 연결되지 않았습니다"
         >
           <Ban className="size-4" aria-hidden="true" />
-          STOP
+          STOP 준비 중
         </button>
+        <p className="-mt-1 text-[10px] leading-snug text-pretty text-slate-400">
+          일반 정지 기능은 아직 연결되지 않았습니다. EMERGENCY STOP은 비상 상황에서만 사용하세요.
+        </p>
         <button
           type="button"
           onClick={() => onEmergencyStop?.(vehicle.vehicleId)}

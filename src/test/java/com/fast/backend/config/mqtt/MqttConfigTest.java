@@ -35,7 +35,8 @@ class MqttConfigTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement");
+                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "forklift/+/load-safety");
         mqttProperties = new MqttProperties(
                 "tcp://localhost:1883", null, null, "test-inbound", "test-outbound",
                 10, 30, true, true, 1, 5000L, 5000L, topics);
@@ -43,18 +44,19 @@ class MqttConfigTest {
     }
 
     @Test
-    void inboundAdapter_subscribesToAllEightConfirmedTopics() {
+    void inboundAdapter_subscribesToAllNineConfirmedTopics() {
         MqttPahoMessageDrivenChannelAdapter adapter = mqttConfig.mqttInboundAdapter();
 
+        // prompt63.md 4장으로 적재 화물 안전 구독이 추가되어 8 → 9개가 됐다.
         assertThat(adapter.getTopic()).containsExactlyInAnyOrder(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "fast/station/+/measurement");
+                "cargo/detected", "fast/station/+/measurement", "forklift/+/load-safety");
     }
 
     @Test
     void inboundAdapter_everySubscribedTopicUsesMqttQos1() {
-        // 상태·위치·경로·command-result·포크상태·오류·AI·스테이션 구독 QoS를 한 번에 확인한다.
+        // 상태·위치·경로·command-result·포크상태·오류·AI·스테이션·적재안전 구독 QoS를 한 번에 확인한다.
         MqttPahoMessageDrivenChannelAdapter adapter = mqttConfig.mqttInboundAdapter();
 
         Map<String, Integer> topicToQos = topicToQos(adapter);
@@ -62,7 +64,7 @@ class MqttConfigTest {
         assertThat(topicToQos).containsOnlyKeys(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "fast/station/+/measurement");
+                "cargo/detected", "fast/station/+/measurement", "forklift/+/load-safety");
         assertThat(topicToQos.values()).allMatch(qos -> qos == 1, "MQTT QoS 1이어야 한다");
     }
 

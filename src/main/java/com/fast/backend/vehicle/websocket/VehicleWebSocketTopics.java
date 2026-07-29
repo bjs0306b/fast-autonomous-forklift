@@ -15,6 +15,8 @@ public final class VehicleWebSocketTopics {
     public static final String FORK_STATUS_ALL = "/topic/vehicles/fork-status";
     /** 실물 임베디드 오류 전용(prompt29.md 19장 권장 destination). */
     public static final String ERRORS_ALL = "/topic/vehicles/errors";
+    /** 적재 화물 안전 상태 전용(prompt63.md 4장 권장 destination). */
+    public static final String LOAD_SAFETY_ALL = "/topic/vehicles/load-safety";
 
     private VehicleWebSocketTopics() {
     }
@@ -41,5 +43,9 @@ public final class VehicleWebSocketTopics {
 
     public static String errors(String vehicleId) {
         return ERRORS_ALL + "/" + vehicleId;
+    }
+
+    public static String loadSafety(String vehicleId) {
+        return LOAD_SAFETY_ALL + "/" + vehicleId;
     }
 }

@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils"
 import { worldToPercent, type WorldBounds } from "@/lib/coordinate"
 import type { DashboardVehicle } from "@/types/monitoring"
+import type { LoadSafetyState } from "@/types/loadSafety"
 import { MiniMapVehicleMarker } from "./MiniMapVehicleMarker"
 
 /** 미니맵에 그릴 수 있는 차량(위치 객체와 x/y가 모두 있는 차량)인지 판별한다. */
@@ -22,17 +23,25 @@ export function isVehicleWithRenderableLocation(
  * - 마커 클릭 시 팝업 없이 onSelectVehicle(vehicleId) 만 호출한다.
  * - STOP / 배터리 등은 표시하지 않는다.
  * - 위치 이벤트가 도착하면 마커가 자동으로 이동한다(좌표는 props 로만 내려온다).
+ * - 적재 안전 위험 상태를 마커에 표시한다 — **선택하지 않은 차량의 위험도 인지**하기 위해서다.
+ *
+ * 적재 안전 데이터는 차량 목록과 별개로 내려온다(dashboard 응답에 없다). 미니맵은 vehicleId 로만
+ * 조회하며, <b>적재 데이터가 있어도 차량 목록에 없으면 마커를 만들지 않는다</b> — 마커의 근거는
+ * 언제나 차량 목록과 위치다.
  */
 export function MiniMap({
   vehicles,
   selectedVehicleId,
   onSelectVehicle,
+  loadSafetyByVehicleId,
   bounds,
   className,
 }: {
   vehicles: DashboardVehicle[]
   selectedVehicleId?: string | null
   onSelectVehicle?: (vehicleId: string) => void
+  /** 차량별 최신 적재 안전 상태. 없는 차량은 기본 마커로 그린다. */
+  loadSafetyByVehicleId?: Record<string, LoadSafetyState>
   bounds?: WorldBounds
   className?: string
 }) {
@@ -81,6 +90,7 @@ export function MiniMap({
                 left={pos.left}
                 top={pos.top}
                 selected={vehicle.vehicleId === selectedVehicleId}
+                loadSafety={loadSafetyByVehicleId?.[vehicle.vehicleId] ?? null}
                 onSelect={onSelectVehicle}
               />
             )
