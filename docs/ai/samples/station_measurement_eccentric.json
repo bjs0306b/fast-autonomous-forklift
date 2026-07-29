@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "measurement_id": "station-1-20260729-093750-0001",
+  "station_id": "station-1",
+  "measured_at": "2026-07-29T09:37:50+09:00",
+  "status": "ok",
+  "detection": {
+    "box_count": 2,
+    "boxes": [
+      {
+        "bbox_px": [
+          1336,
+          638,
+          518,
+          351
+        ],
+        "score": 0.97
+      },
+      {
+        "bbox_px": [
+          1250,
+          721,
+          97,
+          165
+        ],
+        "score": 0.74
+      }
+    ],
+    "pallet": {
+      "bbox_px": [
+        551,
+        912,
+        1232,
+        167
+      ],
+      "score": 0.93
+    }
+  },
+  "distance": {
+    "front_cm": 200.0,
+    "std_cm": 0.0,
+    "frames_used": 0
+  },
+  "dimensions": {
+    "height_cm": 33.7,
+    "total_height_cm": 45.7,
+    "pallet_height_cm": 12.0,
+    "width_cm": 50.7,
+    "depth_cm": null,
+    "miniature_scale": 10,
+    "miniature_height_mm": 33.7,
+    "miniature_total_height_mm": 45.7,
+    "miniature_width_mm": 50.7,
+    "tilt_deg": -0.78
+  },
+  "box_measurements": [
+    {
+      "bbox_px": [
+        1336,
+        638,
+        518,
+        351
+      ],
+      "score": 0.97,
+      "height_cm": 33.7,
+      "width_cm": 50.7,
+      "miniature_height_mm": 33.7,
+      "miniature_width_mm": 50.7
+    }
+  ],
+  "tipping": {
+    "assessable": true,
+    "level": "danger",
+    "static_stable": true,
+    "support_offset": 0.693,
+    "margin": 0.307,
+    "direction": "right",
+    "aspect_ratio": 0.66,
+    "overhang": 0.057,
+    "message": "운반 부적합 — 무게중심이 파렛트 반폭의 69% 이탈, 화물이 파렛트 밖으로 6% 돌출 (정지 시엔 안정)"
+  },
+  "load_balance": {
+    "eccentric": true,
+    "direction": [
+      "right"
+    ],
+    "ratio_x": 1.651,
+    "ratio_y": null,
+    "magnitude": 1.651,
+    "threshold": 0.3,
+    "message": "오른쪽 편하중 (치우침 1.65 > 0.3)"
+  }
+}

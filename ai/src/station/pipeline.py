@@ -123,13 +123,20 @@ def build_payload(
     boxes = on_pallet(boxes, pallet)
     detection_block = _detection_block(detections, pallet)
 
+    # 키는 status와 무관하게 **항상 있게** 한다 — 소비자가 키 유무를 분기하지 않도록.
+    # 값이 없을 때는 null 또는 assessable=false로 이유를 담아 낸다.
+    unassessable = {"assessable": False, "reason": "화물 또는 파렛트 없음"}
+
     if not boxes:
         return {**base, "status": "no_detection", "detection": detection_block,
                 "distance": _distance_block(distance),
-                "dimensions": None, "load_balance": None}
+                "dimensions": None, "box_measurements": [],
+                "tipping": unassessable, "load_balance": None}
     if distance is None:
         return {**base, "status": "unreliable", "detection": detection_block,
-                "distance": None, "dimensions": None, "load_balance": None}
+                "distance": None, "dimensions": None, "box_measurements": [],
+                "tipping": {"assessable": False, "reason": "거리 측정 실패"},
+                "load_balance": None}
 
     load = hull(boxes)
     # 카메라 롤 보정 — bbox는 축 정렬이라 기울면 부풀려진다. 파렛트 상판을 수평
@@ -184,6 +191,7 @@ def build_payload(
         return {**base, "status": "dimensions_only", "detection": detection_block,
                 "distance": _distance_block(distance),
                 "dimensions": dimensions, "box_measurements": box_measurements,
+                "tipping": {"assessable": False, "reason": "파렛트 미검출"},
                 "load_balance": None}
 
     # 편하중: assess_load(중심 단순 평균 + hull 정규화) 재사용하되 좌우(x)만 채택
