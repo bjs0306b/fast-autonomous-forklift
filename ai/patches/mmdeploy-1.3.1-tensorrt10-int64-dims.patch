@@ -1,0 +1,60 @@
+--- gather_topk/gather_topk.cpp.bak	2026-07-29 09:52:53.955752125 +0900
++++ gather_topk/gather_topk.cpp	2026-07-29 09:52:53.987752125 +0900
+@@ -1,4 +1,5 @@
+ // Copyright (c) OpenMMLab. All rights reserved.
++#include <vector>
+ #include "gather_topk.hpp"
+ 
+ #include <assert.h>
+@@ -78,10 +79,16 @@
+ int GatherTopk::enqueue(const nvinfer1::PluginTensorDesc *inputDesc,
+                         const nvinfer1::PluginTensorDesc *outputDesc, const void *const *inputs,
+                         void *const *outputs, void *workSpace, cudaStream_t stream) TRT_NOEXCEPT {
+-  const int *dims = &(inputDesc[0].dims.d[0]);
+-  const int *indices_dims = &(inputDesc[1].dims.d[0]);
++  // TensorRT 10에서 Dims::d 가 int64_t 로 바뀌었다. 커널 시그니처는 int 배열이므로
++  // 여기서 int 로 좁혀 복사한다 (텐서 차원값은 int 범위를 넘지 않는다).
+   int nbDims = inputDesc[0].dims.nbDims;
+   int indice_nbDims = inputDesc[1].dims.nbDims;
++  std::vector<int> dims_vec(nbDims), indices_dims_vec(indice_nbDims);
++  for (int i = 0; i < nbDims; ++i) dims_vec[i] = static_cast<int>(inputDesc[0].dims.d[i]);
++  for (int i = 0; i < indice_nbDims; ++i)
++    indices_dims_vec[i] = static_cast<int>(inputDesc[1].dims.d[i]);
++  const int *dims = dims_vec.data();
++  const int *indices_dims = indices_dims_vec.data();
+ 
+   const void *data = inputs[0];
+   const void *indices = inputs[1];
+--- grid_sampler/trt_grid_sampler.cpp.bak	2026-07-29 10:00:48.819752125 +0900
++++ grid_sampler/trt_grid_sampler.cpp	2026-07-29 10:00:48.851752125 +0900
+@@ -1,4 +1,5 @@
+ // Copyright (c) OpenMMLab. All rights reserved.
++#include <vector>
+ #include "trt_grid_sampler.hpp"
+ 
+ #include <assert.h>
+@@ -109,9 +110,21 @@
+ 
+   switch (data_type) {
+     case nvinfer1::DataType::kFLOAT:
+-      grid_sample<float>((float *)outputs[0], (float *)inputs[0], (float *)inputs[1],
+-                         &(output_dims.d[0]), &(input_dims.d[0]), &(grid_dims.d[0]),
+-                         input_dims.nbDims, interp_mode, padding_mode, mAlignCorners, stream);
++      {
++        // TensorRT 10에서 Dims::d 가 int64_t 로 바뀌었다. 커널은 int 배열을 받으므로
++        // int 로 좁혀 복사한다 (텐서 차원값은 int 범위를 넘지 않는다).
++        std::vector<int> out_d(output_dims.nbDims), in_d(input_dims.nbDims),
++            grid_d(grid_dims.nbDims);
++        for (int i = 0; i < output_dims.nbDims; ++i)
++          out_d[i] = static_cast<int>(output_dims.d[i]);
++        for (int i = 0; i < input_dims.nbDims; ++i)
++          in_d[i] = static_cast<int>(input_dims.d[i]);
++        for (int i = 0; i < grid_dims.nbDims; ++i)
++          grid_d[i] = static_cast<int>(grid_dims.d[i]);
++        grid_sample<float>((float *)outputs[0], (float *)inputs[0], (float *)inputs[1],
++                           out_d.data(), in_d.data(), grid_d.data(),
++                           input_dims.nbDims, interp_mode, padding_mode, mAlignCorners, stream);
++      }
+       break;
+     default:
+       return 1;
