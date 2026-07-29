@@ -1,0 +1,38 @@
+erDiagram
+    ai_cargo_analysis ||--o{ ai_cargo_detection_box : ""
+
+    ai_cargo_analysis {
+        bigint   id PK
+        varchar  analysis_id UK
+        varchar  schema_version
+        varchar  vehicle_id "FK 아님"
+        varchar  cargo_id "FK 아님"
+        varchar  status
+        double   distance_cm
+        double   distance_std_cm
+        double   width_cm
+        double   height_cm
+        double   depth_cm
+        double   volume_cm3
+        varchar  dimension_scale
+        varchar  load_direction "쉼표 구분"
+        varchar  load_message
+        double   ratio_horizontal
+        double   ratio_vertical
+        varchar  message
+        datetime captured_at
+        datetime processed_at "idx(cargo_id, processed_at DESC)"
+        datetime received_at
+        datetime created_at
+    }
+    ai_cargo_detection_box {
+        bigint   id PK
+        bigint   analysis_id FK
+        varchar  class_name
+        double   confidence
+        int      bbox_x
+        int      bbox_y
+        int      bbox_width
+        int      bbox_height
+        datetime created_at
+    }

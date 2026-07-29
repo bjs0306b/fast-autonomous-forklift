@@ -1,0 +1,47 @@
+erDiagram
+    station_measurement ||--o{ station_measurement_box : ""
+
+    station_measurement {
+        bigint   id PK
+        varchar  measurement_id UK
+        varchar  station_id "idx(station_id, measured_at_utc DESC)"
+        varchar  schema_version
+        datetime measured_at_utc
+        int      measured_at_offset_minutes
+        varchar  status
+        int      box_count
+        int      pallet_bbox_x
+        int      pallet_bbox_y
+        int      pallet_bbox_width
+        int      pallet_bbox_height
+        double   pallet_score
+        double   front_cm
+        double   distance_std_cm
+        int      frames_used
+        double   height_cm
+        double   width_cm
+        double   depth_cm "정책상 항상 null"
+        int      miniature_scale
+        double   miniature_height_mm
+        double   miniature_width_mm
+        boolean  eccentric
+        varchar  load_direction
+        double   ratio_x
+        double   ratio_y
+        double   magnitude
+        double   threshold
+        varchar  load_message
+        datetime received_at
+        datetime created_at
+    }
+    station_measurement_box {
+        bigint   id PK
+        bigint   station_measurement_id FK
+        int      box_order "payload 배열 순서 보존"
+        int      bbox_x
+        int      bbox_y
+        int      bbox_width
+        int      bbox_height
+        double   score
+        datetime created_at
+    }
