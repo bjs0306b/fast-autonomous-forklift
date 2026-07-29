@@ -75,3 +75,22 @@ infra/mqtt/data/*
 !infra/mqtt/data/.gitkeep
 infra/mqtt/log/*
 !infra/mqtt/log/.gitkeep
+
+### AI 대용량 산출물 ###
+# 데이터셋·체크포인트 번들. 서버(GPU)와 주고받는 중간 산출물이라 수백 MB이고,
+# `git add -A` 한 번에 딸려 들어가면 리포가 망가진다 (실제로 ai/ 최상위에
+# 165MB·200MB tar.gz가 무방비로 놓여 있었다). 내려받는 방법은 ai/README.md 참고.
+*.tar.gz
+*.tgz
+*.zip
+# 체크포인트·모델 가중치 (models/ 하위는 ai/models/.gitignore가 따로 관리)
+*.pth
+*.onnx
+*.engine
+
+# 스테이션 실행 중 생기는 작업 산출물 — 커밋 대상 아님.
+# 발표에 쓸 스틸은 발표자료/ 로 옮겨서 관리한다.
+ai/*.png
+ai/*.jpg
+ai/annotated.png
+ai/camera_probe_*.jpg
