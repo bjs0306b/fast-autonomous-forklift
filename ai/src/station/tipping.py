@@ -87,15 +87,26 @@ def assess_tipping(
         level = _escalate(level)
         reasons.append(f"화물이 파렛트 밖으로 {overhang:.0%} 돌출")
 
+    # **정지 안정과 운반 안전은 다른 질문이다.** 무게중심이 파렛트 안에 있으면 세워둔
+    # 채로는 안 넘어지지만(static_stable), 지게차가 가속·회전·요철을 지나면 남은 여유가
+    # 쉽게 사라진다. 실측(2026-07-29 tip_005): 이탈률 0.799에 무게중심이 파렛트 끝보다
+    # 100px 안쪽이라 정지 시엔 멀쩡했으나 하단 박스의 42%가 파렛트 밖으로 나가 있었다.
+    # 그래서 등급은 운반 기준으로 매기되, 정지 안정 여부를 따로 알려 혼선을 없앤다.
+    static_stable = offset < 1.0
+
     if level == "safe":
         message = f"안정 (무게중심 이탈 {offset:.0%}, 한계까지 {1 - offset:.0%} 여유)"
+    elif not static_stable:
+        message = f"즉시 전복 위험 — 무게중심이 이미 파렛트 밖 ({offset:.0%})"
     else:
-        head = "전복 위험" if level == "danger" else "전복 주의"
-        message = f"{head} — {', '.join(reasons)}"
+        head = "운반 부적합" if level == "danger" else "운반 주의"
+        message = f"{head} — {', '.join(reasons)} (정지 시엔 안정)"
 
     return {
         "assessable": True,
         "level": level,
+        # 정지 상태에서 넘어지는가 — 등급(운반 기준)과 구분해서 낸다
+        "static_stable": static_stable,
         "support_offset": round(offset, 3),      # 1.0 = 물리적 한계
         "margin": round(max(0.0, 1 - offset), 3),
         "direction": direction if offset > 0.05 else None,

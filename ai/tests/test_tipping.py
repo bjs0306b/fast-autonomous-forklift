@@ -34,7 +34,7 @@ def test_이탈률은_파렛트_반폭_기준():
 def test_경고_임계():
     r = assess_tipping([box_at(500 + 0.7 * 500)], PALLET, height_cm=30, width_cm=50)
     assert r["level"] == "warning"
-    assert "전복 주의" in r["message"]
+    assert "운반 주의" in r["message"]
 
 
 def test_위험_임계():
@@ -80,3 +80,23 @@ def test_치수_없으면_종횡비_건너뜀():
 def test_화물_없으면_판정_불가():
     r = assess_tipping([], PALLET, height_cm=30, width_cm=50)
     assert r["assessable"] is False
+
+
+def test_정지_안정과_운반_등급을_구분한다():
+    """무게중심이 파렛트 안이면 세워둔 채로는 안 넘어진다 — 등급은 운반 기준.
+
+    실측 tip_005 재현: 이탈률 0.80, 하단 박스가 파렛트 밖으로 크게 나감.
+    정지 시엔 버티지만 운반은 부적합이어야 한다.
+    """
+    r = assess_tipping([box_at(500 + 0.8 * 500, w=400)], PALLET,
+                       height_cm=52, width_cm=59)
+    assert r["static_stable"] is True          # 무게중심이 아직 파렛트 안
+    assert r["level"] == "danger"              # 그래도 운반은 부적합(돌출 격상)
+    assert "정지 시엔 안정" in r["message"]
+
+
+def test_무게중심이_파렛트_밖이면_즉시_전복():
+    r = assess_tipping([box_at(500 + 1.2 * 500)], PALLET, height_cm=30, width_cm=50)
+    assert r["static_stable"] is False
+    assert r["level"] == "danger"
+    assert "즉시 전복" in r["message"]
