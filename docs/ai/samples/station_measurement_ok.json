@@ -1,0 +1,170 @@
+{
+  "schema_version": "1.0",
+  "measurement_id": "station-1-20260729-093748-0001",
+  "station_id": "station-1",
+  "measured_at": "2026-07-29T09:37:48+09:00",
+  "status": "ok",
+  "detection": {
+    "box_count": 5,
+    "boxes": [
+      {
+        "bbox_px": [
+          641,
+          693,
+          445,
+          280
+        ],
+        "score": 0.98
+      },
+      {
+        "bbox_px": [
+          1078,
+          433,
+          422,
+          259
+        ],
+        "score": 0.97
+      },
+      {
+        "bbox_px": [
+          1127,
+          347,
+          311,
+          91
+        ],
+        "score": 0.97
+      },
+      {
+        "bbox_px": [
+          660,
+          437,
+          425,
+          262
+        ],
+        "score": 0.97
+      },
+      {
+        "bbox_px": [
+          1080,
+          684,
+          439,
+          276
+        ],
+        "score": 0.97
+      }
+    ],
+    "pallet": {
+      "bbox_px": [
+        620,
+        951,
+        976,
+        127
+      ],
+      "score": 0.92
+    }
+  },
+  "distance": {
+    "front_cm": 236.0,
+    "std_cm": 0.0,
+    "frames_used": 0
+  },
+  "dimensions": {
+    "height_cm": 72.3,
+    "total_height_cm": 84.3,
+    "pallet_height_cm": 12.0,
+    "width_cm": 102.2,
+    "depth_cm": null,
+    "miniature_scale": 10,
+    "miniature_height_mm": 72.3,
+    "miniature_total_height_mm": 84.3,
+    "miniature_width_mm": 102.2,
+    "tilt_deg": null
+  },
+  "box_measurements": [
+    {
+      "bbox_px": [
+        1127,
+        347,
+        311,
+        91
+      ],
+      "score": 0.97,
+      "height_cm": 10.5,
+      "width_cm": 36.2,
+      "miniature_height_mm": 10.5,
+      "miniature_width_mm": 36.2
+    },
+    {
+      "bbox_px": [
+        1078,
+        433,
+        422,
+        259
+      ],
+      "score": 0.97,
+      "height_cm": 30.0,
+      "width_cm": 49.1,
+      "miniature_height_mm": 30.0,
+      "miniature_width_mm": 49.1
+    },
+    {
+      "bbox_px": [
+        660,
+        437,
+        425,
+        262
+      ],
+      "score": 0.97,
+      "height_cm": 30.4,
+      "width_cm": 49.6,
+      "miniature_height_mm": 30.4,
+      "miniature_width_mm": 49.6
+    },
+    {
+      "bbox_px": [
+        1080,
+        684,
+        439,
+        276
+      ],
+      "score": 0.97,
+      "height_cm": 31.9,
+      "width_cm": 51.1,
+      "miniature_height_mm": 31.9,
+      "miniature_width_mm": 51.1
+    },
+    {
+      "bbox_px": [
+        641,
+        693,
+        445,
+        280
+      ],
+      "score": 0.98,
+      "height_cm": 32.4,
+      "width_cm": 51.8,
+      "miniature_height_mm": 32.4,
+      "miniature_width_mm": 51.8
+    }
+  ],
+  "tipping": {
+    "assessable": true,
+    "level": "safe",
+    "static_stable": true,
+    "support_offset": 0.027,
+    "margin": 0.973,
+    "direction": null,
+    "aspect_ratio": 0.71,
+    "overhang": 0.0,
+    "message": "안정 (무게중심 이탈 3%, 한계까지 97% 여유)"
+  },
+  "load_balance": {
+    "eccentric": false,
+    "direction": [],
+    "ratio_x": 0.03,
+    "ratio_y": null,
+    "magnitude": 0.03,
+    "threshold": 0.3,
+    "message": "정상 (치우침 0.03 ≤ 0.3)"
+  }
+}

@@ -30,19 +30,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cv2  # noqa: E402
 
+from perception.tfnova import MeasurementUnreliable, TfNova  # noqa: E402
 from station.config import StationConfig  # noqa: E402
 
 PREVIEW_WIDTH = 960          # 미리보기만 축소 — 저장은 원본 해상도
 HUD_BG = (30, 30, 30)
 
 
-def open_camera(cfg: StationConfig, index: int) -> cv2.VideoCapture:
+def open_camera(cfg: StationConfig, index: int, width: int, height: int) -> cv2.VideoCapture:
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
     if not cap.isOpened():
         raise RuntimeError(f"카메라 index {index}를 열 수 없습니다 "
                            f"(serve.py --probe로 확인)")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     for _ in range(cfg.warmup_frames):   # 자동 노출 안정화 (실측: 안 하면 어둡다)
         cap.read()
     return cap
@@ -77,21 +78,59 @@ def main(argv: list[str] | None = None) -> int:
                         help="저장 폴더 (없으면 만든다)")
     parser.add_argument("--prefix", default="rig", help="파일명 접두사")
     parser.add_argument("--camera", type=int, help="카메라 인덱스 (기본: config)")
+    # 온보드 -s 촬영(S15P11A304-144)은 스테이션 BRIO와 다른 USB 카메라(1280x960)를 쓴다.
+    # 해상도는 학습 시 어차피 리사이즈되므로 도메인만 맞으면 되고, 여기서 실제 카메라
+    # 네이티브 해상도를 지정해 매 프레임 mismatch 경고가 뜨지 않게 한다.
+    parser.add_argument("--width", type=int, help="캡처 폭 (기본: config)")
+    parser.add_argument("--height", type=int, help="캡처 높이 (기본: config)")
     parser.add_argument("--burst", type=int, default=5, help="B키 1회에 저장할 장수")
     parser.add_argument("--auto", type=float, metavar="SEC",
                         help="자동 저장 간격(초) — 지정하면 자동 모드로 시작")
+    # 치수 평가셋(스테이션)은 프레임마다 TF-Nova 실측 거리가 있어야 오프라인 치수
+    # 검증이 된다. 이 플래그를 켜면 저장할 때마다 거리를 읽어 session.csv에 남긴다.
+    # (온보드 -s 촬영은 detection이라 거리 불필요 → 끄고 쓴다.)
+    parser.add_argument("--tfnova", action="store_true",
+                        help="저장 시 TF-Nova 거리를 읽어 session.csv에 기록 (치수 평가셋용)")
     args = parser.parse_args(argv)
 
     cfg = StationConfig()
     index = args.camera if args.camera is not None else cfg.camera_index
+    width = args.width if args.width is not None else cfg.frame_width
+    height = args.height if args.height is not None else cfg.frame_height
     args.out.mkdir(parents=True, exist_ok=True)
 
-    cap = open_camera(cfg, index)
+    cap = open_camera(cfg, index, width, height)
+
+    # TF-Nova는 저장 시점에만 읽는다 — 미리보기 루프에서 매 프레임 읽으면(0.5초) 뷰가
+    # 버벅인다. 포트 열기 실패해도 거리 없이 계속 찍는다(촬영을 막지 않는다).
+    sensor = None
+    if args.tfnova:
+        try:
+            sensor = TfNova(cfg.tfnova_port)
+            print(f"TF-Nova 연결({cfg.tfnova_port}) — 저장마다 거리 기록")
+        except Exception as e:
+            print(f"[TF-Nova 열기 실패] {e} — 거리 없이 진행", file=sys.stderr)
+
+    def read_distance() -> tuple[float | None, float | None]:
+        if sensor is None:
+            return None, None
+        try:
+            m = sensor.measure(cfg.tfnova_seconds, scale=cfg.tfnova_scale,
+                               offset_cm=cfg.tfnova_offset_cm)
+            return round(m.distance_cm, 1), round(m.std_cm, 2)
+        except MeasurementUnreliable as e:
+            print(f"[거리 측정 불가] {e}", file=sys.stderr)
+            return None, None
+        except Exception as e:
+            print(f"[TF-Nova 오류] {e}", file=sys.stderr)
+            return None, None
+
     saved: list[Path] = []
     auto_interval = args.auto
     auto_on = args.auto is not None
     next_auto = time.monotonic()
     stamp = f"{_dt.datetime.now():%Y%m%d-%H%M%S}"
+    last_dist: float | None = None      # HUD 표시용
     log_path = args.out / "session.csv"
     new_log = not log_path.exists()
 
@@ -101,16 +140,19 @@ def main(argv: list[str] | None = None) -> int:
     with open(log_path, "a", newline="", encoding="utf-8") as fp:
         log = csv.writer(fp)
         if new_log:
-            log.writerow(["index", "file", "saved_at", "mode"])
+            log.writerow(["index", "file", "saved_at", "mode",
+                          "distance_cm", "distance_std"])
 
-        def store(frame, mode: str) -> None:
+        def store(frame, mode: str, dist: float | None, std: float | None) -> None:
             path = args.out / f"{args.prefix}_{stamp}_{len(saved) + 1:04d}.jpg"
             if not save(frame, path):
                 print("저장 실패", file=sys.stderr)
                 return
             saved.append(path)
             log.writerow([len(saved), path.name,
-                          _dt.datetime.now().isoformat(timespec="seconds"), mode])
+                          _dt.datetime.now().isoformat(timespec="seconds"), mode,
+                          "" if dist is None else dist,
+                          "" if std is None else std])
             fp.flush()
 
         try:
@@ -121,28 +163,36 @@ def main(argv: list[str] | None = None) -> int:
                     break
 
                 h, w = frame.shape[:2]
-                warn = ("" if (w, h) == (cfg.frame_width, cfg.frame_height)
-                        else f"  !! {cfg.frame_width}x{cfg.frame_height} 아님")
+                warn = ("" if (w, h) == (width, height)
+                        else f"  !! {width}x{height} 아님")
+                dist_txt = (f"dist {last_dist}cm" if last_dist is not None
+                            else ("dist --" if sensor else "dist off"))
                 cv2.imshow("shoot", draw_hud(frame, [
-                    f"saved {len(saved)}   {w}x{h}{warn}",
+                    f"saved {len(saved)}   {w}x{h}{warn}   {dist_txt}",
                     f"auto {'ON ' + format(auto_interval, '.1f') + 's' if auto_on else 'OFF'}"
                     f"   burst {args.burst}   [SPACE/B/A/U/Q]",
                 ]))
 
                 if auto_on and time.monotonic() >= next_auto:
-                    store(frame, "auto")
+                    d, s = read_distance()
+                    last_dist = d if d is not None else last_dist
+                    store(frame, "auto", d, s)
                     next_auto = time.monotonic() + (auto_interval or 1.0)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break
                 if key == ord(" "):
-                    store(frame, "single")
+                    d, s = read_distance()
+                    last_dist = d if d is not None else last_dist
+                    store(frame, "single", d, s)
                 elif key == ord("b"):
+                    d, s = read_distance()    # 버스트는 거리 한 번만 (짧은 동안 불변)
+                    last_dist = d if d is not None else last_dist
                     for _ in range(args.burst):   # 손 흔들림·조명 흔들림으로 다양성 확보
                         ok, f2 = cap.read()
                         if ok:
-                            store(f2, "burst")
+                            store(f2, "burst", d, s)
                 elif key == ord("a"):
                     if auto_interval is None:
                         auto_interval = 1.5   # --auto 없이 켜면 기본 간격
@@ -153,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             cap.release()
             cv2.destroyAllWindows()
+            if sensor is not None:
+                sensor.close()
 
     print(f"\n총 {len(saved)}장 저장 → {args.out.resolve()}")
     print(f"기록: {log_path}")

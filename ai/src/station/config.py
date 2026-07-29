@@ -74,6 +74,10 @@ class StationConfig:
     # --- 판정 ---
     calib: CameraCalib = field(default_factory=CameraCalib)
     miniature_scale: int = 10          # 실물 ÷10 = 미니어처 (명세 §2.1)
+    # 파렛트 높이(실물 cm). 화물은 **항상 파렛트 위에 실려** 운반되므로, 적재 위치
+    # 산출(FR-202)에 넘길 값은 화물 높이가 아니라 **파렛트를 포함한 총높이**다.
+    # T-11 표준 120mm (hardware/pallet_mini.scad R_height).
+    pallet_height_cm: float = 12.0
     eccentric_threshold: float = 0.3   # 편하중 임계 (load_balance 기본과 동일)
 
     def threshold_for(self, label: str) -> float:
