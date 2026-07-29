@@ -65,9 +65,8 @@ train_batch_size = 16     # GPU1에 팀원 Isaac Sim 상주 → 보수적. lr은
 base_lr = 1e-4            # 고정값. 5e-4는 val 붕괴 전례(실험4).
 num_workers = 8
 
-# exp7 계보 -s 체크포인트에서 이어서 학습.
-# ⚠️ 서버의 실제 파일명을 확인하고 맞출 것 (S15P11A304-68 코멘트 기준 경로).
-load_from = 'work_dirs/rtmdet_s_forklift/best_epoch_5.pth'
+# exp7 계보 -s 체크포인트에서 이어서 학습 (2026-07-29 서버에서 파일명 확인함).
+load_from = 'work_dirs/rtmdet_s_forklift/best_coco_bbox_mAP_epoch_5.pth'
 
 # --- 파이프라인 ---
 # hole은 640 입력에서 세로 약 27px(원본 54px × 0.5)로 작다. RandomResize 하한을 0.1까지
