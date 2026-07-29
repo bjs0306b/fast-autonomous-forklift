@@ -13,6 +13,8 @@
 -- 기본값이 이미 InnoDB·utf8mb4이고, 이 절을 빼면 H2에서도 그대로 실행할 수 있어 테스트로 실제 검증이
 -- 가능하기 때문이다. 팀 MySQL 서버의 기본 엔진/문자셋이 다르면 CREATE TABLE 뒤에 팀이 별도로
 -- ALTER TABLE ... ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 등을 추가하면 된다.
+USE fast_backend;
+
 
 CREATE TABLE IF NOT EXISTS vehicle (
     id           BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -432,3 +434,39 @@ CREATE TABLE IF NOT EXISTS transport_command (
     INDEX idx_transport_command_status (status),
     INDEX idx_transport_command_created (created_at DESC)
 );
+
+USE fast_backend;
+SHOW TABLES;
+
+SHOW TABLES LIKE '%vehicle%';
+
+SELECT user, host
+FROM mysql.user
+WHERE user = 'fastbackend';
+
+SELECT user, host
+FROM mysql.user
+WHERE user = 'fastbackend';
+
+ALTER USER ''@'localhost'
+    IDENTIFIED BY '1234';
+
+GRANT ALL PRIVILEGES
+    ON fast_backend.*
+    TO 'fastbackend'@'localhost';
+
+FLUSH PRIVILEGES;
+
+SELECT USER(), CURRENT_USER();
+
+CREATE USER IF NOT EXISTS 'fastbackend'@'localhost'
+    IDENTIFIED BY '1234';
+
+ALTER USER 'fastbackend'@'localhost'
+    IDENTIFIED BY '1234';
+
+GRANT ALL PRIVILEGES
+    ON fast_backend.*
+    TO 'fastbackend'@'localhost';
+
+FLUSH PRIVILEGES;

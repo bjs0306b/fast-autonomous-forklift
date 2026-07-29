@@ -62,6 +62,24 @@ function toMonitoringState(dashboard: DashboardResponse): MonitoringState {
 }
 
 /**
+ * 들어온 위치 이벤트가 현재 표시 중인 위치보다 오래됐는지 판정한다.
+ *
+ * 둘 중 하나라도 없거나 파싱할 수 없으면 <b>false</b>(= 최신으로 취급)를 돌려준다.
+ * 시각 형식 문제 때문에 정상 갱신이 막히면 마커가 아예 멈춰 버리므로,
+ * 확실히 오래된 경우에만 버린다.
+ */
+function isOlderThanCurrent(
+  incomingMessageAt: string | null,
+  currentMessageAt: string | null | undefined,
+): boolean {
+  if (!incomingMessageAt || !currentMessageAt) return false
+  const incoming = Date.parse(incomingMessageAt)
+  const currentValue = Date.parse(currentMessageAt)
+  if (Number.isNaN(incoming) || Number.isNaN(currentValue)) return false
+  return incoming < currentValue
+}
+
+/**
  * 새 차량 목록에 맞춰 선택 차량을 결정한다.
  * - 기존 선택이 새 목록에 남아 있으면 유지 (재연결 후에도 선택이 튀지 않게)
  * - 없으면 위치가 있는 첫 차량
@@ -189,7 +207,16 @@ export function useMonitoringDashboard() {
     })
   }, [])
 
-  /** 차량 위치 이벤트 반영. ROS2/Isaac 두 payload 는 normalizeLocationEvent 가 흡수한다. */
+  /**
+   * 차량 위치 이벤트 반영. ROS2/Isaac 두 payload 는 normalizeLocationEvent 가 흡수한다.
+   *
+   * <b>오래된 메시지 방어</b>: 백엔드는 최신 위치 저장소(LatestVehicleLocationProvider)에서만
+   * messageAt 을 비교해 stale 을 걸러내고, <b>STOMP 발행은 그와 무관하게 수행</b>한다.
+   * 따라서 네트워크 지연으로 순서가 뒤집히면 오래된 좌표 이벤트가 화면에 그대로 도착해
+   * 마커가 뒤로 튄다. 여기서 messageAt 을 비교해 한 번 더 막는다(prompt73 4.4장).
+   * 비교할 messageAt 이 없으면(둘 중 하나라도 없거나 파싱 불가) 최신 수신을 신뢰한다 —
+   * 시각 형식 문제로 정상 갱신을 막지 않기 위해서다.
+   */
   const applyLocationEvent = useCallback((event: RealtimeEvent<unknown>) => {
     const location = normalizeLocationEvent(event)
     if (!location) return
@@ -198,6 +225,9 @@ export function useMonitoringDashboard() {
       const current = prev.vehiclesById[event.vehicleId]
       if (!current) {
         console.warn("[monitoring] 등록되지 않은 차량의 위치 이벤트 무시:", event.vehicleId)
+        return prev
+      }
+      if (isOlderThanCurrent(location.messageAt, current.location?.messageAt)) {
         return prev
       }
       return {
