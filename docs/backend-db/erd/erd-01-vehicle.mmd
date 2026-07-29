@@ -1,0 +1,49 @@
+erDiagram
+    vehicle ||--o| vehicle_current_status : ""
+    vehicle ||--o{ vehicle_status_history : ""
+
+    vehicle {
+        bigint   id PK
+        varchar  vehicle_id UK "업무 키"
+        varchar  name
+        varchar  source "ISAAC / ROS2 등"
+        varchar  vehicle_type
+        boolean  active
+        datetime created_at
+        datetime updated_at
+    }
+    vehicle_current_status {
+        varchar  vehicle_id PK,FK
+        varchar  status "기본 UNKNOWN"
+        int      battery
+        double   position_x
+        double   position_y
+        double   heading
+        double   speed
+        double   fork_height "Isaac 확장"
+        boolean  has_cargo "Isaac 확장"
+        varchar  cargo_id "Isaac 확장"
+        double   footprint_length "Isaac 확장"
+        double   footprint_width "Isaac 확장"
+        datetime message_at
+        datetime received_at
+        datetime updated_at
+    }
+    vehicle_status_history {
+        bigint   id PK
+        varchar  vehicle_id FK
+        varchar  status
+        int      battery
+        double   position_x
+        double   position_y
+        double   heading
+        double   speed
+        double   fork_height
+        boolean  has_cargo
+        varchar  cargo_id
+        double   footprint_length
+        double   footprint_width
+        datetime message_at "idx(vehicle_id, message_at DESC)"
+        datetime received_at
+        datetime created_at
+    }
