@@ -5,12 +5,13 @@ idf_component_register(
         "servo.c"
         "pca9685.c"
         "dc_motor.c"
-        "linear_motor.c"
+        "stepper_motor.c"
         "task_motor.c"
         "task_comm.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_driver_i2c
         esp_driver_gpio
+        esp_driver_gptimer
         esp_driver_uart
 )
