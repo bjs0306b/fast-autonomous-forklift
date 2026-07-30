@@ -17,8 +17,9 @@ hole 최대 4개**를 그려야 하고 208장을 연속으로 처리하므로, �
     G             프레임 번호로 이동
     S             지금 저장              Q / ESC  저장하고 종료
 
-구멍이 작아 경계가 안 보이면 ``--view-width``를 올린다(예: 1920). 화면 전체가
-확대되므로 별도 돋보기 창 없이 같은 효과가 난다.
+구멍이 작아 경계가 안 보이면 ``--view-width``를 올린다. 단 **화면을 넘지 않도록
+자동으로 깎는다** — 창이 모니터보다 커지면 아래쪽 경고줄이 잘려 안 보이고,
+그게 검수를 화면에 띄운 의미를 없앤다. 실제 배율은 상단 HUD에 표시된다.
 
 **진행 상황은 `<out>.progress.json`에 따로 남긴다.** "아직 안 본 프레임"과
 "보고 나서 라벨이 없다고 판정한 프레임"은 다르다 — 네거티브(구간 8) 7장이 후자이고,
@@ -72,6 +73,28 @@ def check_frame(anns: list[dict]) -> list[str]:
         if hb[3] < MIN_HOLE_H:
             warn.append(f"hole height {hb[3]:.0f}px < {MIN_HOLE_H}")
     return warn
+
+
+def screen_size(fallback: tuple[int, int] = (1600, 900)) -> tuple[int, int]:
+    """모니터 해상도. 실패하면 보수적인 기본값을 쓴다.
+
+    DPI 인식을 켜지 않는 게 의도다 — 배율 150% 환경에서는 논리 해상도가
+    나와야 창 크기 계산이 맞는다.
+    """
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        w, h = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        return (w, h) if w > 200 and h > 200 else fallback
+    except Exception:
+        return fallback
+
+
+def fit_scale(img_w: int, img_h: int, want_w: int,
+              screen: tuple[int, int], hud: int = 130) -> float:
+    """요청 폭을 쓰되 화면(작업줄·제목줄 여유 포함)을 넘지 않는 배율."""
+    sw, sh = screen
+    return min(want_w / img_w, (sw - 40) / img_w, (sh - hud) / img_h)
 
 
 def _inside(inner, outer, slack: int = 8) -> bool:
@@ -138,6 +161,8 @@ class Labeler:
         self.cursor = self._first_todo()
         self.drag_start: tuple[int, int] | None = None
         self.rect: tuple[int, int, int, int] | None = None
+        self.screen = screen_size()
+        self.announced = False
 
     def _first_todo(self) -> int:
         for i, p in enumerate(self.files):
@@ -184,7 +209,8 @@ class Labeler:
 
     def run(self) -> None:
         win = "label_onboard"
-        cv2.namedWindow(win)
+        # WINDOW_NORMAL — 자동 크기 창은 화면보다 커지면 그냥 잘린다. 이건 손으로 조절 가능.
+        cv2.namedWindow(win, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(win, self.on_mouse)
 
         while True:
@@ -196,9 +222,14 @@ class Labeler:
                 self.cursor += 1
                 continue
             self.sizes[path.name] = (frame.shape[1], frame.shape[0])
-            self.scale = self.view_w / frame.shape[1]
-            base = cv2.resize(frame, (self.view_w,
+            self.scale = fit_scale(frame.shape[1], frame.shape[0],
+                                   self.view_w, self.screen)
+            base = cv2.resize(frame, (int(frame.shape[1] * self.scale),
                                       int(frame.shape[0] * self.scale)))
+            if not self.announced:
+                print(f"  화면 {self.screen[0]}x{self.screen[1]} → 창 "
+                      f"{base.shape[1]}x{base.shape[0]} (배율 {self.scale:.2f})")
+                self.announced = True
 
             advance = 0
             while advance == 0:
@@ -215,9 +246,10 @@ class Labeler:
                 n_p = sum(1 for a in anns if a["category_id"] == PALLET_ID)
                 n_h = sum(1 for a in anns if a["category_id"] == HOLE_ID)
                 seg = frame_number(path.name)
-                head = (f"[{self.cursor + 1}/{len(self.files)}] {path.name}  "
-                        f"frame {seg}  |  DRAW: {NAME[self.cls].upper()}  |  "
-                        f"pallet {n_p}  hole {n_h}  |  done {len(self.done)}")
+                head = (f"[{self.cursor + 1}/{len(self.files)}] frame {seg}  |  "
+                        f"DRAW: {NAME[self.cls].upper()}  |  "
+                        f"pallet {n_p}  hole {n_h}  |  done {len(self.done)}  |  "
+                        f"zoom {self.scale:.2f}x")
                 cv2.rectangle(view, (0, 0), (view.shape[1], 38), (30, 30, 30), -1)
                 cv2.putText(view, head, (8, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52,
                             (240, 240, 240), 1)
