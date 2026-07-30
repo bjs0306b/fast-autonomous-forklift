@@ -1,6 +1,7 @@
-"""Open-loop cmd_vel mapping for the rear-steered forklift tele-op gate."""
+"""Convert cmd_vel into drive PWM and rear-steering servo commands."""
 
 from dataclasses import dataclass
+import math
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,8 @@ class TeleopLimits:
     max_linear_mps: float = 0.20
     max_angular_rps: float = 0.35
     linear_deadband_mps: float = 0.01
+    wheelbase_m: float = 0.144
+    rear_steering_limit_deg: float = 15.0
     min_drive_percent: int = 50
     max_drive_percent: int = 60
     steering_center_cdeg: int = 10000
@@ -25,6 +28,10 @@ class TeleopLimits:
             raise ValueError("maximum velocities must be positive")
         if not 0 <= self.linear_deadband_mps < self.max_linear_mps:
             raise ValueError("linear deadband is invalid")
+        if self.wheelbase_m <= 0.0:
+            raise ValueError("wheelbase must be positive")
+        if not 0.0 < self.rear_steering_limit_deg < 89.0:
+            raise ValueError("rear steering limit is invalid")
         if not 0 <= self.min_drive_percent <= self.max_drive_percent <= 60:
             raise ValueError("drive percentage limits are invalid")
         if not (
@@ -47,17 +54,21 @@ def map_twist(
 ) -> ActuatorCommand:
     """Map Twist values to signed PWM and a rear-steering servo command.
 
-    This is intentionally an open-loop sign/response mapping, not the final
-    Ackermann curvature model.  The angular/linear sign ratio makes rear
-    steering reverse when the vehicle direction reverses.
+    Positive rear-wheel angle points left. For a rear-steered vehicle,
+    delta_rear = -atan(wheelbase * angular_z / linear_x). The installed
+    linkage maps negative rear-wheel angle toward the larger servo command.
     """
     limits.validate()
 
     if abs(linear_x) < limits.linear_deadband_mps:
         return ActuatorCommand(0, limits.steering_center_cdeg)
 
+    bounded_linear_x = math.copysign(
+        min(abs(linear_x), limits.max_linear_mps),
+        linear_x,
+    )
     speed_ratio = _clamp(
-        abs(linear_x) / limits.max_linear_mps,
+        abs(bounded_linear_x) / limits.max_linear_mps,
         0.0,
         1.0,
     )
@@ -65,19 +76,29 @@ def map_twist(
         limits.min_drive_percent
         + speed_ratio * (limits.max_drive_percent - limits.min_drive_percent)
     )
-    drive_percent = drive_magnitude if linear_x > 0.0 else -drive_magnitude
+    drive_percent = (
+        drive_magnitude if bounded_linear_x > 0.0 else -drive_magnitude
+    )
 
-    if abs(angular_z) < 1e-6:
+    bounded_angular_z = _clamp(
+        angular_z,
+        -limits.max_angular_rps,
+        limits.max_angular_rps,
+    )
+    if abs(bounded_angular_z) < 1e-6:
         return ActuatorCommand(drive_percent, limits.steering_center_cdeg)
 
+    curvature = bounded_angular_z / bounded_linear_x
+    rear_steering_angle_rad = -math.atan(limits.wheelbase_m * curvature)
+    steering_limit_rad = math.radians(limits.rear_steering_limit_deg)
     turn_ratio = _clamp(
-        abs(angular_z) / limits.max_angular_rps,
+        abs(rear_steering_angle_rad) / steering_limit_rad,
         0.0,
         1.0,
     )
-    steering_sign = 1 if (angular_z / linear_x) > 0.0 else -1
+    servo_direction = -1 if rear_steering_angle_rad > 0.0 else 1
 
-    if steering_sign > 0:
+    if servo_direction > 0:
         steering_span = (
             limits.steering_max_cdeg - limits.steering_center_cdeg
         )
@@ -88,7 +109,7 @@ def map_twist(
 
     steering_cdeg = (
         limits.steering_center_cdeg
-        + steering_sign * round(turn_ratio * steering_span)
+        + servo_direction * round(turn_ratio * steering_span)
     )
     return ActuatorCommand(drive_percent, steering_cdeg)
 
