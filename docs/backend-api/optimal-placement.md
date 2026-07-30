@@ -13,7 +13,7 @@ FR-201에서 관리하는 적재 위치 정보와 측정 스테이션의 화물 
 - **TBD**: 실제 맵 좌표나 최종 통신 필드명처럼 아직 확정되지 않은 설정값
 
 > 현재 백엔드의 적재 계산, AI 안전 판정, 스테이션 메시지와 이 문서의 목표 규격 사이에는 차이가 있다.
-> 상세 차이는 `12. 현재 구현과 목표 규격의 차이`와 `15. 다른 파일의 후속 수정 사항`에서 관리한다.
+> 상세 차이는 `12. 현재 구현과 목표 규격의 차이`와 `14. 다른 파일의 후속 수정 사항`에서 관리한다.
 
 ## 2. 범위와 담당 영역
 
@@ -25,8 +25,9 @@ FR-201에서 관리하는 적재 위치 정보와 측정 스테이션의 화물 
 2. 측정 단위를 현실 스케일 `m`로 정규화한다.
 3. 안전 조건과 적재 가능 조건을 만족하는 빈 적재 위치를 찾는다.
 4. 확정된 우선순위에 따라 최적 위치를 한 곳 선택한다.
-5. 운반 작업 생성과 함께 해당 위치를 원자적으로 예약한다.
-6. 적재 성공·실패·취소에 따라 적재 위치 상태를 변경한다.
+5. 선정에 사용한 `measurement_id`를 운반 작업에 남긴다.
+6. 운반 작업 생성과 함께 해당 위치를 원자적으로 예약한다.
+7. 적재 성공·실패·취소에 따라 적재 위치 상태를 변경한다.
 
 ### 2.2 다른 영역의 담당 범위
 
@@ -121,6 +122,9 @@ measurementId
 ```
 
 이전 화물의 결과가 늦게 도착하여 현재 화물에 연결되지 않도록 `sessionId`를 검증한다.
+`measurementId`는 외부 측정 결과의 고유 식별자이며, DB에서는 `station_measurement.measurement_id`의
+고유 제약으로 중복 저장을 차단한다. `sequence_no`는 같은 세션에서 가장 최근에 수신한 결과를 고르는
+내부 순서이고, 외부 식별자나 센서 측정 시각을 대신하지 않는다.
 
 ### 4.4 측정 결과 유효성
 
@@ -134,6 +138,8 @@ measurementId
 6. 애플리케이션에 고정 스테이션 좌표가 설정되어 있다.
 
 불완전하거나 오래된 결과에는 임의 기본값을 넣지 않는다. 해당 측정은 재측정 또는 격리 대상으로 처리한다.
+운반 작업을 생성할 때는 선택한 측정의 세션이 참조하는 `cargo_id`와 작업의 `cargo_id`가 같은지도 검증한다.
+`transport_task`가 화물과 측정을 각각 FK로 참조하므로, 이 교차 일치 조건은 작업 생성 트랜잭션에서 보장해야 한다.
 
 > **현재 구현 차이:** 목표 스키마 초안에는 세션 연결과 `tipping_level`, `overhang_ratio`가 정의되어 있지만
 > 현재 실행 스키마와 애플리케이션 매핑에는 아직 반영되지 않았다.
@@ -166,6 +172,21 @@ MVP 적재 계산을 위한 별도 `rack`, `rack_level` 테이블은 만들지 �
 
 운반 작업을 생성할 때 선택한 위치를 `destination_slot_code`로 참조하고, 목적지 좌표·방향과 포크 높이를 `transport_task`에
 실행 시점 스냅샷으로 복사한다. 이후 적재 위치 설정이 바뀌어도 이미 생성된 작업의 목표값은 변경하지 않는다.
+또한 `measurement_id`를 연결하여, 같은 화물을 여러 번 측정했더라도 어떤 측정 결과로 적재 위치를 선택했는지 추적한다.
+
+### 5.3 핵심 참조 관계
+
+| 기준 데이터 | 참조 데이터 | 목적 |
+|---|---|---|
+| `cargo.cargo_id` | `station_session.cargo_id` | 측정 세션의 대상 화물 식별 |
+| `station_session.session_id` | `station_measurement.session_id` | 측정 결과가 속한 세션 식별 |
+| `station_measurement.measurement_id` | `transport_task.measurement_id` | 적재 위치 선정에 사용한 측정 근거 보존 |
+| `cargo.cargo_id` | `transport_task.cargo_id` | 실제 운반 대상 화물 식별 |
+| `storage_slot.slot_code` | `transport_task.destination_slot_code` | 선택한 적재 위치 식별 |
+| `vehicle.vehicle_id` | 작업·명령·오류의 `vehicle_id` | 배정 차량과 처리 이력의 식별자 통일 |
+
+참조 대상 데이터는 이력이 남아 있는 동안 삭제하지 않는다. 목표 스키마의 FK는 모두 `ON DELETE RESTRICT`를
+사용해 측정 근거, 운반 작업 또는 차량 이력이 끊기는 것을 막는다.
 
 ## 6. 정상 입력 계약과 단위 정규화
 
@@ -204,6 +225,7 @@ MVP의 정상 흐름에서는 다음 값이 모두 제공된다고 가정한다.
 - 애플리케이션에 설정된 스테이션 픽업 좌표
 - 적재 위치의 가용 높이와 상태
 - 목적지 좌표·방향과 포크 높이
+- Nav2가 후보별로 산출한 경로 거리
 
 SQL에서 일부 값이 nullable이더라도 정상 알고리즘은 누락된 값을 임의로 보완하지 않는다.
 
@@ -284,16 +306,15 @@ requiredHeightM <= storageSlot.usableHeight
 remainingHeightM = storageSlot.usableHeight - requiredHeightM
 ```
 
-이동거리는 활성 측정 세션에 연결된 스테이션 좌표와 적재 위치 접근 좌표 사이의 직선거리다.
+이동거리는 각 후보 위치에 대해 Nav2가 계산해 전달한 경로 길이를 사용한다.
 
 ```text
-distanceM = sqrt(
-    (stationX - destinationX)^2
-    + (stationY - destinationY)^2
-  )
+distanceM = nav2PathDistanceM
 ```
 
-Nav2 경로가 확정되기 전까지 직선거리를 MVP 이동 비용으로 사용한다.
+`nav2PathDistanceM`은 고정 스테이션 픽업 pose에서 후보의 `destination_*` pose까지 계획된 경로의
+길이이며 단위는 `m`다. 값이 없거나 유한한 양수가 아니면 직선거리로 대체하지 않고 해당 후보를 제외한다.
+이 값은 후보 비교 중에만 사용하는 계산 변수이므로 현재 목표 스키마에는 별도 컬럼으로 저장하지 않는다.
 
 ### 8.2 정렬 순서
 
@@ -349,6 +370,27 @@ EMPTY → RESERVED → OCCUPIED
 적재 가능한 위치가 없으면 `NO_AVAILABLE_STORAGE_SLOT`을 반환한다.
 임의의 좌표를 생성하거나 기존 화물을 자동 재배치하지 않는다.
 
+### 9.5 작업·명령·오류 추적
+
+`transport_task`는 화물, 측정 결과, 선택한 적재 위치와 실행 시점의 출발·목적지 pose를 보존한다.
+`vehicle_id`는 차량 배정 전에는 `NULL`일 수 있지만, 실제 명령을 만들기 전에는 반드시 확정되어야 한다.
+
+| 테이블 | 역할 |
+|---|---|
+| `vehicle_current_status` | 차량별 최신 주행·위치·포크·화물 적재 상태를 한 행으로 유지 |
+| `transport_command` | 특정 운반 작업을 차량에 전달한 명령과 성공·실패 상태 기록 |
+| `embedded_vehicle_command` | ROS2, 임베디드 또는 양쪽에 전달하는 개별 차량 제어 명령 기록 |
+| `embedded_error_history` | 주행·조향·포크·리미트 스위치·UART·시스템 오류의 누적 이력 |
+
+모든 차량 관련 테이블은 `vehicle_id`를 사용한다. `transport_command`는 반드시 `task_id`와 `vehicle_id`를
+참조하며, `embedded_vehicle_command`와 `embedded_error_history`도 존재하는 차량만 참조할 수 있다.
+오류 발생 시 `error_code`는 프로그램이 분기할 기계 판독값, `result_message` 또는 `message`는 사람이 확인할
+설명으로 사용한다. 오류 이력은 상태를 덮어쓰지 않고 새 행으로 누적한다.
+
+`embedded_vehicle_command.target_system`은 `ROS2`, `EMBEDDED`, `ALL` 중 하나이며, 명령 상태는
+생성부터 발행·수락·실행·완료 또는 실패까지의 흐름을 표현한다. 운반 명령과 임베디드 명령은 목적이 다르므로
+각 테이블에서 별도로 추적하되 동일한 `vehicle_id`를 사용한다.
+
 ## 10. 추천 결과 규격
 
 최종 API·DTO·MQTT 필드명은 연동 담당자 협의 후 확정한다. 다음 예시는 필요한 의미를 보여주기 위한 비구속 예시다.
@@ -397,6 +439,8 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | 픽업 위치 | 고정 스테이션 `x`, `y`, `heading` | 작업 생성 전 설정 | 추천 실행 중단 |
 | 적재 위치 | `destination_x`, `destination_y`, `destination_heading` | 후보 등록·활성화 전 입력 | 후보 제외 또는 비활성 처리 |
 | 적재 위치 | `usable_height`, `fork_height` | 후보 등록·활성화 전 입력 | 후보 제외 또는 비활성 처리 |
+| 경로 비용 | `nav2PathDistanceM` | 후보 정렬 전에 Nav2가 산출 | 해당 후보 제외 |
+| 측정 근거 | `transport_task.measurement_id` | 유효한 최신 측정 결과와 화물 일치 확인 | 작업 생성 차단 |
 | 운반 작업 | 출발·도착 좌표, 포크 높이, 차량 ID | 실제 명령 발행 전에 확정 | 명령 발행 차단 |
 
 구체적인 오류 코드와 복구 API는 TBD다. 누락값을 `0`, 임의 좌표 또는 임의 정렬값으로 대체하지 않는다.
@@ -409,55 +453,31 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | 팔레트 높이 | cargo-only 높이에 `0.12m`를 한 번 추가 | `cargo.height + clearance` | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:82-85` | 수직 판정식 변경 |
 | 수평 판정 | 모든 위치가 고정 팔레트 `1.1 × 1.1m`를 수용하도록 사전 구성 | cargo width/length 및 90도 회전 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:86-115` | 런타임 수평 판정 제거 |
 | 정렬 | 높이 → 거리 → 슬롯 코드 | 낭비 부피 → 잔여 치수 합 → 층 → 거리 → 코드 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:117-146` | comparator 변경 |
-| 거리 누락 | 정상 입력 완전성 요구 | 좌표 누락 시 `distance = null` 허용 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:139-146` | 입력 검증 추가 |
+| 이동 거리 | Nav2의 후보별 경로 거리 사용, 누락 시 후보 제외 | 좌표 간 직선거리 계산 및 `distance = null` 허용 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:139-146` | Nav2 거리 입력 연동 및 검증 추가 |
 | 후보 상태 | `EMPTY`만 조회·예약 | `EMPTY`만 조회하고 조건부 예약 | `src/main/resources/mapper/StorageSlotMapper.xml:56-106` | 유지 |
 | 예약 충돌 | 롤백, 자동 재시도 없음 | 동일 | `src/main/java/com/fast/backend/transport/service/TransportTaskService.java:112-119` | 유지 |
 | 돌출·전복 | 독립 gate, 돌출 `< 0.05` | 돌출 `> 0.02`이면 tipping level 상승 | `ai/src/station/tipping.py:31-32,63-68,80-88` | AI 판정 분리 |
 | 스테이션 DTO | 세션·화물·tipping·overhang 수신 | 관련 필드 없음 | `src/main/java/com/fast/backend/station/dto/StationMeasurementMessage.java:20-75` | DTO 및 adapter 확장 |
 | 스테이션 검증 | 원시 cargo-only cm를 adapter에서 m로 변환 | miniature scale/height/width 필수 검증 | `src/main/java/com/fast/backend/station/service/StationMeasurementService.java:112-146,212-240` | validator 변경 |
-| 측정 저장 | 세션 연결과 tipping·overhang 보존 | 관련 컬럼·매핑 없음 | `src/main/resources/db/schema.sql:146-180`, `src/main/resources/mapper/StationMeasurementMapper.xml:5-83` | 목표 스키마·domain·mapper 반영 |
+| 측정 저장 | 세션 연결과 tipping·overhang 보존 | `measurement_id`는 있으나 세션 연결과 목표 안전 필드는 없음 | `src/main/resources/db/schema.sql:146-180`, `src/main/resources/mapper/StationMeasurementMapper.xml:5-83` | 목표 스키마·domain·mapper 반영 |
+| 작업의 측정 근거 | `transport_task.measurement_id`로 사용한 측정 결과를 FK 참조 | 운반 작업에 측정 결과 참조가 없음 | `src/main/resources/db/schema.sql:347-380`, `src/main/resources/mapper/TransportTaskMapper.xml` | domain·mapper·서비스에 측정 참조 추가 |
 | 적재 위치 구조 | `storage_slot` 단일 테이블과 `slot_code` PK | 랙·층·슬롯 계층 및 숫자 슬롯 ID | `src/main/resources/db/schema.sql:311-360` | 목표 스키마와 매핑으로 평탄화 |
+| 차량 식별자 | 차량 관련 FK를 `vehicle_id`로 통일 | 일부 임베디드 테이블은 `forklift_id` 사용 | `src/main/resources/db/schema.sql:211-264`, `src/main/resources/mapper/VehicleCommandMapper.xml` | 도메인·매퍼·연동 필드 통일 |
+| 임베디드 이력 무결성 | 명령·오류가 `vehicle`을 FK로 참조하고 상태값을 제한 | 차량 FK와 일부 상태 제약이 없음 | `src/main/resources/db/schema.sql:215-264` | 목표 제약과 매핑 반영 |
 | 스테이션 좌표 | 애플리케이션의 단일 고정 pose를 pickup origin으로 사용 | `station_measurement`의 `station_id` 외 고정 pose 설정 없음 | 현재 설정 및 스키마 검색 | 고정 pose 설정 추가 |
 | 높이 handoff | cargo-only `height_cm` 사용 | 문서는 `total_height_cm` 사용 권장 | `docs/ai/station-measurement-handoff.md:21-30,65-79` | 연동 문서 수정 |
 
-## 13. 검증 시나리오
-
-시나리오 ID는 승인된 FR-202 검증 명세와 연결된다.
-
-| ID | 시나리오 | 기대 결과 |
-|---|---|---|
-| SC-01 | cargo `0.63m` + pallet `0.12m` + clearance `0.25m`, 위치 높이 `1.00m` | 경계값과 같으므로 통과 |
-| SC-02 | 위 조건에서 위치 높이 `0.999m` | 후보 제외 |
-| SC-03~05 | 돌출률 `0.049999`, `0.05`, `0.08` | 첫 값만 통과 가능, 나머지는 후보 제외 |
-| SC-06~10 | `SAFE`, `WARNING`, `DANGER` 및 다른 gate와 충돌 | `SAFE`만 통과하고 차단 조건 우선 |
-| SC-11~12 | 고정 팔레트 호환 위치와 비호환 위치 등록 시도 | 호환 위치만 운영 후보로 등록 |
-| SC-12a | 돌출률 `0.03`, 전복 위험 `SAFE` | 두 독립 gate 통과 |
-| SC-13 | `EMPTY`, `RESERVED`, `OCCUPIED`, `BLOCKED` 혼합 | `EMPTY`만 후보 유지 |
-| SC-14~17 | 높이·거리·슬롯 코드 순서별 동률 | 확정 comparator 순서대로 하나를 선택 |
-| SC-18 | 후보가 없음 | `NO_AVAILABLE_STORAGE_SLOT` |
-| SC-19~21 | 동시 예약, 완료, 실패·취소 | 한 작업만 예약; 완료 시 `OCCUPIED`, 실패·취소 시 `EMPTY` |
-| SC-22~23 | stale session과 세 식별자가 일치하는 session | stale 결과 격리, 일치 결과만 사용 |
-| SC-24 | 운영 필수 좌표가 null | 임의 fallback 없이 예외 등록부로 라우팅 |
-| SC-24a~c | status 비정상, 위험등급 누락, 필수 측정값 누락 | fallback 없이 재측정·격리 |
-| SC-24d~f | 고정 pose 정상, 잘못된 설정, pose 누락 | 정상 설정만 사용하고 잘못된 pose는 차단 |
-| SC-25~28 | 현실·모형 길이, clearance, heading 변환 | 길이만 `0.1`, heading 유지, clearance 중복 적용 금지 |
-| SC-29 | 돌출률·지지면 이탈률·margin·종횡비 | 무차원 값이므로 변환하지 않음 |
-| SC-30 | 현재 AI에서 돌출률 `0.03`, 기본 전복 위험 `SAFE` | 현재 mismatch를 표시하고 목표에서는 독립 gate로 통과 |
-| SC-31 | 원시 `height_cm=63` | adapter 결과 `0.63m`, 필요 높이 `1.00m` |
-| SC-32 | cargo·total·miniature 높이가 함께 전달됨 | cargo-only `height_cm / 100`만 canonical 입력으로 사용 |
-
-## 14. MVP 제외 범위
+## 13. MVP 제외 범위
 
 - 화물 깊이 측정과 깊이 기반 회전 판정
 - 화물 무게와 랙 하중 최적화
 - `WARNING` 작업의 관제 승인 UI 및 승인 API
 - 적재 완료 화물의 자동 재배치
 - 여러 화물의 입고 순서를 함께 계산하는 전역 최적화
-- Nav2 실제 경로 길이·예상 시간 기반 비용 계산
 - 동적 랙 탐색과 자동 맵 생성
 - 임의 임시 적재 좌표 생성
 
-## 15. 다른 파일의 후속 수정 사항
+## 14. 다른 파일의 후속 수정 사항
 
 목표 규격을 실제 애플리케이션에 구현할 때는 다음 파일 또는 영역의 수정이 필요하다.
 
@@ -467,14 +487,18 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | `src/main/java/com/fast/backend/storage/placement/PlacementProperties.java` | 고정 팔레트 상수와 돌출 임계값의 설정·상수 관리 방법 정리 |
 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java` | cargo-only 높이에 팔레트와 여유 높이를 더하고, 안전 gate와 높이·거리·슬롯 코드 정렬 적용 |
 | `src/main/java/com/fast/backend/storage/placement/PlacementRecommendation.java` | 필요 높이, 남는 높이, 거리, 안전 판정과 선정 이유 등 목표 응답 정보 추가 검토 |
+| Nav2 연동 adapter/API | 후보별 `nav2PathDistanceM`을 요청·수신하고 유효성 검증 |
 | `src/main/java/com/fast/backend/transport/service/TransportTaskService.java` | 단일 스테이션의 고정 pose를 pickup origin으로 사용하고 필수 입력 완전성 검증 |
+| `src/main/java/com/fast/backend/transport/domain/TransportTask.java` | `measurementId`를 추가하고 작업 생성 시 사용한 측정 근거 보존 |
+| `src/main/resources/mapper/TransportTaskMapper.xml` | `transport_task.measurement_id` 조회·저장 매핑 추가 |
 | `src/main/java/com/fast/backend/station/dto/StationMeasurementMessage.java` | `sessionId`, `cargoId`, `tipping`, `overhang` 수신 구조 추가 |
-| `src/main/java/com/fast/backend/station/service/StationMeasurementService.java` | 현실 cargo-only 입력 검증, 세션 일치·status·assessable 검증, legacy miniature 필수 조건 제거 검토 |
+| `src/main/java/com/fast/backend/station/service/StationMeasurementService.java` | 현실 cargo-only 입력 검증, 세션 일치·상태·위험등급 검증, legacy miniature 필수 조건 제거 검토 |
 | `src/main/java/com/fast/backend/station/domain/StationMeasurement.java` | 세션과 안전 분석 결과 보존 필드 추가 검토 |
 | `src/main/resources/mapper/StationMeasurementMapper.xml` | 신규 측정·세션·안전 필드 매핑 추가 |
 | `src/main/resources/db/schema-fr202-placement-draft.sql` | 본 문서의 목표 테이블·키·제약조건과 함께 최종 검토 |
 | `src/main/resources/db/schema.sql` | 초기 스키마 확정 시 목표 초안의 cargo·세션·측정·슬롯·운반 구조 반영 |
 | `src/main/resources/mapper/StorageSlotMapper.xml` 및 관련 domain | 랙·층 조인을 제거하고 `slot_code`, `usable_height`, `fork_height`, pose 기반으로 평탄화 |
+| 차량 명령·오류 domain 및 mapper | `forklift_id`를 `vehicle_id`로 통일하고 차량 FK·상태 제약에 맞춰 매핑 갱신 |
 | `ai/src/station/tipping.py` | 돌출률에 의한 2% 위험등급 상승을 제거하거나 별도 gate로 분리하여 목표 5% 정책과 일치 |
 | `docs/ai/station-measurement-handoff.md` | cargo-only 높이 계약, 세션 식별자, 독립 overhang/tipping 계약으로 갱신 |
 | `docs/ai/samples/station_measurement_*.json` | 목표 세션·화물·안전 필드를 포함하는 예시로 갱신 |
