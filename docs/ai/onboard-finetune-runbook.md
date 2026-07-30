@@ -1,6 +1,6 @@
 # 온보드 -s 파인튜닝 런북 (S15P11A304-145)
 
-> 대상: 지게차 온보드 카메라의 포크 정렬 비전 — box·pallet·**hole** 3클래스
+> 대상: 지게차 온보드 카메라의 포크 정렬 비전 — **pallet·hole 2클래스** (box는 프리라벨 과검출로 폐기, §1)
 > 관련: 144(촬영·라벨링) · 68(TensorRT 엔진) · 152~154(정렬 제어)
 > 데이터 기록: `docs/ai/onboard-dataset-batches.md` · 라벨 규약: `docs/ai/onboard-hole-label-guide.md`
 
@@ -19,59 +19,48 @@ G3의 임계가 낮은 이유는 실측 근거가 있다 — 현역 exp8로 네�
 
 ⚠️ **스테이션 -m(exp8)은 건드리지 않는다.** 온보드 -s만 3클래스다. exp8 계보를 손대면 이미 통과한 치수 KPI(평균 0.66mm)와 편하중 판정을 다시 검증해야 한다.
 
-## 1. 라벨링 — 클래스별로 담당을 나눈다
+## 1. 라벨링 — 사람이 pallet·hole만 그린다 (2클래스)
 
-**사람은 `pallet`·`hole`만 그린다. `box`는 exp8 프리라벨이 채운다.**
+**최종 클래스는 `pallet`·`hole` 2개다.** `box`는 넣으려다 뺐다 — 근거는 아래 "box를 뺀 이유".
 
-배분 근거는 **승격 게이트**다. G1(hole 재현율)·G2(pallet 재현율)·G3(hole 오탐)이 걸린 클래스에만 사람 손을 쓴다. `box`는 어느 게이트에도 없다 — 온보드에서 box를 소비하는 하류가 없고(§0 참조), 존재 이유는 **amodal `pallet`의 가림물을 가르치는 것**뿐이다.
-
-현역 exp8로 이 358장에 돌려본 실측이 배분의 근거다:
-
-| 항목 | 결과 | 그래서 |
-|---|---|---|
-| pallet 검출률 | **14%** (정면 구간 0%) | **사람이 그린다** |
-| hole | **0개** (모델이 모르는 클래스) | **사람이 그린다** |
-| box | 743개 — 장당 2.4개로 **과검출** | 프리라벨 + 검수 |
-| 네거티브 42장 | box **35개 오탐** | **구간 8엔 안 돌린다** |
-
-exp8은 실물 리그의 **검은 플라스틱 파렛트**로 적응된 모델이고 미니어처는 **흰색 3D 프린트**라 도메인이 다르다.
-
-### 순서를 지킨다 — 사람이 먼저다
-
-**라벨링 화면에 box를 띄우지 않는다.** 자동 박스가 보이는 상태로 pallet을 그리면 "대충 맞겠지" 하고 넘기게 되고, 오탐이 정답으로 굳는다. 병합은 사람이 끝난 **뒤에 코드로** 한다.
-
-```
-label_onboard (pallet+hole, 208장) ──┐
-                                     ├─ merge_coco ─→ pass1 ─→ audit ─→ expand ─→ split_onboard
-prelabel box (프레임 1~316) ──────────┘
-```
-
-1. 사람이 `pallet`·`hole`을 그린다 (규약은 `onboard-hole-label-guide.md` §3)
-2. 그 결과를 **기준(base)으로 잠그고** box 프리라벨을 돌린다
-3. 병합 → 감사 → 펼치기
+사람이 그리는 이유는 **승격 게이트**다. G1(hole 재현율)·G2(pallet 재현율)·G3(hole 오탐)이 pallet·hole에 걸려 있고, 현역 exp8로 이 358장에 돌려보면 pallet 검출률 **14%**(정면 0%), hole은 **모르는 클래스라 0개**다. 프리라벨이 무의미하니 빈 화면부터 사람이 그린다(규약은 `onboard-hole-label-guide.md` §3).
 
 ```bash
-# ① 사람이 그린다 — 로컬 라벨러. 중단해도 같은 명령으로 이어진다
+# ① 사람이 pallet·hole을 그린다 — 로컬 라벨러. 중단해도 같은 명령으로 이어진다
 python -m dataset.label_onboard \
     --images data/processed/cvat_onboard_pass1 \
     --out data/labels/onboard_cvat_pallet_hole.json
 
-# ② box 프리라벨 — 사람이 그린 208장에만, 네거티브(317~358) 제외
-python -m dataset.prelabel \
-    --images data/processed/cvat_onboard_pass1 \
-    --out data/processed/onboard_box_prelabel.json \
-    --only box --frames 1-316
+# ② 버스트 전체로 펼친다 (208 → 358장)
+python -m dataset.onboard_bursts expand \
+    --plan data/labels/onboard_burst_plan.json \
+    --coco data/labels/onboard_cvat_pallet_hole.json \
+    --out data/labels/onboard_cvat.json
 
-# ③ 병합 — base가 프레임 집합을 정하고, 충돌 시 사람이 이긴다
-python -m dataset.merge_coco \
-    --base data/labels/onboard_cvat_pallet_hole.json \
-    --add data/processed/onboard_box_prelabel.json \
-    --add-only box \
-    --out data/labels/onboard_cvat_pass1.json
-
-# ④ 감사 — 미리 정한 기준을 실제로 잰다
-python -m dataset.onboard_bursts audit --coco data/labels/onboard_cvat_pass1.json
+# ③ 구간 단위 train/val 분할 + 이미지 스테이징
+python -m dataset.split_onboard \
+    --coco data/labels/onboard_cvat.json \
+    --images data/raw/onboard/train_20260729/b01_upright \
+    --out-dir data/processed        # ← 명시할 것. 없으면 실행 위치(src)에 샌다
 ```
+
+결과(2026-07-30): **train 291장**(pallet 261·hole 570) / **val 67장**(pallet 67·hole 134) / 네거티브 30장. 이미지 358장이 `data/processed/staged_images_onboard/`.
+
+### box를 뺀 이유 (2026-07-30)
+
+원래 box를 **amodal pallet의 가림물 학습 보조**로 넣으려 했다 — 사람은 게이트가 걸린 pallet·hole만 그리고, 게이트 없는 box는 exp8 프리라벨로 채우는 분업이었다. 실제로 돌려보니 프리라벨이 못 쓸 수준이었다:
+
+| 항목 | 실측 |
+|---|---|
+| box 장당 | **2.4개** (기대 1개) — 구간 1·5에서 기대의 2배 초과 |
+| 그중 파렛트 오인 | **22%** — 흰 미니어처 파렛트를 통째로 box로 잡음(score 0.87까지) |
+| 나머지 오탐 | 배경(의자·신발) + 같은 박스 중복 검출 |
+
+파렛트를 box로 가르치면 **pallet 검출(G2)을 오히려 해친다.** 오탐이 파렛트·배경·중복으로 섞여 단일 기하 필터로 못 거르고, box는 **런타임 미사용 보조 클래스**라 얻는 것보다 위험이 컸다. `audit`이 이 판정을 냈다(구간 1·5 "과검출 의심").
+
+> 이 판정은 착수 전에 정한 기준이 발동한 것이다 — "기대의 2배 초과 또는 검수 감당 안 되면 box를 버리고 2클래스로 간다"(§1 아래 box 판정 기준). `prelabel`·`merge_coco`·`audit`·`cvat_onboard_labels.json`은 **그 시도의 산물로 남겨둔다** — box를 되살릴 근거가 생기면 다시 쓴다.
+
+⚠️ **2클래스 warm-start 함정** — config `rtmdet_s_640_onboard_forklift.py` 결정 2 참고. exp7 -s가 (box, pallet) 2클래스라 새 (pallet, hole)와 채널이 같아, 체크포인트를 그대로 로드하면 box 가중치가 pallet 자리에 조용히 들어간다. **rtm_cls 키를 제거한 사본**을 load_from으로 줘야 한다.
 
 ### 라벨러 조작
 
@@ -89,25 +78,7 @@ python -m dataset.onboard_bursts audit --coco data/labels/onboard_cvat_pass1.jso
 
 그리는 중에 가이드 §4 검수 규칙을 화면 아래에 띄운다 — pallet 없이 hole만, pallet 밖 hole, 종횡비 1.5:1 미만, 세로 16px 미만, hole 5개 이상. **막지는 않는다**(규약을 어긴 프레임이 정말 예외인지는 사람이 봐야 한다).
 
-`merge_coco`는 **category를 id가 아니라 이름으로 맞춘다.** 라벨러는 `box`=1·`pallet`=2·`hole`=3으로 내지만, CVAT으로 우회할 경우엔 태스크 라벨 순서대로 id가 붙어 pallet=1이 될 수 있다. 어느 쪽이 와도 출력은 config와 맞는 순서로 다시 낸다.
-
-### box 판정 기준 — 착수 전에 정한다
-
-box는 게이트가 없어서 "감으로 괜찮아 보인다"로 넘어가기 쉽다. 그래서 `audit`이 구간별 기대치와 대조한다.
-
-| 구간 | 기대 box/장 |
-|---|---|
-| 1·4·5 정면·파렛트밖 | 1 |
-| 2 회전 (3~4개 적재) | 3~4 |
-| 3 오버행 | 1~2 |
-| 6·7 배경변형 | 1~2 |
-| 8 네거티브 | **0** |
-
-> **기대치의 2배를 넘거나 검수가 감당 안 되면 `box`를 버리고 2클래스(pallet·hole)로 학습한다.** box의 목적은 가림물을 가르치는 것뿐이고, 라벨이 부정확하면 그 목적이 사라져 노이즈만 남는다.
-
-⚠️ 2클래스로 갈 때는 **분류 헤드를 명시적으로 초기화**해야 한다. exp7 -s 체크포인트도 2클래스라 shape이 맞아 **그대로 로드되고, box 가중치가 pallet 자리에·pallet 가중치가 hole 자리에 조용히 들어간다.** 3클래스면 shape 불일치로 mmdet이 시끄럽게 건너뛰므로 이 사고가 안 난다.
-
-부분 라벨링(예: "파렛트에 닿은 박스만")은 **하지 않는다.** 가이드 §3-⑥이 hole에 대해 배척한 것과 같은 이유다 — 사진만 봐선 알 수 없는 판단을 라벨러에게 요구하고, 모델은 "어떤 박스는 박스가 아니다"라는 모순 신호를 배운다. 전부 그리거나 클래스를 빼거나 둘 중 하나다.
+라벨러는 category를 `box`=1·`pallet`=2·`hole`=3으로 낸다(box는 0개). 학습은 config `classes=('pallet','hole')`로 box를 무시하고 2클래스만 로드한다.
 
 ### 358장을 다 그리지는 않는다 — 버스트 61개
 
@@ -129,20 +100,13 @@ python -m dataset.onboard_bursts plan \
 | **그릴 프레임** | **208장 / 358장 (58%)** — 150장 절감 |
 | 그중 구간 8 네거티브 | 7장 (라벨 없음 확인만) |
 
-`ai/configs/cvat_onboard_labels.json`은 **CVAT으로 우회할 때만** 쓰는 태스크 스키마다(`pallet`·`hole` 두 개뿐 — box는 일부러 넣지 않았다). 로컬 라벨러를 쓰면 필요 없다.
+`ai/configs/cvat_onboard_labels.json`은 **CVAT으로 우회할 때만** 쓰는 태스크 스키마다(`pallet`·`hole` 두 개뿐). 로컬 라벨러를 쓰면 필요 없다.
 
-라벨 후 키프레임 라벨을 버스트 전체로 펼친다. 출력은 `split_onboard`가 그대로 받는다 (확인: 291 train / 67 val 재현).
-
-```bash
-python -m dataset.onboard_bursts expand \
-    --plan data/labels/onboard_burst_plan.json \
-    --coco data/labels/onboard_cvat_pass1.json \
-    --out data/labels/onboard_cvat.json
-```
+라벨 후 키프레임 라벨을 버스트 전체로 펼치는 것이 §1의 `expand` 단계다.
 
 ⚠️ **판정은 밝기가 아니라 이동량으로 한다.** 처음엔 프레임 간 평균절대차를 썼는데 **자동 노출 때문에 양쪽으로 다 틀린다** — 버스트 353~358은 차이 12.3으로 '움직임'이 나왔지만 실제 이동은 2.6px(카펫만 찍힌 네거티브에서 노출이 튄 것)이고, 반대로 버스트 135~140은 차이 7.8로 '정지'인데 실제로는 4.3px 밀려 있었다. 그래서 파렛트가 들어오는 하단-중앙(x320~1088 · y300~640)을 밝기·콘트라스트 정규화한 뒤 `phaseCorrelate`로 **몇 px 밀렸는지**를 잰다.
 
-임계 **4px**의 근거는 `hole`이다. 개구부는 1280×800에서 세로 약 25~60px(가이드 하한 16px)이므로 4px는 그 1/6 이하이고, 사람이 그은 bbox 자체의 흔들림과 같은 수준이다. `pallet`·`box`는 훨씬 크므로 더 관대하다.
+임계 **4px**의 근거는 `hole`이다. 개구부는 1280×800에서 세로 약 25~60px(가이드 하한 16px)이므로 4px는 그 1/6 이하이고, 사람이 그은 bbox 자체의 흔들림과 같은 수준이다. `pallet`은 훨씬 크므로 더 관대하다.
 
 구간 5(79장)와 구간 8(42장)은 거의 전부 정지라 절감이 여기서 나온다. 반대로 구간 2(회전)는 12개 버스트 중 **11개가 개별 라벨**이다 — 손으로 돌리며 찍었으니 당연하다.
 
@@ -184,11 +148,12 @@ config: `ai/configs/rtmdet_s_640_onboard_forklift.py`
 CUDA_VISIBLE_DEVICES=1 bash scripts/train_rtmdet.sh configs/rtmdet_s_640_onboard_forklift.py
 ```
 
-config에 박아둔 결정 3가지 (근거는 파일 상단 주석):
+config에 박아둔 결정 (근거는 파일 상단 주석):
 
 1. **공개 데이터를 섞지 않는다** — 공개셋에는 hole 라벨이 없어, 섞으면 "파렛트가 보이는데 구멍은 없다"고 가르치게 된다. 온보드 -s의 도메인은 데모 환경 그 자체라 공개 도메인 성능은 KPI가 아니다
-2. **warm-start는 exp7 계보 -s** — 2→3클래스라 분류 헤드만 재초기화되고 backbone·neck·회귀 헤드는 전이된다
-3. **상하 뒤집기 증강 금지** — 파렛트는 상판이 위, 구멍은 그 아래라는 상하 관계가 hole 판별의 단서다
+2. **box를 뺀 2클래스**(pallet·hole) — box 프리라벨 과검출로 폐기(§1). `num_classes=2`, `classes=('pallet','hole')`
+3. **warm-start는 exp7 -s의 rtm_cls를 떼어낸 사본** — exp7이 (box,pallet) 2클래스라 채널이 같아, 그대로 로드하면 box 가중치가 pallet 자리에 들어간다. strip 명령은 config 결정 2 주석
+4. **상하 뒤집기 증강 금지** — 파렛트는 상판이 위, 구멍은 그 아래라는 상하 관계가 hole 판별의 단서다
 
 기타: lr **1e-4** 고정(5e-4는 val 붕괴 전례) · `filter_empty_gt=False`(네거티브 보존) · 오버샘플이 필요하면 **JSON 복제**로(RepeatDataset은 stage2 전환을 깨뜨린다) · `RandomResize` 하한 0.5(hole이 640에서 27px이라 0.1까지 줄이면 뭉개진다).
 

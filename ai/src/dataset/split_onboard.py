@@ -91,6 +91,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="온보드 라벨 반입·분할")
     ap.add_argument("--coco", type=Path, required=True, help="CVAT COCO export")
     ap.add_argument("--images", type=Path, required=True, help="원본 이미지 폴더")
+    # 기본값은 리포 루트(ai/) 기준이다. src에서 실행하면 여기에 --out-dir을 명시하지
+    # 않는 한 src/data/processed로 새므로, 실행 위치를 ai/로 두거나 경로를 명시할 것.
     ap.add_argument("--out-dir", type=Path, default=Path("data/processed"))
     ap.add_argument("--stage", default="staged_images_onboard")
     ap.add_argument("--no-copy", action="store_true", help="이미지 복사 생략(검증만)")

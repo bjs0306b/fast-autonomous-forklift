@@ -1,4 +1,4 @@
-# RTMDet-s 파인튜닝 — 온보드 포크 정렬, box·pallet·hole 3클래스, 해상도 640 (S15P11A304-145)
+# RTMDet-s 파인튜닝 — 온보드 포크 정렬, pallet·hole 2클래스, 해상도 640 (S15P11A304-145)
 #
 # 목적: 지게차 온보드 카메라가 미니어처 파렛트의 **포크 진입 구멍(hole)** 을 찾아 정렬하는 것.
 # 스테이션 -m(측정)과 완전히 별개의 모델이며, 도메인도 KPI도 다르다.
@@ -22,11 +22,26 @@
 #
 # 즉 여기서 "잊어도 되는 능력"을 지키느라 hole을 망치는 것은 손해다.
 #
-# 결정 2. warm-start는 exp7 계보 -s 체크포인트에서 한다.
+# 결정 1-b. box를 뺀다 — pallet·hole 2클래스. (2026-07-30 결정)
 #
-# 2클래스 → 3클래스라 분류 헤드(rtm_cls)의 출력 채널이 바뀐다. mmengine이 shape 불일치
-# 파라미터를 건너뛰므로 **분류 헤드만 재초기화되고 backbone·neck·회귀 헤드는 전이**된다.
-# 초기 몇 epoch는 클래스 점수가 불안정한 것이 정상이며, lr 1e-4가 그 완충 역할을 한다.
+# 원래 box를 amodal pallet의 가림물 학습 보조로 넣으려 했으나, exp8 프리라벨이 이
+# 도메인에서 과검출이었다: 장당 2.4개(기대 1개), 그중 22%가 **흰 파렛트 자체를 box로
+# 오인**. 파렛트를 box로 가르치면 pallet 검출(G2)을 오히려 해친다. 오탐이 파렛트·배경·
+# 중복으로 섞여 단일 필터로 못 거르고, box는 런타임 미사용 보조 클래스라 버리는 편이 낫다.
+# 상세: docs/ai/onboard-finetune-runbook.md §1.
+#
+# 결정 2. warm-start는 exp7 계보 -s 체크포인트에서 하되, 분류 헤드는 **떼어내고** 로드한다.
+#
+# ⚠️ 함정: exp7 -s는 (box, pallet) 2클래스다. 새 모델도 (pallet, hole) 2클래스라
+# rtm_cls 출력 채널이 **똑같다**. 그대로 로드하면 mmengine이 shape이 맞아 건너뛰지 않고
+# **box 가중치를 pallet 자리에, pallet 가중치를 hole 자리에** 조용히 넣는다. 의미가
+# 완전히 어긋난 채 학습이 시작돼 원인 찾기가 어렵다(클래스 수가 달랐다면 자동 스킵됐다).
+#
+# 그래서 체크포인트에서 rtm_cls.* 키를 제거한 사본을 만들어 load_from으로 준다. 서버에서:
+#   python -c "import torch; c=torch.load('best_coco_bbox_mAP_epoch_5.pth', map_location='cpu'); \
+#       sd=c['state_dict']; [sd.pop(k) for k in list(sd) if 'bbox_head.rtm_cls' in k]; \
+#       torch.save(c, 'rtmdet_s_forklift_nocls.pth')"
+# backbone·neck·회귀 헤드는 전이되고 분류 헤드만 랜덤 초기화된다. lr 1e-4가 그 완충이다.
 #
 # 결정 3. val은 구간 단위로 뗀다 — 랜덤 분할 금지.
 #
@@ -42,12 +57,14 @@ _base_ = ['mmdet::rtmdet/rtmdet_s_8xb32-300e_coco.py']
 data_root = 'data/processed/'
 img_prefix = 'staged_images_onboard/'
 
+# box는 데이터에도 0개다(사람이 pallet·hole만 그렸다). classes에서 빼면 mmdet이
+# COCO의 box category(id=1)를 무시하고 pallet·hole만 2클래스로 로드한다.
 metainfo = dict(
-    classes=('box', 'pallet', 'hole'),
-    palette=[(220, 20, 60), (0, 128, 255), (255, 190, 0)],
+    classes=('pallet', 'hole'),
+    palette=[(0, 128, 255), (255, 190, 0)],
 )
 
-model = dict(bbox_head=dict(num_classes=3))
+model = dict(bbox_head=dict(num_classes=2))
 
 # --- 학습 스케줄 ---
 # 291장 × batch16 ≈ 18 iter/epoch로 한 epoch이 매우 짧다. rig(50ep, 17k장)보다 epoch을
@@ -65,8 +82,9 @@ train_batch_size = 16     # GPU1에 팀원 Isaac Sim 상주 → 보수적. lr은
 base_lr = 1e-4            # 고정값. 5e-4는 val 붕괴 전례(실험4).
 num_workers = 8
 
-# exp7 계보 -s 체크포인트에서 이어서 학습 (2026-07-29 서버에서 파일명 확인함).
-load_from = 'work_dirs/rtmdet_s_forklift/best_coco_bbox_mAP_epoch_5.pth'
+# exp7 계보 -s 체크포인트 — 분류 헤드를 제거한 사본(결정 2). strip을 안 하고 원본을
+# 주면 box 가중치가 pallet 자리에 들어간다. strip 명령은 파일 상단 결정 2 주석 참고.
+load_from = 'work_dirs/rtmdet_s_forklift/rtmdet_s_forklift_nocls.pth'
 
 # --- 파이프라인 ---
 # hole은 640 입력에서 세로 약 27px(원본 54px × 0.5)로 작다. RandomResize 하한을 0.1까지
@@ -130,8 +148,10 @@ train_dataloader = dict(
         metainfo=metainfo,
         ann_file='onboard_coco_train.json',
         data_prefix=dict(img=img_prefix),
-        # 네거티브 42장(파렛트·박스 없는 카펫·의자 다리)을 반드시 학습에 남긴다.
-        # 근거: 현역 exp8로 프리라벨을 돌렸을 때 그 42장에서 box를 35개나 잡았다.
+        # 네거티브 30장(파렛트 없는 카펫·의자 다리·신발)을 반드시 학습에 남긴다.
+        # 구간 8(317~358) 중 317·323 버스트는 다른 배경의 파렛트라 라벨됐고, 329~358만
+        # 진짜 네거티브다(docs/ai/onboard-dataset-batches.md). 근거: exp8로 그 배경에
+        # 프리라벨을 돌렸을 때 카펫·의자 다리를 box로 잡았다 — hole 오탐(G3)의 실증.
         # base(coco_detection)의 기본값 filter_empty_gt=True를 덮어써야 한다.
         filter_cfg=dict(filter_empty_gt=False, min_size=8),
         pipeline=train_pipeline,
