@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataset.onboard_bursts import expand, frame_no, group_bursts, segment_of
+from dataset.onboard_bursts import audit, expand, frame_no, group_bursts, segment_of
 
 
 def make_plan(bursts: list[tuple[list[str], bool]]) -> dict:
@@ -114,6 +114,62 @@ def test_구간_경계() -> None:
 
 
 # --- 버스트 묶기 ---
+
+## --- 구간 감사 (box 기대치 대조) ---
+
+def audit_coco(frames: dict[str, list[int]]) -> dict:
+    """{파일명: [category_id, ...]} → COCO (box=1·pallet=2·hole=3)."""
+    images, anns = [], []
+    for i, (name, cats) in enumerate(frames.items(), start=1):
+        images.append({"id": i, "file_name": name, "width": 1280, "height": 800})
+        for cat in cats:
+            anns.append({"id": len(anns) + 1, "image_id": i, "category_id": cat,
+                         "bbox": [1, 2, 30, 8], "area": 240, "iscrowd": 0})
+    return {"images": images, "annotations": anns,
+            "categories": [{"id": 1, "name": "box"}, {"id": 2, "name": "pallet"},
+                           {"id": 3, "name": "hole"}]}
+
+
+def test_기대치_안이면_경고가_없다() -> None:
+    # 구간 1 기대 box 1개/장
+    coco = audit_coco({"o_0001.jpg": [1, 2, 3, 3], "o_0002.jpg": [1, 2, 3, 3]})
+
+    rows, warn = audit(coco)
+
+    assert rows[0]["segment"] == 1
+    assert rows[0]["box_per_img"] == 1.0
+    assert not warn
+
+
+def test_box_과검출을_2배_기준으로_잡는다() -> None:
+    """구간 1 기대 1개 — 장당 3개는 2배 초과."""
+    coco = audit_coco({"o_0001.jpg": [1, 1, 1, 2], "o_0002.jpg": [1, 1, 1, 2]})
+
+    rows, warn = audit(coco)
+
+    assert rows[0]["verdict"] == "과검출 의심"
+    assert any("2배 초과" in w for w in warn)
+
+
+def test_네거티브_구간의_box는_즉시_경고한다() -> None:
+    """구간 8은 프리라벨을 돌리지 않기로 했다 — 있으면 사고다."""
+    coco = audit_coco({"o_0317.jpg": [1], "o_0318.jpg": []})
+
+    rows, warn = audit(coco)
+
+    seg8 = [r for r in rows if r["segment"] == 8][0]
+    assert seg8["verdict"] == "네거티브에 box"
+    assert any("네거티브인데 box" in w for w in warn)
+
+
+def test_구간별로_따로_집계한다() -> None:
+    coco = audit_coco({"o_0001.jpg": [2, 3], "o_0060.jpg": [2, 3, 3]})
+
+    rows, _ = audit(coco)
+
+    assert [r["segment"] for r in rows] == [1, 2]
+    assert rows[0]["hole"] == 1 and rows[1]["hole"] == 2
+
 
 def test_저장_시각_공백으로_버스트를_나눈다(tmp_path) -> None:
     csv_path = tmp_path / "session.csv"

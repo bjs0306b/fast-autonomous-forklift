@@ -23,6 +23,16 @@ DEFAULT_CLASSES = ("box", "pallet")
 _ROBOFLOW_SUFFIX = re.compile(r"^(.*?)_(?:jpg|jpeg|png)\.rf\.[0-9a-f]+\.", re.IGNORECASE)
 
 
+def frame_number(file_name: str) -> int | None:
+    """``shoot.py``가 붙인 촬영 순번(``..._0358.jpg`` → 358).
+
+    구간 매핑·프레임 범위 필터가 전부 이 번호를 기준으로 돌아간다.
+    번호가 없으면 None — 호출부가 '구간 불명'으로 처리한다.
+    """
+    tail = Path(file_name).stem.rsplit("_", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
 def image_identity(file_name: str) -> str:
     """서로 다른 소스에서 온 '같은 원본 사진'을 알아보기 위한 키.
 

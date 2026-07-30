@@ -1,11 +1,5 @@
 [
  {
-  "name": "box",
-  "color": "#c8a165",
-  "type": "rectangle",
-  "attributes": []
- },
- {
   "name": "pallet",
   "color": "#33ddff",
   "type": "rectangle",

@@ -19,20 +19,74 @@ G3의 임계가 낮은 이유는 실측 근거가 있다 — 현역 exp8로 네�
 
 ⚠️ **스테이션 -m(exp8)은 건드리지 않는다.** 온보드 -s만 3클래스다. exp8 계보를 손대면 이미 통과한 치수 KPI(평균 0.66mm)와 편하중 판정을 다시 검증해야 한다.
 
-## 1. 라벨링 (사람)
+## 1. 라벨링 — 클래스별로 담당을 나눈다
 
-**프리라벨을 쓰지 않는다.** 현역 exp8로 358장에 돌려본 결과:
+**사람은 `pallet`·`hole`만 그린다. `box`는 exp8 프리라벨이 채운다.**
 
-| 항목 | 결과 |
+배분 근거는 **승격 게이트**다. G1(hole 재현율)·G2(pallet 재현율)·G3(hole 오탐)이 걸린 클래스에만 사람 손을 쓴다. `box`는 어느 게이트에도 없다 — 온보드에서 box를 소비하는 하류가 없고(§0 참조), 존재 이유는 **amodal `pallet`의 가림물을 가르치는 것**뿐이다.
+
+현역 exp8로 이 358장에 돌려본 실측이 배분의 근거다:
+
+| 항목 | 결과 | 그래서 |
+|---|---|---|
+| pallet 검출률 | **14%** (정면 구간 0%) | **사람이 그린다** |
+| hole | **0개** (모델이 모르는 클래스) | **사람이 그린다** |
+| box | 743개 — 장당 2.4개로 **과검출** | 프리라벨 + 검수 |
+| 네거티브 42장 | box **35개 오탐** | **구간 8엔 안 돌린다** |
+
+exp8은 실물 리그의 **검은 플라스틱 파렛트**로 적응된 모델이고 미니어처는 **흰색 3D 프린트**라 도메인이 다르다.
+
+### 순서를 지킨다 — 사람이 먼저다
+
+**CVAT 태스크에 box를 넣지 않는다.** 자동 박스가 화면에 떠 있는 상태로 pallet을 그리면 "대충 맞겠지" 하고 넘기게 되고, 오탐이 정답으로 굳는다. 병합은 사람이 끝난 **뒤에 코드로** 한다.
+
+```
+CVAT(pallet+hole, 208장) ──┐
+                           ├─ merge_coco ─→ pass1 ─→ audit ─→ expand ─→ split_onboard
+prelabel box (프레임 1~316)─┘
+```
+
+1. 사람이 `pallet`·`hole`을 그린다 (규약은 `onboard-hole-label-guide.md` §3)
+2. 그 export를 **기준(base)으로 잠그고** box 프리라벨을 돌린다
+3. 병합 → 감사 → 펼치기
+
+```bash
+# ② box 프리라벨 — 사람이 그린 208장에만, 네거티브(317~358) 제외
+python -m dataset.prelabel \
+    --images data/processed/cvat_onboard_pass1 \
+    --out data/processed/onboard_box_prelabel.json \
+    --only box --frames 1-316
+
+# ③ 병합 — base가 프레임 집합을 정하고, 충돌 시 사람이 이긴다
+python -m dataset.merge_coco \
+    --base data/labels/onboard_cvat_pallet_hole.json \
+    --add data/processed/onboard_box_prelabel.json \
+    --add-only box \
+    --out data/labels/onboard_cvat_pass1.json
+
+# ④ 감사 — 미리 정한 기준을 실제로 잰다
+python -m dataset.onboard_bursts audit --coco data/labels/onboard_cvat_pass1.json
+```
+
+`merge_coco`는 **category를 id가 아니라 이름으로 맞춘다.** CVAT이 태스크 라벨 순서로 id를 매기므로 pallet+hole만 정의하면 pallet=1이 되는데, 출력은 항상 `box`=1·`pallet`=2·`hole`=3으로 다시 낸다 — config와 어긋나지 않는다.
+
+### box 판정 기준 — 착수 전에 정한다
+
+box는 게이트가 없어서 "감으로 괜찮아 보인다"로 넘어가기 쉽다. 그래서 `audit`이 구간별 기대치와 대조한다.
+
+| 구간 | 기대 box/장 |
 |---|---|
-| pallet 검출률 | **14%** (정면 구간은 0%) |
-| box | 743개 — 장당 2.4개로 **과검출** |
-| hole | **0개** (모델이 모르는 클래스) |
-| 네거티브 42장 | box 35개 **오탐** |
+| 1·4·5 정면·파렛트밖 | 1 |
+| 2 회전 (3~4개 적재) | 3~4 |
+| 3 오버행 | 1~2 |
+| 6·7 배경변형 | 1~2 |
+| 8 네거티브 | **0** |
 
-exp8은 실물 리그의 **검은 플라스틱 파렛트**로 적응된 모델이고 미니어처는 **흰색 3D 프린트**라 도메인이 다르다. 이 상태의 프리라벨은 지우는 비용이 그리는 비용과 비슷하고, 무엇보다 **라벨러를 오염시킨다** — 자동 박스를 보고 "대충 맞겠지" 하고 넘기면 오탐이 정답으로 굳는다.
+> **기대치의 2배를 넘거나 검수가 감당 안 되면 `box`를 버리고 2클래스(pallet·hole)로 학습한다.** box의 목적은 가림물을 가르치는 것뿐이고, 라벨이 부정확하면 그 목적이 사라져 노이즈만 남는다.
 
-→ CVAT에서 **빈 화면부터 사람이 그린다.** 규약은 `onboard-hole-label-guide.md` §3.
+⚠️ 2클래스로 갈 때는 **분류 헤드를 명시적으로 초기화**해야 한다. exp7 -s 체크포인트도 2클래스라 shape이 맞아 **그대로 로드되고, box 가중치가 pallet 자리에·pallet 가중치가 hole 자리에 조용히 들어간다.** 3클래스면 shape 불일치로 mmdet이 시끄럽게 건너뛰므로 이 사고가 안 난다.
+
+부분 라벨링(예: "파렛트에 닿은 박스만")은 **하지 않는다.** 가이드 §3-⑥이 hole에 대해 배척한 것과 같은 이유다 — 사진만 봐선 알 수 없는 판단을 라벨러에게 요구하고, 모델은 "어떤 박스는 박스가 아니다"라는 모순 신호를 배운다. 전부 그리거나 클래스를 빼거나 둘 중 하나다.
 
 ### 358장을 다 그리지는 않는다 — 버스트 61개
 
@@ -54,7 +108,7 @@ python -m dataset.onboard_bursts plan \
 | **그릴 프레임** | **208장 / 358장 (58%)** — 150장 절감 |
 | 그중 구간 8 네거티브 | 7장 (라벨 없음 확인만) |
 
-CVAT 태스크의 라벨은 `ai/configs/cvat_onboard_labels.json`을 그대로 붙여 만든다. **순서가 box → pallet → hole이어야 한다** — CVAT은 정의 순서로 `category_id`를 매기고, 이게 어긋나면 config의 클래스와 뒤섞인다(`expand`·`split_onboard`가 경고한다).
+CVAT 태스크 라벨은 `ai/configs/cvat_onboard_labels.json`을 그대로 붙인다 — **`pallet`·`hole` 두 개뿐이다.** box를 일부러 넣지 않았다(§1: 자동 박스가 보이면 라벨러가 오염된다). 학습용 클래스 순서(`box`=1·`pallet`=2·`hole`=3)는 `merge_coco`가 **이름으로 다시 매핑**하므로 CVAT의 id 순서에 기대지 않는다.
 
 라벨 후 키프레임 라벨을 버스트 전체로 펼친다. 출력은 `split_onboard`가 그대로 받는다 (확인: 291 train / 67 val 재현).
 

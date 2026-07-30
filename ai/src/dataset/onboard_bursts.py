@@ -43,6 +43,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dataset.coco import frame_number  # noqa: E402
+
 CLASSES = ["box", "pallet", "hole"]
 
 # 파렛트가 들어오는 영역 (1280×800 기준). 전신 프레임을 쓰면 배경에서
@@ -61,10 +65,15 @@ SEGMENTS = [
 ]
 
 
-def frame_no(file_name: str) -> int | None:
-    stem = Path(file_name).stem
-    tail = stem.rsplit("_", 1)[-1]
-    return int(tail) if tail.isdigit() else None
+frame_no = frame_number      # 이름 호환 — 구간 로직은 전부 이 번호를 쓴다
+
+# 구간별 box 기대치 (docs/ai/onboard-dataset-batches.md 구간 내용에서 온 값).
+# 프리라벨이 이보다 2배 이상이면 과검출로 보고 box를 버릴지 판단한다 —
+# 착수 전에 정해둔 기준이다(사후에 "좋아졌나" 묻지 않는다).
+BOX_EXPECTED = {
+    1: (1, 1), 2: (3, 4), 3: (1, 2), 4: (1, 1),
+    5: (1, 1), 6: (1, 2), 7: (1, 2), 8: (0, 0),
+}
 
 
 def segment_of(n: int | None) -> int | None:
@@ -286,6 +295,69 @@ def cmd_expand(a) -> int:
     return 0
 
 
+def audit(coco: dict) -> tuple[list[dict], list[str]]:
+    """구간별 클래스 분포를 세고, box 기대치와 대조한다.
+
+    미리 정한 판정 기준을 실제로 재는 자리다 — box는 게이트가 없어서
+    "감으로 괜찮아 보인다"로 넘어가기 쉽다.
+    """
+    cat_name = {c["id"]: c["name"] for c in coco["categories"]}
+    per_img = defaultdict(lambda: defaultdict(int))
+    for x in coco["annotations"]:
+        per_img[x["image_id"]][cat_name.get(x["category_id"], "?")] += 1
+
+    seg_imgs: dict[int, list[int]] = defaultdict(list)
+    for im in coco["images"]:
+        seg = segment_of(frame_number(im["file_name"]))
+        if seg is not None:
+            seg_imgs[seg].append(im["id"])
+
+    rows, warn = [], []
+    for i, (s, e, name) in enumerate(SEGMENTS, 1):
+        ids = seg_imgs.get(i, [])
+        if not ids:
+            continue
+        counts = {c: sum(per_img[j][c] for j in ids) for c in CLASSES}
+        box_per = counts["box"] / len(ids)
+        lo, hi = BOX_EXPECTED[i]
+        verdict = "ok"
+        if hi == 0 and counts["box"]:
+            verdict = "네거티브에 box"
+            warn.append(f"구간 {i}({name}): 네거티브인데 box {counts['box']}개 — "
+                        "프리라벨을 구간 8에 돌렸는지 확인")
+        elif box_per > hi * 2:
+            verdict = "과검출 의심"
+            warn.append(f"구간 {i}({name}): box 장당 {box_per:.2f}개, 기대 {lo}~{hi} — "
+                        "2배 초과. box를 버리고 2클래스로 갈지 판단할 것")
+        rows.append({"segment": i, "name": name, "images": len(ids),
+                     "box": counts["box"], "box_per_img": round(box_per, 2),
+                     "expected": f"{lo}~{hi}", "pallet": counts["pallet"],
+                     "hole": counts["hole"], "verdict": verdict})
+    return rows, warn
+
+
+def cmd_audit(a) -> int:
+    coco = json.loads(a.coco.read_text(encoding="utf-8"))
+    rows, warn = audit(coco)
+
+    print("구간            | 장수 | box | 장당 | 기대  | pallet | hole | 판정")
+    for r in rows:
+        print(f"{r['name']:15s} | {r['images']:4d} | {r['box']:3d} | "
+              f"{r['box_per_img']:4.2f} | {r['expected']:5s} | {r['pallet']:6d} | "
+              f"{r['hole']:4d} | {r['verdict']}")
+
+    # hole은 파렛트가 보이는 구간에서 장당 2~4개가 정상이다(§3-⑥ 최대 4).
+    for r in rows:
+        if r["segment"] != 8 and r["pallet"] and not r["hole"]:
+            print(f"⚠️ 구간 {r['segment']}: pallet은 있는데 hole이 0개다")
+
+    for w in warn:
+        print("⚠️ " + w)
+    if not warn:
+        print("\n기대치 이탈 없음.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="온보드 버스트 라벨 계획·전파")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -305,6 +377,10 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--coco", type=Path, required=True, help="CVAT COCO export")
     e.add_argument("--out", type=Path, default=Path("data/labels/onboard_cvat.json"))
     e.set_defaults(func=cmd_expand)
+
+    d = sub.add_parser("audit", help="구간별 클래스 분포 + box 기대치 대조")
+    d.add_argument("--coco", type=Path, required=True)
+    d.set_defaults(func=cmd_audit)
 
     a = ap.parse_args(argv)
     return a.func(a)
