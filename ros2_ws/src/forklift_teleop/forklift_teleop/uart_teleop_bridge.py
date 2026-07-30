@@ -24,6 +24,8 @@ class UartTeleopBridge(Node):
         self.declare_parameter("max_linear_mps", 0.20)
         self.declare_parameter("max_angular_rps", 0.35)
         self.declare_parameter("linear_deadband_mps", 0.01)
+        self.declare_parameter("wheelbase_m", 0.144)
+        self.declare_parameter("rear_steering_limit_deg", 15.0)
         self.declare_parameter("min_drive_percent", 50)
         self.declare_parameter("max_drive_percent", 60)
         self.declare_parameter("steering_center_cdeg", 10000)
@@ -44,6 +46,12 @@ class UartTeleopBridge(Node):
             max_angular_rps=float(self.get_parameter("max_angular_rps").value),
             linear_deadband_mps=float(
                 self.get_parameter("linear_deadband_mps").value
+            ),
+            wheelbase_m=float(
+                self.get_parameter("wheelbase_m").value
+            ),
+            rear_steering_limit_deg=float(
+                self.get_parameter("rear_steering_limit_deg").value
             ),
             min_drive_percent=int(
                 self.get_parameter("min_drive_percent").value

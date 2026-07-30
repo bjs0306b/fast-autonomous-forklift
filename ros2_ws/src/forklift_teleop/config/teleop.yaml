@@ -8,6 +8,8 @@ uart_teleop_bridge:
     max_linear_mps: 0.20
     max_angular_rps: 0.35
     linear_deadband_mps: 0.01
+    wheelbase_m: 0.144
+    rear_steering_limit_deg: 15.0
     min_drive_percent: 50
     max_drive_percent: 60
     steering_center_cdeg: 10000
