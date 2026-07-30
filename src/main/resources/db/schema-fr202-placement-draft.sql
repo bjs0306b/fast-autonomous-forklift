@@ -97,8 +97,6 @@ CREATE TABLE vehicle_current_status (
     fork_error_code  VARCHAR(50) NULL COMMENT '포크 장치 오류 코드',
     has_cargo        BOOLEAN     NULL COMMENT '화물 적재 여부',
     cargo_id         VARCHAR(50) NULL COMMENT '차량이 운반 중이라고 보고한 화물',
-    footprint_length DOUBLE      NULL COMMENT '현재 차량 점유 영역 길이',
-    footprint_width  DOUBLE      NULL COMMENT '현재 차량 점유 영역 너비',
     received_at      DATETIME(6) NOT NULL COMMENT '최신 상태 메시지 수신 시각',
     CONSTRAINT fk_vehicle_current_status_vehicle
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id)

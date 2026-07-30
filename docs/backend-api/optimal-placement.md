@@ -463,6 +463,7 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | 작업의 측정 근거 | `transport_task.measurement_id`로 사용한 측정 결과를 FK 참조 | 운반 작업에 측정 결과 참조가 없음 | `src/main/resources/db/schema.sql:347-380`, `src/main/resources/mapper/TransportTaskMapper.xml` | domain·mapper·서비스에 측정 참조 추가 |
 | 적재 위치 구조 | `storage_slot` 단일 테이블과 `slot_code` PK | 랙·층·슬롯 계층 및 숫자 슬롯 ID | `src/main/resources/db/schema.sql:311-360` | 목표 스키마와 매핑으로 평탄화 |
 | 차량 식별자 | 차량 관련 FK를 `vehicle_id`로 통일 | 일부 임베디드 테이블은 `forklift_id` 사용 | `src/main/resources/db/schema.sql:211-264`, `src/main/resources/mapper/VehicleCommandMapper.xml` | 도메인·매퍼·연동 필드 통일 |
+| 차량 footprint | 모든 차량의 현실 스케일 고정 규격을 애플리케이션 설정으로 관리 | 차량 상태·이력과 Isaac 상태 메시지에 길이·너비 저장 | `src/main/resources/db/schema.sql:34-50,75-79`, `src/main/java/com/fast/backend/isaac/service/IsaacForkliftStatusService.java:94-151` | 상태 컬럼·메시지 검증 제거 후 설정값 사용 |
 | 임베디드 이력 무결성 | 명령·오류가 `vehicle`을 FK로 참조하고 상태값을 제한 | 차량 FK와 일부 상태 제약이 없음 | `src/main/resources/db/schema.sql:215-264` | 목표 제약과 매핑 반영 |
 | 스테이션 좌표 | 애플리케이션의 단일 고정 pose를 pickup origin으로 사용 | `station_measurement`의 `station_id` 외 고정 pose 설정 없음 | 현재 설정 및 스키마 검색 | 고정 pose 설정 추가 |
 | 높이 handoff | cargo-only `height_cm` 사용 | 문서는 `total_height_cm` 사용 권장 | `docs/ai/station-measurement-handoff.md:21-30,65-79` | 연동 문서 수정 |
@@ -484,6 +485,7 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | 파일 또는 영역 | 필요한 수정 |
 |---|---|
 | `src/main/resources/application.yml` | `storage.placement.height-clearance`를 목표 현실값 `0.25`로 변경 |
+| `src/main/resources/application.yml`, `VehicleProperties.java` | 공통 차량 footprint 길이·너비를 현실 스케일 `m` 설정값으로 추가 |
 | `src/main/java/com/fast/backend/storage/placement/PlacementProperties.java` | 고정 팔레트 상수와 돌출 임계값의 설정·상수 관리 방법 정리 |
 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java` | cargo-only 높이에 팔레트와 여유 높이를 더하고, 안전 gate와 높이·거리·슬롯 코드 정렬 적용 |
 | `src/main/java/com/fast/backend/storage/placement/PlacementRecommendation.java` | 필요 높이, 남는 높이, 거리, 안전 판정과 선정 이유 등 목표 응답 정보 추가 검토 |
@@ -496,9 +498,12 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | `src/main/java/com/fast/backend/station/domain/StationMeasurement.java` | 세션과 안전 분석 결과 보존 필드 추가 검토 |
 | `src/main/resources/mapper/StationMeasurementMapper.xml` | 신규 측정·세션·안전 필드 매핑 추가 |
 | `src/main/resources/db/schema-fr202-placement-draft.sql` | 본 문서의 목표 테이블·키·제약조건과 함께 최종 검토 |
-| `src/main/resources/db/schema.sql` | 초기 스키마 확정 시 목표 초안의 cargo·세션·측정·슬롯·운반 구조 반영 |
+| `src/main/resources/db/schema.sql` | 초기 스키마 확정 시 목표 초안의 cargo·세션·측정·슬롯·운반 구조를 반영하고 차량 상태·이력의 footprint 컬럼 제거 |
 | `src/main/resources/mapper/StorageSlotMapper.xml` 및 관련 domain | 랙·층 조인을 제거하고 `slot_code`, `usable_height`, `fork_height`, pose 기반으로 평탄화 |
 | 차량 명령·오류 domain 및 mapper | `forklift_id`를 `vehicle_id`로 통일하고 차량 FK·상태 제약에 맞춰 매핑 갱신 |
+| 차량 상태·이력 domain, DTO 및 mapper | `footprintLength`, `footprintWidth` 필드와 DB 매핑 제거 |
+| `IsaacForkliftStatusMessage.java`, `IsaacForkliftStatusService.java` | 상태 payload의 footprint 필수 조건과 저장 변환을 제거하고 설정값 사용 |
+| `MqttMessageRouter.java`, 차량 WebSocket 이벤트 | footprint에 의존하는 Isaac 메시지 판별과 상태 응답 필드 제거 |
 | `ai/src/station/tipping.py` | 돌출률에 의한 2% 위험등급 상승을 제거하거나 별도 gate로 분리하여 목표 5% 정책과 일치 |
 | `docs/ai/station-measurement-handoff.md` | cargo-only 높이 계약, 세션 식별자, 독립 overhang/tipping 계약으로 갱신 |
 | `docs/ai/samples/station_measurement_*.json` | 목표 세션·화물·안전 필드를 포함하는 예시로 갱신 |
