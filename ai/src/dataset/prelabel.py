@@ -24,11 +24,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cv2  # noqa: E402
 
-from dataset.coco import DEFAULT_CLASSES  # noqa: E402
+from dataset.coco import DEFAULT_CLASSES, frame_number  # noqa: E402
 from station.config import StationConfig  # noqa: E402
 from station.detector import OnnxDetector  # noqa: E402
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+
+
+def parse_ranges(spec: str) -> list[tuple[int, int]]:
+    """``"1-316"`` 또는 ``"1-100,200-316"`` → [(1,316)] / [(1,100),(200,316)]."""
+    out = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            out.append((int(lo), int(hi)))
+        else:
+            n = int(part)
+            out.append((n, n))
+    return out
+
+
+def in_ranges(n: int | None, ranges: list[tuple[int, int]]) -> bool:
+    return n is not None and any(lo <= n <= hi for lo, hi in ranges)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,11 +58,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--score", type=float, default=0.3,
                         help="프리라벨 임계값 (기본 0.3 — 추론 0.5보다 낮게)")
     parser.add_argument("--model", type=Path, help="ONNX 경로 (기본: config)")
+    parser.add_argument("--only", help="남길 클래스 (쉼표 구분, 예: box). 나머지는 버린다")
+    parser.add_argument("--frames", help="프레임 번호 범위 (예: 1-316). 밖은 추론도 안 한다")
     args = parser.parse_args(argv)
 
+    keep = {c.strip() for c in args.only.split(",")} if args.only else None
+    if keep and not keep <= set(DEFAULT_CLASSES):
+        print(f"--only에 모르는 클래스가 있다: {keep - set(DEFAULT_CLASSES)} "
+              f"(가능: {', '.join(DEFAULT_CLASSES)})", file=sys.stderr)
+        return 1
+    ranges = parse_ranges(args.frames) if args.frames else None
+
     cfg = StationConfig()
-    files = sorted(p for p in args.images.iterdir()
-                   if p.suffix.lower() in IMAGE_SUFFIXES)
+    all_files = sorted(p for p in args.images.iterdir()
+                       if p.suffix.lower() in IMAGE_SUFFIXES)
+    if ranges:
+        files = [p for p in all_files if in_ranges(frame_number(p.name), ranges)]
+        print(f"프레임 범위 {args.frames} → {len(files)}/{len(all_files)}장 "
+              f"({len(all_files) - len(files)}장 제외)")
+    else:
+        files = all_files
+    if keep:
+        print(f"남길 클래스: {', '.join(sorted(keep))}")
     if not files:
         print(f"이미지가 없습니다: {args.images}", file=sys.stderr)
         return 1
@@ -65,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         images.append({"id": i, "file_name": path.name, "width": w, "height": h})
 
         detections = detector.detect(frame)
+        if keep is not None:
+            detections = [d for d in detections if d.label in keep]
         if not detections:
             empty += 1
         for det in detections:
@@ -93,9 +132,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n이미지 {len(images)}장 / 어노테이션 {len(annotations)}개 → {args.out}")
     for name, count in per_class.items():
-        print(f"  {name}: {count}")
+        if keep is None or name in keep:
+            print(f"  {name}: {count}  (장당 {count / len(images):.2f})")
     print(f"  감지 0건인 이미지: {empty}장")
-    if per_class.get("pallet", 0) < len(images) * 0.5:
+    # --only로 파렛트를 걸러낸 경우엔 아래 경고가 의미 없다(애초에 안 쓸 클래스다).
+    if (keep is None or "pallet" in keep) and per_class.get("pallet", 0) < len(images) * 0.5:
         print("\n⚠️ 파렛트 프리라벨이 이미지 수의 절반에 못 미친다 — "
               "파렛트는 사람이 그려 넣어야 한다(예상된 결과).")
     return 0
