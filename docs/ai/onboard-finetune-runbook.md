@@ -38,19 +38,24 @@ exp8은 실물 리그의 **검은 플라스틱 파렛트**로 적응된 모델�
 
 ### 순서를 지킨다 — 사람이 먼저다
 
-**CVAT 태스크에 box를 넣지 않는다.** 자동 박스가 화면에 떠 있는 상태로 pallet을 그리면 "대충 맞겠지" 하고 넘기게 되고, 오탐이 정답으로 굳는다. 병합은 사람이 끝난 **뒤에 코드로** 한다.
+**라벨링 화면에 box를 띄우지 않는다.** 자동 박스가 보이는 상태로 pallet을 그리면 "대충 맞겠지" 하고 넘기게 되고, 오탐이 정답으로 굳는다. 병합은 사람이 끝난 **뒤에 코드로** 한다.
 
 ```
-CVAT(pallet+hole, 208장) ──┐
-                           ├─ merge_coco ─→ pass1 ─→ audit ─→ expand ─→ split_onboard
-prelabel box (프레임 1~316)─┘
+label_onboard (pallet+hole, 208장) ──┐
+                                     ├─ merge_coco ─→ pass1 ─→ audit ─→ expand ─→ split_onboard
+prelabel box (프레임 1~316) ──────────┘
 ```
 
 1. 사람이 `pallet`·`hole`을 그린다 (규약은 `onboard-hole-label-guide.md` §3)
-2. 그 export를 **기준(base)으로 잠그고** box 프리라벨을 돌린다
+2. 그 결과를 **기준(base)으로 잠그고** box 프리라벨을 돌린다
 3. 병합 → 감사 → 펼치기
 
 ```bash
+# ① 사람이 그린다 — 로컬 라벨러. 중단해도 같은 명령으로 이어진다
+python -m dataset.label_onboard \
+    --images data/processed/cvat_onboard_pass1 \
+    --out data/labels/onboard_cvat_pallet_hole.json
+
 # ② box 프리라벨 — 사람이 그린 208장에만, 네거티브(317~358) 제외
 python -m dataset.prelabel \
     --images data/processed/cvat_onboard_pass1 \
@@ -68,7 +73,22 @@ python -m dataset.merge_coco \
 python -m dataset.onboard_bursts audit --coco data/labels/onboard_cvat_pass1.json
 ```
 
-`merge_coco`는 **category를 id가 아니라 이름으로 맞춘다.** CVAT이 태스크 라벨 순서로 id를 매기므로 pallet+hole만 정의하면 pallet=1이 되는데, 출력은 항상 `box`=1·`pallet`=2·`hole`=3으로 다시 낸다 — config와 어긋나지 않는다.
+### 라벨러 조작
+
+| 키 | 동작 |
+|---|---|
+| 드래그 | 현재 클래스로 박스 추가 — **마우스 떼면 바로 확정**(208장 × 최대 5개라 확인키를 두면 손이 두 배) |
+| `1` / `2` | 클래스 전환 — 1=pallet, 2=hole |
+| `U` / `C` | 마지막 박스 취소 / 이 프레임 전부 지우기 |
+| `SPACE`·`ENTER` / `B` | 저장하고 다음 / 이전 |
+| `Z` | **돋보기**(3배) — 개구부가 세로 25px 남짓이라 1:1로는 경계가 안 보인다 |
+| `G` / `S` / `Q` | 프레임 번호로 이동 / 지금 저장 / 저장하고 종료 |
+
+**프레임을 넘길 때마다 저장한다.** 208장은 몇 시간짜리 작업이라 중간에 날리면 안 된다. 진행 상황은 `<out>.progress.json`에 따로 남긴다 — "아직 안 본 프레임"과 "보고 나서 라벨 없다고 판정한 프레임"은 다르고, 네거티브 7장이 후자다. `Q`로 나가면 **현재 프레임은 완료로 표시하지 않으므로** 다음에 거기서 이어진다.
+
+그리는 중에 가이드 §4 검수 규칙을 화면 아래에 띄운다 — pallet 없이 hole만, pallet 밖 hole, 종횡비 1.5:1 미만, 세로 16px 미만, hole 5개 이상. **막지는 않는다**(규약을 어긴 프레임이 정말 예외인지는 사람이 봐야 한다).
+
+`merge_coco`는 **category를 id가 아니라 이름으로 맞춘다.** 라벨러는 `box`=1·`pallet`=2·`hole`=3으로 내지만, CVAT으로 우회할 경우엔 태스크 라벨 순서대로 id가 붙어 pallet=1이 될 수 있다. 어느 쪽이 와도 출력은 config와 맞는 순서로 다시 낸다.
 
 ### box 판정 기준 — 착수 전에 정한다
 
@@ -98,7 +118,7 @@ box는 게이트가 없어서 "감으로 괜찮아 보인다"로 넘어가기 �
 python -m dataset.onboard_bursts plan \
     --images data/raw/onboard/train_20260729/b01_upright \
     --out data/labels/onboard_burst_plan.json \
-    --keyframe-dir data/processed/cvat_onboard_pass1     # CVAT에 이 폴더만 올린다
+    --keyframe-dir data/processed/cvat_onboard_pass1     # 라벨러가 이 폴더를 읽는다
 ```
 
 | | 값 |
@@ -108,7 +128,7 @@ python -m dataset.onboard_bursts plan \
 | **그릴 프레임** | **208장 / 358장 (58%)** — 150장 절감 |
 | 그중 구간 8 네거티브 | 7장 (라벨 없음 확인만) |
 
-CVAT 태스크 라벨은 `ai/configs/cvat_onboard_labels.json`을 그대로 붙인다 — **`pallet`·`hole` 두 개뿐이다.** box를 일부러 넣지 않았다(§1: 자동 박스가 보이면 라벨러가 오염된다). 학습용 클래스 순서(`box`=1·`pallet`=2·`hole`=3)는 `merge_coco`가 **이름으로 다시 매핑**하므로 CVAT의 id 순서에 기대지 않는다.
+`ai/configs/cvat_onboard_labels.json`은 **CVAT으로 우회할 때만** 쓰는 태스크 스키마다(`pallet`·`hole` 두 개뿐 — box는 일부러 넣지 않았다). 로컬 라벨러를 쓰면 필요 없다.
 
 라벨 후 키프레임 라벨을 버스트 전체로 펼친다. 출력은 `split_onboard`가 그대로 받는다 (확인: 291 train / 67 val 재현).
 
