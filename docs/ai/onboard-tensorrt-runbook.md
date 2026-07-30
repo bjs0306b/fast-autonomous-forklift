@@ -46,14 +46,32 @@ RTMDet ONNX는 mmdeploy가 낸 커스텀 op(`TRTBatchedNMS`)를 쓰므로 **플�
 
 ### ① GPU 서버에서 ONNX export
 
+서버 mmdeploy는 **pip 설치라 `tools/deploy.py`가 없다**(소스에만 포함). 젯슨 `~/mmdeploy/tools/`를 노트북 경유로 서버에 올려 쓴다(순수 python, 버전 1.3.1로 일치). deploy config가 `type='tensorrt'`라 export 후 TRT 변환까지 시도하지만 **서버엔 TRT가 없어 그 단계만 실패**한다 — end2end.onnx는 그 전에 생성되므로 정상이다.
+
 ```bash
-# GPU 서버, Device1만 사용
-CUDA_VISIBLE_DEVICES=1 python tools/deploy.py \
+# GPU 서버(rtmdet env), ai/ 에서. Device1만 사용
+CUDA_VISIBLE_DEVICES=1 python mmdeploy_tools/deploy.py \
     configs/deploy/detection_tensorrt_static_onboard.py \
-    <모델 config> <체크포인트 .pth> <샘플 이미지>
+    configs/rtmdet_s_640_onboard_forklift.py \
+    work_dirs/onboard_s_2class/epoch_116.pth \
+    <샘플 이미지> --work-dir work_dirs/onboard_export --device cuda:0
 ```
 
-**onnxruntime용 export를 그대로 쓰지 않는다.** TensorRT deploy config로 다시 뽑는다 — §3에서 07-28본과 07-29본의 md5가 다른 이유다.
+⚠️ **labels dtype 후처리 필수 (2026-07-30 실측 — 68 최대 함정).** mmdeploy export가
+`labels` 출력을 **INT64**로 내면 젯슨 TRT 10.3이 파싱에서 거부한다:
+`Assertion failed: For INT32 tensors, the output type must also be INT32`. 07-29 onnx는
+INT32라 빌드됐고 구조는 완전 동일했다 — 차이는 labels dtype뿐. **INT32로 되돌린 뒤
+젯슨으로 보낸다:**
+
+```bash
+python -m dataset.fix_onnx_labels_int32 \
+    work_dirs/onboard_export/end2end.onnx \
+    work_dirs/onboard_export/end2end_int32.onnx
+```
+
+이 진단은 **기존 성공 onnx로 대조 빌드**해서 얻었다 — 새 onnx가 실패할 때 환경 문제인지
+export 문제인지부터 가른다(기존이 되면 export, 안 되면 환경). onnx 백업은
+`ai/models/onboard_s_2class/end2end_s640_ep116.onnx`(INT32 수정본, 젯슨 재빌드 소스).
 
 ### ② 노트북 경유로 전송
 
@@ -67,29 +85,33 @@ scp end2end.onnx orin:~/trt_test/
 ### ③ 젯슨에서 FP16 엔진 빌드
 
 ```bash
+# 검증된 명령 (2026-07-30 epoch 116 빌드 성공, 9.6분)
 /usr/src/tensorrt/bin/trtexec \
-    --onnx=$HOME/trt_test/end2end_s640_trt.onnx \
-    --saveEngine=$HOME/trt_test/onboard_s640_fp16.engine \
+    --onnx=$HOME/trt_test/onboard_ep116_int32.onnx \
+    --saveEngine=$HOME/trt_test/onboard_s640_ep116_fp16.engine \
     --fp16 \
-    --staticPlugins=$HOME/mmdeploy/build_trt/lib/libmmdeploy_tensorrt_ops.so
+    --staticPlugins=$HOME/mmdeploy/build_trt/lib/libmmdeploy_tensorrt_ops.so \
+    --memPoolSize=workspace:512
 ```
 
-플래그 이름은 보드의 `trtexec --help`로 확인했다(2026-07-30) — `--staticPlugins`·`--memPoolSize`·`--iterations`·`--avgRuns` 모두 존재하고, **구버전의 `--plugins`는 없다**(TRT 10에서 `--staticPlugins`/`--dynamicPlugins`로 갈렸다).
+플래그 이름은 보드의 `trtexec --help`로 확인했다 — `--staticPlugins`·`--memPoolSize`·`--iterations`·`--avgRuns` 모두 존재하고, **구버전의 `--plugins`는 없다**(TRT 10에서 `--staticPlugins`/`--dynamicPlugins`로 갈렸다). 위 명령으로 23MB 엔진이 나왔다.
 
-⚠️ 다만 **07-29에 실제로 쓴 명령은 복원하지 못했다** — `~/trt_test`에 로그가 없고 `~/.bash_history`도 비어 있다. 위 명령은 TensorRT 10.3 기준으로 재구성한 것이니, 처음 돌릴 때 결과를 이 문서에 확정해 둘 것.
+**메모리를 확인하고 시작한다.** 7.4Gi를 CPU와 공유하고 팀원 노드가 상시 5GB 가까이 쓴다(2026-07-30 조회 시 가용 2.1Gi). `--memPoolSize=workspace:512`면 그 여유에서도 빌드된다(1024는 `NvMapMemAllocInternalTagged: error 12`=ENOMEM으로 실패). `free -h`로 먼저 보고, 남의 프로세스를 밀어내지 않게 workspace를 줄인다.
 
-**메모리를 확인하고 시작한다.** 7.4Gi를 CPU와 공유하고 팀원 ROS2 노드가 상시 4GB 가까이 쓴다(2026-07-30 조회 시 가용 1.9Gi). 빌드는 워크스페이스를 크게 잡으므로 여유가 없으면 실패하거나 다른 사람 프로세스를 밀어낸다. `free -h`와 `who`로 먼저 보고, 필요하면 `--memPoolSize=workspace:1024`로 제한한다.
+⚠️ **엔진은 이식되지 않는다** — TRT 버전·GPU 아키텍처에 묶인다. 노트북엔 재빌드 소스(INT32 onnx)만 백업하고, 엔진은 젯슨에서만 빌드·사용한다.
 
 ### ④ 엔진 검증
 
 ```bash
 /usr/src/tensorrt/bin/trtexec \
-    --loadEngine=$HOME/trt_test/onboard_s640_fp16.engine \
+    --loadEngine=$HOME/trt_test/onboard_s640_ep116_fp16.engine \
     --staticPlugins=$HOME/mmdeploy/build_trt/lib/libmmdeploy_tensorrt_ops.so \
-    --iterations=200 --avgRuns=100
+    --iterations=200 --avgRuns=100 --warmUp=500
 ```
 
-## 5. 지연 실측 — 재측정으로 확정할 것
+**epoch 116 실측 (2026-07-30, G4)**: GPU Compute **10.18ms** (mean=median, p99 10.22ms) · Host Latency 10.50ms · 97.8fps. 측정 조건 = MAXN_SUPER · **팀원 5GB 점유 경합 중** · 전처리 미포함. 예산 100ms의 1/10이라 **G4 통과**. 경합 상태의 값이라 한가할 때 재면 같거나 빨라진다.
+
+## 5. 지연 실측 — 벤치 최적값과 운용값
 
 CLAUDE.md와 `onboard-finetune-runbook.md` G4에 **RTMDet-s @640 FP16 9.28ms / 107fps**로 적혀 있다. 그런데 **이 숫자의 측정 조건이 어디에도 없다** — 리포지토리에도, 젯슨에도 로그가 없다(`~/trt_test` 로그 없음, `~/.bash_history` 비어 있음).
 
