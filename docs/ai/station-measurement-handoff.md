@@ -146,7 +146,31 @@ python src/station/serve.py --once --out sample.json          # 라이브
 python src/station/serve.py --once --image <사진> --distance 200   # 사진으로
 ```
 
-## 미정 — 전달 방식
+## 전달 방식 — MQTT 발행 (2026-07-30 구현)
 
-지금은 stdout/파일 출력까지가 범위다. MQTT/HTTP 전송은 통신 규격 확정 후 붙인다
-(S15P11A304-91). 백엔드가 GPU서버로 통합됐으므로(2026-07-28) 그 경로에 맞춘다.
+측정 JSON을 백엔드 브로커로 발행한다. **백엔드는 받는 쪽이 이미 완성**돼 있다 —
+`fast/station/+/measurement` 구독 → `StationMeasurementService` → DB(`station_measurement`)
+→ WebSocket(`/topic/stations/measurements`). 비어 있던 **발행 측**을 `station/publisher.py`로
+채웠다.
+
+```bash
+# 브로커는 환경변수로만 (실제 IP·인증정보 하드코딩 금지)
+MQTT_HOST=<브로커> MQTT_PORT=1883 [MQTT_USERNAME=… MQTT_PASSWORD=…] \
+    python src/station/serve.py --once --publish
+```
+
+- 토픽 `fast/station/{station_id}/measurement`, **QoS 1 · retained false**
+  (`communication-protocol.md` §2 인바운드 규약, `dummy-real-f01-location-publisher.py`와 동일).
+- `--publish` 없이 실행하면 종전대로 stdout/파일까지만.
+
+### ⚠️ 남은 확인 (팀)
+
+1. **브로커 접속값**: 백엔드가 GPU서버로 이전(2026-07-28)됐으므로 그 배포처의
+   `MQTT_HOST`·포트·인증(평문/TLS)을 스테이션 PC 환경에 주입해야 한다. 젯슨 온보드
+   브리지가 `~/mqtt-certs/ca.crt`를 쓰므로 TLS일 가능성 — 백엔드 팀 확인 필요.
+2. **DTO 규격 정합**: 현재 백엔드 `StationMeasurementMessage`에는 `tipping`·
+   `dimensions.total_height_cm`·`box_measurements`가 **없다**(구버전). 발행 측은 규격(위
+   v1.0+)대로 전량 쏘고, **미지원 필드는 백엔드가 무시**하므로 발행은 깨지지 않는다.
+   전복·총높이를 DB/화면에 쓰려면 백엔드 DTO·스키마 확장이 필요(백엔드 담당).
+3. 실제 브로커 왕복 테스트는 접속값 확보 후. 지금은 토픽·페이로드 순수 로직만 단위
+   테스트(`tests/test_publisher.py`).

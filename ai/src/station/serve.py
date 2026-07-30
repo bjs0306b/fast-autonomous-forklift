@@ -89,6 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--distance", type=float, help="TF-Nova 대신 고정 거리(cm) 사용")
     parser.add_argument("--out", type=Path, help="결과 JSON 저장 경로")
     parser.add_argument("--save-frame", type=Path, help="캡처 프레임 저장 경로 (디버그)")
+    parser.add_argument("--publish", action="store_true",
+                        help="측정 JSON을 백엔드 MQTT 브로커로 발행 "
+                             "(브로커는 MQTT_HOST 등 환경변수)")
     args = parser.parse_args(argv)
 
     if args.probe:
@@ -140,6 +143,17 @@ def main(argv: list[str] | None = None) -> int:
     print(text)
     if args.out:
         args.out.write_text(text, encoding="utf-8")
+
+    if args.publish:
+        # status != ok는 적재 판단에 못 쓰지만(핸드오프 규격), 발행은 한다 —
+        # 백엔드가 재측정 요청 등에 쓸 수 있고, 필드는 status와 무관하게 항상 존재한다.
+        from station.publisher import publish_once
+        ok = publish_once(payload)
+        print(f"[publish] {'성공' if ok else '실패'} "
+              f"topic=fast/station/{payload.get('station_id')}/measurement",
+              file=sys.stderr)
+        if not ok:
+            return 1
     return 0
 
 
