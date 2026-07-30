@@ -1,8 +1,11 @@
 #include "task_comm.h"
+#include "task_imu.h"
 #include "task_motor.h"
+#include "task_telemetry.h"
 #include "stepper_motor.h"
 #include "config.h"
 
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -107,6 +110,19 @@ void app_main(void)
     ESP_ERROR_CHECK(motor_task_start());
     ESP_ERROR_CHECK(comm_task_start());
 
+    /*
+     * The sensor uplink is best-effort: a missing USB host or a missing gyro
+     * must never keep the drive and fork from running. Start the uplink before
+     * homing so its log output already goes through the USB driver, and start
+     * the IMU afterwards so bias is measured with the fork at rest.
+     */
+    esp_err_t telemetry_result = telemetry_task_start();
+
+    if (telemetry_result != ESP_OK) {
+        ESP_LOGE(TAG, "Telemetry uplink unavailable: %s",
+                 esp_err_to_name(telemetry_result));
+    }
+
 #if STEPPER_MOTOR_STARTUP_HOME_ENABLED
     for (int seconds = 10; seconds > 0; --seconds) {
         ESP_LOGW(TAG,
@@ -131,6 +147,17 @@ void app_main(void)
         STEPPER_MOTOR_STARTUP_TEST_RATE_SPS,
         STEPPER_MOTOR_DEFAULT_ACCEL_SPS2));
 #endif
+
+    if (telemetry_result == ESP_OK) {
+        esp_err_t imu_result = imu_task_start();
+
+        if (imu_result != ESP_OK) {
+            ESP_LOGE(TAG, "IMU unavailable, continuing without gyro: %s",
+                     esp_err_to_name(imu_result));
+        }
+    } else {
+        ESP_LOGW(TAG, "Skipping IMU start; it has nowhere to publish");
+    }
 
     ESP_LOGI(TAG, "All tasks created successfully");
 }

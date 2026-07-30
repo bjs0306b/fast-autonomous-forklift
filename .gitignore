@@ -75,3 +75,5 @@ infra/mqtt/data/*
 !infra/mqtt/data/.gitkeep
 infra/mqtt/log/*
 !infra/mqtt/log/.gitkeep
+firmware/esp32/motor_controller/4�@W@8
+firmware/esp32/motor_controller/4�@W@8

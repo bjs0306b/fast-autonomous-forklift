@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "frame_codec.h"
 #include "task_motor.h"
 
 #include "driver/uart.h"
@@ -19,26 +20,6 @@
 #include "esp_log.h"
 
 static const char *TAG = "COMM_TASK";
-
-static uint16_t crc16_ccitt_false(
-    const uint8_t *data,
-    size_t length
-)
-{
-    uint16_t crc = 0xFFFFU;
-
-    for (size_t index = 0; index < length; index++) {
-        crc ^= (uint16_t)data[index] << 8;
-
-        for (uint8_t bit = 0; bit < 8; bit++) {
-            crc = (crc & 0x8000U) != 0U
-                ? (uint16_t)((crc << 1) ^ 0x1021U)
-                : (uint16_t)(crc << 1);
-        }
-    }
-
-    return crc;
-}
 
 static bool is_decimal_digits(const char *text)
 {
@@ -176,24 +157,14 @@ static void send_ack(uint32_t sequence)
         return;
     }
 
-    uint16_t crc = crc16_ccitt_false(
-        (const uint8_t *)body,
-        (size_t)body_length
-    );
     char frame[56];
-    int frame_length = snprintf(
-        frame,
-        sizeof(frame),
-        "@%s*%04X\n",
-        body,
-        crc
-    );
+    size_t frame_length = frame_codec_wrap(body, frame, sizeof(frame));
 
-    if (frame_length > 0 && (size_t)frame_length < sizeof(frame)) {
+    if (frame_length > 0U) {
         uart_write_bytes(
             JETSON_UART_PORT,
             frame,
-            (size_t)frame_length
+            frame_length
         );
     }
 }

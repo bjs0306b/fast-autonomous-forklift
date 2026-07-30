@@ -1,0 +1,8 @@
+ros2 launch slam_toolbox online_async_launch.py slam_params_file:=/home/orin/ros2_ws/mapper_params_online_async.yaml use_sim_time:=false
+
+ros2 launch nav2_bringup bringup_launch.py \
+  map:=/home/orin/ros2_ws/maps/sim_warehouse.yaml \
+  params_file:=/home/orin/ros2_ws/nav2_params.yaml \
+  use_sim_time:=false
+
+  ros2 topic pub -1 /initialpose geometry_msgs/msg/PoseWithCovarianceStamped "{header: {frame_id: 'map'}, pose: {pose: {position: {x: 0.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"

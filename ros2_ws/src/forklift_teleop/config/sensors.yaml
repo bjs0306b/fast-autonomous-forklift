@@ -1,0 +1,15 @@
+imu_bridge:
+  ros__parameters:
+    # Native USB CDC of the ESP32-S3. Confirm with `ls /dev/ttyACM*`.
+    serial_port: /dev/ttyACM0
+    baud_rate: 115200
+    imu_topic: /imu/data
+    imu_frame_id: imu_link
+    # Frames arrive at 100Hz; read faster so lines are not batched up.
+    read_rate_hz: 200.0
+    # Set to -1 if a counter-clockwise turn reports a negative rate (REP-103).
+    gyro_z_sign: 1
+    # Measured standstill noise, rad/s. Never 0: that makes the EKF discard the
+    # laser odometry entirely.
+    yaw_rate_stddev: 0.02
+    status_log_period_sec: 10.0

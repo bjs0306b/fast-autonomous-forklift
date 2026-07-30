@@ -4,7 +4,7 @@
 
 | 패키지 | 역할 |
 |---|---|
-| `forklift_teleop` | `/cmd_vel`(`geometry_msgs/Twist`)을 ESP32 UART 명령으로 변환 |
+| `forklift_teleop` | `/cmd_vel`(`geometry_msgs/Twist`)을 ESP32 UART 명령으로 변환하고, ESP32 USB 텔레메트리를 `/imu/data`로 발행 |
 | `fast_mqtt_bridge` | ROS2 상태·위치·경로와 백엔드 MQTT 명령/결과 연결 |
 
 빌드:
@@ -21,6 +21,7 @@ source install/setup.bash
 ```bash
 ros2 launch fast_mqtt_bridge mqtt_bridge.launch.py
 ros2 launch forklift_teleop teleop_uart.launch.py
+ros2 launch forklift_teleop sensor_usb.launch.py
 ```
 
 `fast_mqtt_bridge`의 상세 설정, MQTT 토픽, 미연결 ROS2 adapter 범위는

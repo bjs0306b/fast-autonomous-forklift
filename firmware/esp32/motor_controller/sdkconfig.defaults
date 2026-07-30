@@ -1,0 +1,9 @@
+# Geekble nano ESP32-S3 (Arduino Nano ESP32 footprint)
+CONFIG_IDF_TARGET="esp32s3"
+
+# The board exposes only the native USB connector, so the console must live on
+# USB Serial/JTAG; UART0 (GPIO43/44) has no bridge chip to reach. The telemetry
+# task installs the USB Serial/JTAG driver and routes console output through it,
+# which keeps log lines from ever landing inside a telemetry frame.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
