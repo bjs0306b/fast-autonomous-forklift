@@ -17,9 +17,12 @@
 static const char *TAG = "MOTOR_TASK";
 
 static QueueHandle_t s_motor_command_queue = NULL;
+static volatile bool s_drive_idle = true;
 
 static esp_err_t motor_apply_safe_stop(void)
 {
+    s_drive_idle = true;
+
     esp_err_t stop_result = dc_motor_stop();
     esp_err_t center_result =
         servo_set_angle(DRIVE_REAR_STEER_CENTER_ANGLE_DEG);
@@ -39,6 +42,9 @@ static esp_err_t motor_apply_command(
     if (command == NULL || applied_command == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+
+    /* Published before the motor actually spins, so idle never lags motion */
+    s_drive_idle = command->drive_percent == 0;
 
     if (command->drive_percent == 0) {
         if (applied_command->drive_percent != 0) {
@@ -182,6 +188,11 @@ static void motor_task(void *argument)
     }
 
     vTaskDelete(NULL);
+}
+
+bool motor_task_drive_is_idle(void)
+{
+    return s_drive_idle;
 }
 
 esp_err_t motor_task_submit_command(const motor_command_t *command)

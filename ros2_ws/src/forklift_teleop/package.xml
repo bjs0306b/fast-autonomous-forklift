@@ -3,11 +3,13 @@
 <package format="3">
   <name>forklift_teleop</name>
   <version>0.1.0</version>
-  <description>ROS2 cmd_vel to ESP32 UART bridge for rear-steered forklift tele-operation.</description>
+  <description>ROS2 cmd_vel to ESP32 UART bridge for rear-steered forklift tele-operation, plus the ESP32 USB sensor telemetry bridge.</description>
   <maintainer email="dev@fast.local">FAST Team</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
