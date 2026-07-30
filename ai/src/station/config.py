@@ -2,9 +2,9 @@
 
 캘리브레이션 값의 출처는 전지웅의 실측 문서다:
 
-- ``docs/ai/FR-103-2a-camera-calibration.md`` — Logitech BRIO 100, 1920×1080,
+- ``docs/ai/measurement/camera-calibration.md`` — Logitech BRIO 100, 1920×1080,
   체커보드 실측. fx/fy/cx/cy. 검증: 60cm 마우스패드 높이 98.24% 정확도.
-- ``docs/ai/FR-103-3-height-estimation-formula.md`` — 치수 산출 공식.
+- ``docs/ai/measurement/height-estimation-formula.md`` — 치수 산출 공식.
 
 ⚠️ 카메라 해상도·화각·디지털 줌이 바뀌면 재캘리브레이션해야 한다 (문서 명시).
 그래서 상수를 코드에 흩뿌리지 않고 여기 한곳에 둔다.

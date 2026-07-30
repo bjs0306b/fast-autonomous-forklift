@@ -1,6 +1,6 @@
 """치수 산출 — 전지웅의 FR-103-3 공식 구현.
 
-출처: ``docs/ai/FR-103-3-height-estimation-formula.md`` (실측 검증 98.24%).
+출처: ``docs/ai/measurement/height-estimation-formula.md`` (실측 검증 98.24%).
 
     치수(cm) = 픽셀 길이(px) × 거리(cm) / 초점거리(px)
 
