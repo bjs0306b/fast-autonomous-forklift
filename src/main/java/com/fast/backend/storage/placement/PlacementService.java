@@ -2,8 +2,6 @@ package com.fast.backend.storage.placement;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
-import com.fast.backend.storage.domain.Cargo;
-import com.fast.backend.storage.domain.CargoOrientation;
 import com.fast.backend.storage.domain.StorageSlotStatus;
 
 import java.util.ArrayList;
@@ -11,138 +9,96 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * 화물 크기 기반 Best Fit 적재 위치 추천(prompt46.md 6·7장). Spring에 의존하지 않는 순수 로직 클래스라
- * 단위 테스트에서 {@code new PlacementService(new PlacementProperties(0.05))}로 바로 검증할 수 있고,
- * 실제 실행 시에는 {@link PlacementConfig}가 빈으로 등록한다.
+ * 적재 위치 추천 — FR-202 최종 스키마(prompt85)에 맞춰 <b>높이 적합성 + 거리</b>로만 판정한다.
  *
- * <p><b>적재 가능 판정은 volume이 아니라 가로·세로·높이를 각각 비교</b>한다(4장). 화물은 두 방향
- * ({@link CargoOrientation#NORMAL}, {@link CargoOrientation#ROTATED_90})으로 놓을 수 있고, 높이 조건은
- * 두 방향 공통으로 {@code cargo.height + heightClearance <= slot.height}다.
+ * <p><b>⚠ 알고리즘이 축소됐다. 반드시 읽을 것.</b>
+ * 옛 구현은 화물 폭·길이와 슬롯 폭·길이를 비교해 정방향/90도 회전 중 들어가는 방향을 고르고
+ * (Best Fit) 남는 부피가 가장 적은 슬롯을 선택했다. 최종 스키마에는 <b>화물 치수도 슬롯 평면 치수도
+ * 없다</b>({@code cargo} 는 식별자만, {@code storage_slot} 은 {@code usable_height} 만).
+ * 그래서 이 구현은 다음을 <b>보장하지 못한다</b>.
+ * <ul>
+ *   <li>화물이 슬롯 평면에 실제로 들어가는지 — <b>폭·길이가 슬롯보다 커도 추천된다</b></li>
+ *   <li>적재 방향(정방향/회전) 판정</li>
+ *   <li>공간 낭비 최소화(Best Fit)</li>
+ * </ul>
+ * 즉 <b>물리적으로 들어가지 않는 슬롯을 추천할 수 있다.</b> 평면 적합성이 필요하면 화물 폭·길이와
+ * 슬롯 폭·길이를 다시 저장해야 한다(스키마 축소의 대가이며, 코드로 메울 수 있는 문제가 아니다).
  *
- * <p><b>한 슬롯에서 두 방향이 모두 가능하면 남는 평면 공간(widthRemaining+lengthRemaining)이 더 작은
- * 방향</b>을 고른다(6장). 슬롯 간 우선순위는 7장 순서를 그대로 따른다:
+ * <p>현재 판정 규칙
  * <ol>
- *   <li>실제로 들어가는 슬롯만(필터)</li>
- *   <li>wastedVolume이 가장 작은 슬롯</li>
- *   <li>widthRemaining+lengthRemaining+heightRemaining이 가장 작은 슬롯</li>
- *   <li>levelNumber가 낮은 슬롯</li>
- *   <li>pickup이 있으면 pickup↔destination 거리가 가까운 슬롯</li>
- *   <li>그래도 같으면 slotCode 오름차순</li>
+ *   <li>{@code status == EMPTY} 인 후보만 본다</li>
+ *   <li>{@code cargoHeight + heightClearance <= usableHeight} 를 만족해야 한다</li>
+ *   <li>남는 후보 중 pickup 지점에서 가까운 순 → 여유 높이가 작은 순(딱 맞는 칸 우선) → slotCode 순</li>
  * </ol>
- *
- * <p><b>heightRemaining 정의</b>: {@code slot.height - cargo.height}(화물 위 물리적 잔여 높이). heightClearance는
- * "적재 가능 여부"를 판단하는 여유 마진으로만 쓰고 잔여 높이 계산에서 빼지 않는다. wastedVolume은 7장 공식대로
- * {@code slot부피 - cargo부피}이며 clearance를 포함하지 않는다.
- *
- * <p>추천 가능한 슬롯이 없으면 {@link ErrorCode#NO_AVAILABLE_STORAGE_SLOT}을 던진다.
  */
 public class PlacementService {
 
     private final double heightClearance;
 
     public PlacementService(PlacementProperties placementProperties) {
-        this.heightClearance = placementProperties.heightClearance();
+        this.heightClearance = placementProperties == null ? 0.0 : placementProperties.heightClearance();
     }
 
     /**
-     * @param cargo     적재할 화물(크기)
-     * @param candidates 후보 슬롯(영속 계층이 조인해 만든 읽기 모델). EMPTY가 아닌 슬롯은 내부에서 제외한다.
-     * @param pickupX   팔레트 pickup X(m). null이면 거리 우선순위는 생략된다.
-     * @param pickupY   팔레트 pickup Y(m)
-     * @return Best Fit 추천 슬롯
-     * @throws BusinessException 적재 가능한 슬롯이 없으면 NO_AVAILABLE_STORAGE_SLOT
+     * @param cargoHeight 측정된 화물 높이(m). {@code station_measurement.cargo_height} 에서 온다.
+     *                    값이 없으면 적합성을 판단할 수 없어 예외를 던진다 — 추측하지 않는다.
+     * @param candidates  후보 슬롯
+     * @param pickupX     픽업 X(m). null 이면 거리 우선순위를 생략한다.
+     * @param pickupY     픽업 Y(m)
      */
     public PlacementRecommendation recommend(
-            Cargo cargo, List<PlacementCandidate> candidates, Double pickupX, Double pickupY) {
-        if (cargo == null) {
-            throw new BusinessException(ErrorCode.CARGO_DIMENSION_INVALID, "cargo는 필수입니다.");
+            Double cargoHeight, List<PlacementCandidate> candidates, Double pickupX, Double pickupY) {
+        if (cargoHeight == null || cargoHeight <= 0 || !Double.isFinite(cargoHeight)) {
+            throw new BusinessException(ErrorCode.CARGO_DIMENSION_INVALID,
+                    "측정된 화물 높이가 없어 적재 위치를 추천할 수 없습니다.");
         }
+
         List<PlacementRecommendation> feasible = new ArrayList<>();
         if (candidates != null) {
             for (PlacementCandidate candidate : candidates) {
                 if (candidate == null || candidate.status() != StorageSlotStatus.EMPTY) {
-                    continue; // EMPTY만 추천 대상(BLOCKED/OCCUPIED/RESERVED 제외)
+                    continue; // EMPTY 만 추천 대상(BLOCKED/OCCUPIED/RESERVED 제외)
                 }
-                PlacementRecommendation evaluated = evaluate(cargo, candidate, pickupX, pickupY);
-                if (evaluated != null) {
-                    feasible.add(evaluated);
+                if (cargoHeight + heightClearance > candidate.usableHeight()) {
+                    continue;
                 }
+                feasible.add(new PlacementRecommendation(
+                        candidate.slotCode(),
+                        candidate.destinationX(),
+                        candidate.destinationY(),
+                        candidate.destinationHeading(),
+                        candidate.forkHeight(),
+                        candidate.usableHeight() - cargoHeight,
+                        distance(pickupX, pickupY, candidate.destinationX(), candidate.destinationY())));
             }
         }
 
         return feasible.stream()
                 .min(recommendationComparator())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NO_AVAILABLE_STORAGE_SLOT,
-                        "화물이 들어갈 수 있는 빈 슬롯이 없습니다: cargoId=" + cargo.getCargoId()));
+                        "화물 높이가 들어갈 수 있는 빈 슬롯이 없습니다: cargoHeight=" + cargoHeight));
     }
 
-    /** 한 후보 슬롯에 대해 방향을 판정·선택하고 잔여 공간을 계산한다. 들어가지 않으면 null. */
-    private PlacementRecommendation evaluate(
-            Cargo cargo, PlacementCandidate slot, Double pickupX, Double pickupY) {
-        boolean heightFits = cargo.getHeight() + heightClearance <= slot.slotHeight();
-        if (!heightFits) {
-            return null;
-        }
-        boolean normalFits = cargo.getWidth() <= slot.slotWidth() && cargo.getLength() <= slot.slotLength();
-        boolean rotatedFits = cargo.getLength() <= slot.slotWidth() && cargo.getWidth() <= slot.slotLength();
-        if (!normalFits && !rotatedFits) {
-            return null;
-        }
-
-        CargoOrientation orientation;
-        double widthRemaining;
-        double lengthRemaining;
-        if (normalFits && rotatedFits) {
-            double normalRemaining = (slot.slotWidth() - cargo.getWidth()) + (slot.slotLength() - cargo.getLength());
-            double rotatedRemaining = (slot.slotWidth() - cargo.getLength()) + (slot.slotLength() - cargo.getWidth());
-            if (rotatedRemaining < normalRemaining) {
-                orientation = CargoOrientation.ROTATED_90;
-                widthRemaining = slot.slotWidth() - cargo.getLength();
-                lengthRemaining = slot.slotLength() - cargo.getWidth();
-            } else {
-                orientation = CargoOrientation.NORMAL;
-                widthRemaining = slot.slotWidth() - cargo.getWidth();
-                lengthRemaining = slot.slotLength() - cargo.getLength();
-            }
-        } else if (normalFits) {
-            orientation = CargoOrientation.NORMAL;
-            widthRemaining = slot.slotWidth() - cargo.getWidth();
-            lengthRemaining = slot.slotLength() - cargo.getLength();
-        } else {
-            orientation = CargoOrientation.ROTATED_90;
-            widthRemaining = slot.slotWidth() - cargo.getLength();
-            lengthRemaining = slot.slotLength() - cargo.getWidth();
-        }
-
-        double heightRemaining = slot.slotHeight() - cargo.getHeight();
-        double wastedVolume = slot.slotWidth() * slot.slotLength() * slot.slotHeight()
-                - cargo.getWidth() * cargo.getLength() * cargo.getHeight();
-        Double distance = distance(pickupX, pickupY, slot.destinationX(), slot.destinationY());
-
-        return new PlacementRecommendation(
-                slot.slotId(), slot.slotCode(), slot.rackCode(), slot.levelNumber(), orientation,
-                slot.destinationX(), slot.destinationY(), slot.destinationHeading(), slot.forkHeight(),
-                widthRemaining, lengthRemaining, heightRemaining, wastedVolume, distance);
-    }
-
+    /**
+     * 거리 → 여유 높이 → slotCode 순.
+     *
+     * <p>거리를 못 구한 후보(좌표 없음)는 뒤로 보낸다 — 거리 정보가 있는 후보를 우선한다.
+     * 마지막에 slotCode 를 넣는 이유는 결과가 실행마다 달라지지 않게 하려는 것이다(동점 처리).
+     */
     private Comparator<PlacementRecommendation> recommendationComparator() {
         return Comparator
-                .comparingDouble(PlacementRecommendation::wastedVolume)
-                .thenComparingDouble(r -> r.widthRemaining() + r.lengthRemaining() + r.heightRemaining())
-                .thenComparingInt(PlacementRecommendation::levelNumber)
-                .thenComparing(PlacementRecommendation::distance,
+                .comparing(PlacementRecommendation::distance,
                         Comparator.nullsLast(Comparator.naturalOrder()))
-                .thenComparing(PlacementRecommendation::slotCode,
-                        Comparator.nullsLast(Comparator.naturalOrder()));
+                .thenComparingDouble(PlacementRecommendation::heightRemaining)
+                .thenComparing(PlacementRecommendation::slotCode);
     }
 
-    /** pickup·destination 좌표가 모두 있으면 유클리드 거리, 하나라도 없으면 null(거리 조건 생략). */
-    private Double distance(Double pickupX, Double pickupY, Double destinationX, Double destinationY) {
-        if (pickupX == null || pickupY == null || destinationX == null || destinationY == null) {
+    private Double distance(Double fromX, Double fromY, Double toX, Double toY) {
+        if (fromX == null || fromY == null || toX == null || toY == null) {
             return null;
         }
-        double dx = pickupX - destinationX;
-        double dy = pickupY - destinationY;
+        double dx = toX - fromX;
+        double dy = toY - fromY;
         return Math.sqrt(dx * dx + dy * dy);
     }
 }

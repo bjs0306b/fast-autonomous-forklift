@@ -122,7 +122,6 @@ class VehicleCurrentStatusMapperTest {
         s.setBattery(battery);
         s.setMessageAt(messageAt);
         s.setReceivedAt(LocalDateTime.now());
-        s.setUpdatedAt(LocalDateTime.now());
         return s;
     }
 }

@@ -1,35 +1,34 @@
 package com.fast.backend.transport.domain;
 
-import com.fast.backend.storage.domain.CargoOrientation;
-
 import java.time.LocalDateTime;
 
 /**
- * 운반 작업(prompt46.md 9장). 팔레트를 pickup 위치에서 추천 슬롯(destination)까지 옮기는 한 건의 작업.
+ * {@code transport_task} 한 행 — FR-202 최종 스키마(prompt85).
  *
- * <p>생성 시점 값: {@code vehicleId=null}, {@code status=PENDING}. 차량은 배정(수동/자동) 단계에서
- * 채워지고 상태가 {@link TaskStatus#ASSIGNED}로 바뀐다.
- *
- * <p><b>단위</b>: source/destination 좌표는 m, heading은 degree, {@code forkHeight}는 m.
- *
- * <p>{@code cargoId}/{@code palletId}/{@code destinationSlotId}는 각각 연관 화물·팔레트·슬롯을 가리킨다.
+ * <p>옛 구조에서 달라진 점
+ * <ul>
+ *   <li>{@code palletId} 제거 — 파렛트 테이블이 사라졌다. 픽업 좌표는 요청이 직접 준다</li>
+ *   <li>{@code measurementId} 추가(NOT NULL FK) — 어떤 측정 결과로 배치를 판단했는지 남긴다</li>
+ *   <li>{@code destinationSlotId}(BIGINT) → {@code destinationSlotCode}(VARCHAR) — 슬롯 PK 가 코드로 바뀜</li>
+ *   <li>{@code cargoOrientation} 제거 — 평면 치수가 없어 방향을 판정할 수 없다</li>
+ *   <li>{@code updatedAt} 제거</li>
+ * </ul>
  */
 public class TransportTask {
 
     private Long id;
     private String taskCode;
     private String cargoId;
-    private String palletId;
+    private String measurementId;
     private String vehicleId;
     private Double sourceX;
     private Double sourceY;
     private Double sourceHeading;
-    private Long destinationSlotId;
+    private String destinationSlotCode;
     private Double destinationX;
     private Double destinationY;
     private Double destinationHeading;
     private Double forkHeight;
-    private CargoOrientation cargoOrientation;
     private TaskStatus status;
     private LocalDateTime assignedAt;
     private LocalDateTime startedAt;
@@ -37,10 +36,6 @@ public class TransportTask {
     private LocalDateTime completedAt;
     private LocalDateTime failedAt;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-
-    public TransportTask() {
-    }
 
     public Long getId() {
         return id;
@@ -66,12 +61,12 @@ public class TransportTask {
         this.cargoId = cargoId;
     }
 
-    public String getPalletId() {
-        return palletId;
+    public String getMeasurementId() {
+        return measurementId;
     }
 
-    public void setPalletId(String palletId) {
-        this.palletId = palletId;
+    public void setMeasurementId(String measurementId) {
+        this.measurementId = measurementId;
     }
 
     public String getVehicleId() {
@@ -106,12 +101,12 @@ public class TransportTask {
         this.sourceHeading = sourceHeading;
     }
 
-    public Long getDestinationSlotId() {
-        return destinationSlotId;
+    public String getDestinationSlotCode() {
+        return destinationSlotCode;
     }
 
-    public void setDestinationSlotId(Long destinationSlotId) {
-        this.destinationSlotId = destinationSlotId;
+    public void setDestinationSlotCode(String destinationSlotCode) {
+        this.destinationSlotCode = destinationSlotCode;
     }
 
     public Double getDestinationX() {
@@ -144,14 +139,6 @@ public class TransportTask {
 
     public void setForkHeight(Double forkHeight) {
         this.forkHeight = forkHeight;
-    }
-
-    public CargoOrientation getCargoOrientation() {
-        return cargoOrientation;
-    }
-
-    public void setCargoOrientation(CargoOrientation cargoOrientation) {
-        this.cargoOrientation = cargoOrientation;
     }
 
     public TaskStatus getStatus() {
@@ -210,11 +197,4 @@ public class TransportTask {
         this.createdAt = createdAt;
     }
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 }

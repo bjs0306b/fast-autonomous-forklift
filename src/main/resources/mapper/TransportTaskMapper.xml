@@ -1,22 +1,26 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+    FR-202 최종 스키마(prompt85). pallet_id / cargo_orientation / updated_at 이 없고
+    destination_slot_code(VARCHAR) 와 measurement_id(NOT NULL) 가 있다.
+    배정·상태 전이는 조건부 UPDATE 로 경쟁을 DB 에서 판정한다.
+-->
 <mapper namespace="com.fast.backend.transport.mapper.TransportTaskMapper">
 
     <resultMap id="transportTaskResultMap" type="com.fast.backend.transport.domain.TransportTask">
         <id property="id" column="id"/>
         <result property="taskCode" column="task_code"/>
         <result property="cargoId" column="cargo_id"/>
-        <result property="palletId" column="pallet_id"/>
+        <result property="measurementId" column="measurement_id"/>
         <result property="vehicleId" column="vehicle_id"/>
         <result property="sourceX" column="source_x"/>
         <result property="sourceY" column="source_y"/>
         <result property="sourceHeading" column="source_heading"/>
-        <result property="destinationSlotId" column="destination_slot_id"/>
+        <result property="destinationSlotCode" column="destination_slot_code"/>
         <result property="destinationX" column="destination_x"/>
         <result property="destinationY" column="destination_y"/>
         <result property="destinationHeading" column="destination_heading"/>
         <result property="forkHeight" column="fork_height"/>
-        <result property="cargoOrientation" column="cargo_orientation"/>
         <result property="status" column="status"/>
         <result property="assignedAt" column="assigned_at"/>
         <result property="startedAt" column="started_at"/>
@@ -24,31 +28,35 @@
         <result property="completedAt" column="completed_at"/>
         <result property="failedAt" column="failed_at"/>
         <result property="createdAt" column="created_at"/>
-        <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
     <sql id="allColumns">
-        id, task_code, cargo_id, pallet_id, vehicle_id, source_x, source_y, source_heading,
-        destination_slot_id, destination_x, destination_y, destination_heading, fork_height,
-        cargo_orientation, status, assigned_at, started_at, picked_up_at, completed_at, failed_at,
-        created_at, updated_at
+        id, task_code, cargo_id, measurement_id, vehicle_id,
+        source_x, source_y, source_heading,
+        destination_slot_code, destination_x, destination_y, destination_heading,
+        fork_height, status, assigned_at, started_at, picked_up_at, completed_at, failed_at, created_at
     </sql>
 
-    <!-- 활성 작업 상태(prompt47.md 9·14장): 배정~적재 진행 중. 종료 상태(COMPLETED/FAILED/CANCELLED) 제외. -->
+    <!-- 차량이 잡혀 진행 중인 상태. 완료/실패/취소와 미배정(PENDING)은 제외한다. -->
     <sql id="activeStatuses">
         ('ASSIGNED', 'MOVING_TO_PICKUP', 'PICKING_UP', 'TRANSPORTING', 'PLACING')
     </sql>
 
+    <!-- 아직 종결되지 않은 상태(미배정 포함). -->
+    <sql id="openStatuses">
+        ('PENDING', 'ASSIGNED', 'MOVING_TO_PICKUP', 'PICKING_UP', 'TRANSPORTING', 'PLACING')
+    </sql>
+
     <insert id="insert" parameterType="com.fast.backend.transport.domain.TransportTask"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
-        INSERT INTO transport_task (task_code, cargo_id, pallet_id, vehicle_id, source_x, source_y, source_heading,
-                                    destination_slot_id, destination_x, destination_y, destination_heading,
-                                    fork_height, cargo_orientation, status, assigned_at, started_at, picked_up_at,
-                                    completed_at, failed_at, created_at, updated_at)
-        VALUES (#{taskCode}, #{cargoId}, #{palletId}, #{vehicleId}, #{sourceX}, #{sourceY}, #{sourceHeading},
-                #{destinationSlotId}, #{destinationX}, #{destinationY}, #{destinationHeading},
-                #{forkHeight}, #{cargoOrientation}, #{status}, #{assignedAt}, #{startedAt}, #{pickedUpAt},
-                #{completedAt}, #{failedAt}, #{createdAt}, #{updatedAt})
+        INSERT INTO transport_task
+            (task_code, cargo_id, measurement_id, vehicle_id, source_x, source_y, source_heading,
+             destination_slot_code, destination_x, destination_y, destination_heading,
+             fork_height, status, created_at)
+        VALUES
+            (#{taskCode}, #{cargoId}, #{measurementId}, #{vehicleId}, #{sourceX}, #{sourceY}, #{sourceHeading},
+             #{destinationSlotCode}, #{destinationX}, #{destinationY}, #{destinationHeading},
+             #{forkHeight}, #{status}, #{createdAt})
     </insert>
 
     <select id="findById" resultMap="transportTaskResultMap">
@@ -65,23 +73,9 @@
         <where>
             <if test="status != null">AND status = #{status}</if>
             <if test="vehicleId != null">AND vehicle_id = #{vehicleId}</if>
-            <if test="palletId != null">AND pallet_id = #{palletId}</if>
         </where>
         ORDER BY created_at DESC, id DESC
-        LIMIT #{limit} OFFSET #{offset}
-    </select>
-
-    <!--
-        차량별 currentTask 계산용 일괄 조회(prompt56.md 9·10장). vehicle_id 그룹의 첫 행이 곧 현재 작업이
-        되도록 정렬해 두어, Service가 Java 메모리에서 그룹의 첫 행만 집으면 된다(추가 쿼리·추가 정렬 없음).
-        activeStatuses(ASSIGNED~PLACING)를 재사용하므로 종료 상태는 자연히 제외된다.
-    -->
-    <select id="findActiveTasksWithVehicle" resultMap="transportTaskResultMap">
-        SELECT <include refid="allColumns"/>
-        FROM transport_task
-        WHERE vehicle_id IS NOT NULL
-          AND status IN <include refid="activeStatuses"/>
-        ORDER BY vehicle_id, updated_at DESC, id DESC
+        LIMIT #{size} OFFSET #{offset}
     </select>
 
     <select id="countAll" resultType="long">
@@ -90,16 +84,22 @@
         <where>
             <if test="status != null">AND status = #{status}</if>
             <if test="vehicleId != null">AND vehicle_id = #{vehicleId}</if>
-            <if test="palletId != null">AND pallet_id = #{palletId}</if>
         </where>
+    </select>
+
+    <select id="findActiveTasksWithVehicle" resultMap="transportTaskResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM transport_task
+        WHERE vehicle_id IS NOT NULL
+          AND status IN <include refid="activeStatuses"/>
+        ORDER BY created_at
     </select>
 
     <update id="updateAssignment">
         UPDATE transport_task
         SET vehicle_id = #{vehicleId},
             status = 'ASSIGNED',
-            assigned_at = #{assignedAt},
-            updated_at = #{updatedAt}
+            assigned_at = #{assignedAt}
         WHERE task_code = #{taskCode}
           AND status = 'PENDING'
           AND vehicle_id IS NULL
@@ -107,12 +107,11 @@
 
     <update id="updateStatus">
         UPDATE transport_task
-        SET status = #{status},
-            <if test="startedAt != null">started_at = #{startedAt},</if>
-            <if test="pickedUpAt != null">picked_up_at = #{pickedUpAt},</if>
-            <if test="completedAt != null">completed_at = #{completedAt},</if>
-            <if test="failedAt != null">failed_at = #{failedAt},</if>
-            updated_at = #{updatedAt}
+        SET status = #{status}
+            <if test="startedAt != null">, started_at = #{startedAt}</if>
+            <if test="pickedUpAt != null">, picked_up_at = #{pickedUpAt}</if>
+            <if test="completedAt != null">, completed_at = #{completedAt}</if>
+            <if test="failedAt != null">, failed_at = #{failedAt}</if>
         WHERE task_code = #{taskCode}
     </update>
 
@@ -121,24 +120,14 @@
         WHERE vehicle_id = #{vehicleId} AND status IN <include refid="activeStatuses"/>
     </select>
 
-    <select id="existsActiveTaskByPalletId" resultType="boolean">
+    <select id="existsOpenTaskByCargoId" resultType="boolean">
         SELECT COUNT(*) > 0 FROM transport_task
-        WHERE pallet_id = #{palletId} AND status IN <include refid="activeStatuses"/>
+        WHERE cargo_id = #{cargoId} AND status IN <include refid="openStatuses"/>
     </select>
 
-    <!--
-        생성 시 Pallet 중복 방지(prompt47.md 8·14장)는 PENDING까지 포함해야 한다 — 아직 배정되지 않은
-        Task가 이미 있는 팔레트로 또 Task를 만들면 안 되기 때문. 종료 상태만 제외하는 "미종료" 기준.
-    -->
-    <select id="existsOpenTaskByPalletId" resultType="boolean">
+    <select id="existsActiveTaskBySlotCode" resultType="boolean">
         SELECT COUNT(*) > 0 FROM transport_task
-        WHERE pallet_id = #{palletId}
-          AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
-    </select>
-
-    <select id="existsActiveTaskBySlotId" resultType="boolean">
-        SELECT COUNT(*) > 0 FROM transport_task
-        WHERE destination_slot_id = #{slotId} AND status IN <include refid="activeStatuses"/>
+        WHERE destination_slot_code = #{slotCode} AND status IN <include refid="activeStatuses"/>
     </select>
 
 </mapper>

@@ -83,6 +83,20 @@ class VehicleRegistrationRollbackIntegrationTest {
                 }
 
                 @Override
+                public int updateLocation(String vehicleId, Double positionX, Double positionY,
+                        Double heading, java.time.LocalDateTime messageAt,
+                        java.time.LocalDateTime receivedAt) {
+                    // 이 테스트는 차량 등록 롤백만 본다 — 위치 갱신 경로는 호출되지 않는다.
+                    throw new UnsupportedOperationException("not used in this test");
+                }
+
+                @Override
+                public int updateForkStatus(String vehicleId, String forkState, String forkErrorCode,
+                        java.time.LocalDateTime receivedAt) {
+                    throw new UnsupportedOperationException("not used in this test");
+                }
+
+                @Override
                 public List<VehicleStatusCountRow> countByStatusForActiveVehicles() {
                     return List.of();
                 }

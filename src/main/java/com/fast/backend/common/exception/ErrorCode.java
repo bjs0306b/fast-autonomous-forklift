@@ -47,18 +47,17 @@ public enum ErrorCode {
     STATION_MEASUREMENT_LOAD_BALANCE_INVALID(HttpStatus.BAD_REQUEST, "load_balance 값이 올바르지 않습니다."),
     STATION_MEASUREMENT_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 저장된 measurement_id입니다."),
     STATION_MEASUREMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 측정 결과입니다."),
+    STATION_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 측정 세션입니다."),
+    STATION_SESSION_NOT_ACTIVE(HttpStatus.CONFLICT, "활성화된 측정 세션이 없습니다."),
+    STATION_ALREADY_OCCUPIED(HttpStatus.CONFLICT, "측정 설비가 이미 다른 세션에 점유되어 있습니다."),
 
     // 화물 크기 기반 적재 위치 추천 및 운반 작업 디스패치(prompt46.md). 기존 공통 예외 구조(BusinessException +
     // ErrorCode)를 그대로 쓰고, 도메인별 예외 클래스를 새로 만들지 않는다(이 프로젝트의 기존 관례).
     CARGO_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 화물입니다."),
     CARGO_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 등록된 cargoId입니다."),
-    CARGO_DIMENSION_INVALID(HttpStatus.BAD_REQUEST, "화물 width/length/height는 0보다 커야 합니다."),
-    PALLET_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 팔레트입니다."),
-    PALLET_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 등록된 palletId입니다."),
-    PALLET_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "이미 다른 작업에 배정된 팔레트입니다."),
-    PALLET_CARGO_MISMATCH(HttpStatus.BAD_REQUEST, "팔레트에 연결된 화물과 요청 화물이 일치하지 않습니다."),
+    CARGO_DIMENSION_INVALID(HttpStatus.BAD_REQUEST, "측정된 화물 높이가 없거나 올바르지 않습니다."),
+    CARGO_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "이미 진행 중인 작업이 있는 화물입니다."),
     TASK_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "이미 배정된(또는 PENDING이 아닌) 작업입니다."),
-    RACK_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 선반입니다."),
     STORAGE_SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 슬롯입니다."),
     NO_AVAILABLE_STORAGE_SLOT(HttpStatus.CONFLICT, "화물이 들어갈 수 있는 빈 슬롯이 없습니다."),
     STORAGE_SLOT_ALREADY_RESERVED(HttpStatus.CONFLICT, "이미 예약된 슬롯입니다."),

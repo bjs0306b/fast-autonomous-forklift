@@ -35,13 +35,15 @@ public class TransportCommandResultService {
     private static final Set<String> FAIL_VALUES = Set.of("FAIL", "FAILED", "ERROR");
 
     private final TransportCommandMapper transportCommandMapper;
+    private final com.fast.backend.transport.mapper.TransportTaskMapper transportTaskMapper;
     private final TransportTaskService transportTaskService;
     private final TransportTaskBroadcaster broadcaster;
 
     public TransportCommandResultService(
             TransportCommandMapper transportCommandMapper, TransportTaskService transportTaskService,
-            TransportTaskBroadcaster broadcaster) {
+            TransportTaskBroadcaster broadcaster, com.fast.backend.transport.mapper.TransportTaskMapper transportTaskMapper) {
         this.transportCommandMapper = transportCommandMapper;
+        this.transportTaskMapper = transportTaskMapper;
         this.transportTaskService = transportTaskService;
         this.broadcaster = broadcaster;
     }
@@ -78,26 +80,36 @@ public class TransportCommandResultService {
         LocalDateTime now = LocalDateTime.now();
 
         if (SUCCESS_VALUES.contains(result)) {
-            int updated = transportCommandMapper.markSucceeded(message.commandId(), completedAt, now);
+            int updated = transportCommandMapper.markSucceeded(message.commandId(), completedAt);
             if (updated != 1) {
                 log.info("Transport SUCCESS result is a duplicate/no-op: commandId={}", message.commandId());
                 return;
             }
-            transportTaskService.driveToCompleted(command.getTaskCode());
-            broadcaster.broadcastAfterCommit("TASK_COMPLETED", command.getTaskCode(), "COMPLETED",
+            transportTaskService.driveToCompleted(taskCodeOf(command));
+            broadcaster.broadcastAfterCommit("TASK_COMPLETED", taskCodeOf(command), "COMPLETED",
                     command.getVehicleId());
         } else if (FAIL_VALUES.contains(result)) {
-            int updated = transportCommandMapper.markFailed(message.commandId(), message.message(), completedAt, now);
+            int updated = transportCommandMapper.markFailed(message.commandId(), message.message(), completedAt);
             if (updated != 1) {
                 log.info("Transport FAIL result is a duplicate/no-op: commandId={}", message.commandId());
                 return;
             }
-            transportTaskService.driveToFailed(command.getTaskCode());
-            broadcaster.broadcastAfterCommit("TASK_FAILED", command.getTaskCode(), "FAILED",
+            transportTaskService.driveToFailed(taskCodeOf(command));
+            broadcaster.broadcastAfterCommit("TASK_FAILED", taskCodeOf(command), "FAILED",
                     command.getVehicleId());
         } else {
             log.warn("Transport command result skipped, unknown result value: commandId={}, result={}",
                     message.commandId(), message.result());
         }
+    }
+
+    /**
+     * FR-202 스키마에서 {@code transport_command.task_code} 컬럼이 사라졌다(prompt85).
+     * 명령이 가진 {@code taskId} 로 작업을 찾아 코드를 얻는다.
+     */
+    private String taskCodeOf(com.fast.backend.transport.domain.TransportCommand command) {
+        return transportTaskMapper.findById(command.getTaskId())
+                .map(com.fast.backend.transport.domain.TransportTask::getTaskCode)
+                .orElse(null);
     }
 }

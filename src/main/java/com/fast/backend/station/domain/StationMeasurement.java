@@ -3,67 +3,35 @@ package com.fast.backend.station.domain;
 import java.time.LocalDateTime;
 
 /**
- * {@code station_measurement} 테이블 한 행(prompt16.md 6·7단계). 측정 스테이션 측정 결과의 부모 레코드로,
- * detection boxes는 {@link StationMeasurementBox}(1:N)로 분리 저장하고 pallet은 이 부모의 단일 컬럼
- * 세트로 보존한다(정책 8번 "pallet 의미 별도 유지").
+ * {@code station_measurement} 한 행 — FR-202 세션 기반 구조(prompt85).
  *
- * <p><b>measured_at 오프셋 보존</b>: DB가 MySQL/H2 공용(DATETIME 중심)이라 오프셋을 직접 담을 수 없어,
- * UTC 변환 시각({@code measuredAtUtc})과 오프셋 분({@code measuredAtOffsetMinutes})을 분리 저장한다
- * (prompt16.md 6단계 권장안). 응답 시 두 값으로 원래 {@code OffsetDateTime}을 손실 없이 복원한다.
+ * <p>옛 구조(31컬럼: station_id/measured_at/bbox/miniature/eccentric/ratio ...)에서 8컬럼으로 줄었다.
+ * 측정 원본 상세값은 더 이상 보관하지 않는다 — 저장하는 것은 <b>배치 판단에 필요한 결과</b>뿐이다.
+ * 상세값이 필요하면 WebSocket 브로드캐스트로 흐르는 원본 메시지를 쓰거나, 별도 요구사항으로 다뤄야 한다.
+ *
+ * <p>{@code sequenceNo}는 <b>수신 순서</b>이지 센서 측정 시각이 아니다. 활성 세션의 최신 행은
+ * {@code (session_id, sequence_no DESC)} 로 고른다.
  */
 public class StationMeasurement {
 
-    private Long id;
+    private Long sequenceNo;
     private String measurementId;
-    private String stationId;
-    private String schemaVersion;
-    private LocalDateTime measuredAtUtc;
-    private Integer measuredAtOffsetMinutes;
+    private String sessionId;
     private StationMeasurementStatus status;
-
-    private Integer boxCount;
-
-    // pallet (단일 세트, nullable)
-    private Integer palletBboxX;
-    private Integer palletBboxY;
-    private Integer palletBboxWidth;
-    private Integer palletBboxHeight;
-    private Double palletScore;
-
-    // distance
-    private Double frontCm;
-    private Double distanceStdCm;
-    private Integer framesUsed;
-
-    // dimensions (status != ok이면 전부 null)
-    private Double heightCm;
-    private Double widthCm;
-    private Double depthCm;
-    private Integer miniatureScale;
-    private Double miniatureHeightMm;
-    private Double miniatureWidthMm;
-
-    // load_balance (status != ok이면 전부 null)
-    private Boolean eccentric;
-    private String loadDirection;
-    private Double ratioX;
-    private Double ratioY;
-    private Double magnitude;
-    private Double threshold;
-    private String loadMessage;
-
-    private LocalDateTime receivedAt;
+    /** 팔레트를 제외한 화물 높이(cm). 측정 실패 시 null. */
+    private Double cargoHeight;
+    /** 전복 위험 등급(SAFE/WARNING/DANGER). 스테이션이 판정해 보내기 전까지는 null. */
+    private String tippingLevel;
+    /** 팔레트 기준 화물 돌출 비율. 판정 전이면 null. */
+    private Double overhangRatio;
     private LocalDateTime createdAt;
 
-    public StationMeasurement() {
+    public Long getSequenceNo() {
+        return sequenceNo;
     }
 
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
+    public void setSequenceNo(Long sequenceNo) {
+        this.sequenceNo = sequenceNo;
     }
 
     public String getMeasurementId() {
@@ -74,36 +42,12 @@ public class StationMeasurement {
         this.measurementId = measurementId;
     }
 
-    public String getStationId() {
-        return stationId;
+    public String getSessionId() {
+        return sessionId;
     }
 
-    public void setStationId(String stationId) {
-        this.stationId = stationId;
-    }
-
-    public String getSchemaVersion() {
-        return schemaVersion;
-    }
-
-    public void setSchemaVersion(String schemaVersion) {
-        this.schemaVersion = schemaVersion;
-    }
-
-    public LocalDateTime getMeasuredAtUtc() {
-        return measuredAtUtc;
-    }
-
-    public void setMeasuredAtUtc(LocalDateTime measuredAtUtc) {
-        this.measuredAtUtc = measuredAtUtc;
-    }
-
-    public Integer getMeasuredAtOffsetMinutes() {
-        return measuredAtOffsetMinutes;
-    }
-
-    public void setMeasuredAtOffsetMinutes(Integer measuredAtOffsetMinutes) {
-        this.measuredAtOffsetMinutes = measuredAtOffsetMinutes;
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
     }
 
     public StationMeasurementStatus getStatus() {
@@ -114,188 +58,28 @@ public class StationMeasurement {
         this.status = status;
     }
 
-    public Integer getBoxCount() {
-        return boxCount;
+    public Double getCargoHeight() {
+        return cargoHeight;
     }
 
-    public void setBoxCount(Integer boxCount) {
-        this.boxCount = boxCount;
+    public void setCargoHeight(Double cargoHeight) {
+        this.cargoHeight = cargoHeight;
     }
 
-    public Integer getPalletBboxX() {
-        return palletBboxX;
+    public String getTippingLevel() {
+        return tippingLevel;
     }
 
-    public void setPalletBboxX(Integer palletBboxX) {
-        this.palletBboxX = palletBboxX;
+    public void setTippingLevel(String tippingLevel) {
+        this.tippingLevel = tippingLevel;
     }
 
-    public Integer getPalletBboxY() {
-        return palletBboxY;
+    public Double getOverhangRatio() {
+        return overhangRatio;
     }
 
-    public void setPalletBboxY(Integer palletBboxY) {
-        this.palletBboxY = palletBboxY;
-    }
-
-    public Integer getPalletBboxWidth() {
-        return palletBboxWidth;
-    }
-
-    public void setPalletBboxWidth(Integer palletBboxWidth) {
-        this.palletBboxWidth = palletBboxWidth;
-    }
-
-    public Integer getPalletBboxHeight() {
-        return palletBboxHeight;
-    }
-
-    public void setPalletBboxHeight(Integer palletBboxHeight) {
-        this.palletBboxHeight = palletBboxHeight;
-    }
-
-    public Double getPalletScore() {
-        return palletScore;
-    }
-
-    public void setPalletScore(Double palletScore) {
-        this.palletScore = palletScore;
-    }
-
-    public Double getFrontCm() {
-        return frontCm;
-    }
-
-    public void setFrontCm(Double frontCm) {
-        this.frontCm = frontCm;
-    }
-
-    public Double getDistanceStdCm() {
-        return distanceStdCm;
-    }
-
-    public void setDistanceStdCm(Double distanceStdCm) {
-        this.distanceStdCm = distanceStdCm;
-    }
-
-    public Integer getFramesUsed() {
-        return framesUsed;
-    }
-
-    public void setFramesUsed(Integer framesUsed) {
-        this.framesUsed = framesUsed;
-    }
-
-    public Double getHeightCm() {
-        return heightCm;
-    }
-
-    public void setHeightCm(Double heightCm) {
-        this.heightCm = heightCm;
-    }
-
-    public Double getWidthCm() {
-        return widthCm;
-    }
-
-    public void setWidthCm(Double widthCm) {
-        this.widthCm = widthCm;
-    }
-
-    public Double getDepthCm() {
-        return depthCm;
-    }
-
-    public void setDepthCm(Double depthCm) {
-        this.depthCm = depthCm;
-    }
-
-    public Integer getMiniatureScale() {
-        return miniatureScale;
-    }
-
-    public void setMiniatureScale(Integer miniatureScale) {
-        this.miniatureScale = miniatureScale;
-    }
-
-    public Double getMiniatureHeightMm() {
-        return miniatureHeightMm;
-    }
-
-    public void setMiniatureHeightMm(Double miniatureHeightMm) {
-        this.miniatureHeightMm = miniatureHeightMm;
-    }
-
-    public Double getMiniatureWidthMm() {
-        return miniatureWidthMm;
-    }
-
-    public void setMiniatureWidthMm(Double miniatureWidthMm) {
-        this.miniatureWidthMm = miniatureWidthMm;
-    }
-
-    public Boolean getEccentric() {
-        return eccentric;
-    }
-
-    public void setEccentric(Boolean eccentric) {
-        this.eccentric = eccentric;
-    }
-
-    public String getLoadDirection() {
-        return loadDirection;
-    }
-
-    public void setLoadDirection(String loadDirection) {
-        this.loadDirection = loadDirection;
-    }
-
-    public Double getRatioX() {
-        return ratioX;
-    }
-
-    public void setRatioX(Double ratioX) {
-        this.ratioX = ratioX;
-    }
-
-    public Double getRatioY() {
-        return ratioY;
-    }
-
-    public void setRatioY(Double ratioY) {
-        this.ratioY = ratioY;
-    }
-
-    public Double getMagnitude() {
-        return magnitude;
-    }
-
-    public void setMagnitude(Double magnitude) {
-        this.magnitude = magnitude;
-    }
-
-    public Double getThreshold() {
-        return threshold;
-    }
-
-    public void setThreshold(Double threshold) {
-        this.threshold = threshold;
-    }
-
-    public String getLoadMessage() {
-        return loadMessage;
-    }
-
-    public void setLoadMessage(String loadMessage) {
-        this.loadMessage = loadMessage;
-    }
-
-    public LocalDateTime getReceivedAt() {
-        return receivedAt;
-    }
-
-    public void setReceivedAt(LocalDateTime receivedAt) {
-        this.receivedAt = receivedAt;
+    public void setOverhangRatio(Double overhangRatio) {
+        this.overhangRatio = overhangRatio;
     }
 
     public LocalDateTime getCreatedAt() {

@@ -29,6 +29,10 @@ public class VehicleCurrentStatus {
     private Double speed;
     /** Isaac 확장: 포크 높이(m). ROS2 상태 메시지에는 없다. */
     private Double forkHeight;
+    /** 실물 포크 동작 상태(구 vehicle_fork_current_status.fork_state 흡수, FR-202 스키마). */
+    private String forkState;
+    /** 실물 포크 장치 오류 코드(구 vehicle_fork_current_status.error_code 흡수). */
+    private String forkErrorCode;
     /** Isaac 확장: 화물 적재 여부. */
     private Boolean hasCargo;
     /** Isaac 확장: 적재된 화물 식별자. */
@@ -37,11 +41,23 @@ public class VehicleCurrentStatus {
     private Double footprintLength;
     /** Isaac 확장: 차량 footprint 폭(m). */
     private Double footprintWidth;
-    /** 송신 측(ROS2/Isaac Sim, 또는 테스트 API 호출자)이 명시한 메시지 생성 시각. */
+    /**
+     * 송신 측(ROS2/Isaac Sim)이 명시한 메시지 생성 시각.
+     *
+     * <p>FR-202 축소 때 뺐다가 되살렸다(prompt86 A안) — 위치 메시지의 stale/중복 판정 기준이다.
+     * DB 컬럼이 {@code DATETIME} 이라 오프셋을 담지 못하므로 값은 <b>Asia/Seoul 벽시계</b>다
+     * ({@link com.fast.backend.common.time.CommunicationTime} 정책). 절대시각 비교가 필요하면
+     * 반드시 그 존을 명시해 {@code Instant} 로 바꾼 뒤 비교한다.
+     */
     private LocalDateTime messageAt;
-    /** Spring Boot가 이 상태를 실제로 수신·반영한 시각. */
+    /**
+     * Spring Boot가 이 상태를 실제로 수신·반영한 시각.
+     *
+     * <p>FR-202 스키마에서 {@code message_at}/{@code updated_at} 컬럼이 사라져 이 값 하나만 남는다.
+     * 송신 측이 명시한 메시지 시각은 더 이상 DB에 남기지 않으며, "오래된 메시지 무시" 판정은
+     * {@link com.fast.backend.vehicle.location.LatestVehicleLocationProvider}(인메모리)가 담당한다.
+     */
     private LocalDateTime receivedAt;
-    private LocalDateTime updatedAt;
 
     public VehicleCurrentStatus() {
     }
@@ -102,6 +118,22 @@ public class VehicleCurrentStatus {
         this.speed = speed;
     }
 
+    public String getForkState() {
+        return forkState;
+    }
+
+    public void setForkState(String forkState) {
+        this.forkState = forkState;
+    }
+
+    public String getForkErrorCode() {
+        return forkErrorCode;
+    }
+
+    public void setForkErrorCode(String forkErrorCode) {
+        this.forkErrorCode = forkErrorCode;
+    }
+
     public Double getForkHeight() {
         return forkHeight;
     }
@@ -158,11 +190,4 @@ public class VehicleCurrentStatus {
         this.receivedAt = receivedAt;
     }
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 }

@@ -3,40 +3,23 @@ package com.fast.backend.transport.domain;
 import java.time.LocalDateTime;
 
 /**
- * 차량에 발행한 MQTT 운반 명령(prompt48.md 3·6장). {@link TransportTask}(업무 단위)와 분리된 명령 단위로,
- * command_id로 차량이 회신하는 command-result를 역추적한다. 하나의 Task에 여러 command가 연결될 수 있다.
+ * {@code transport_command} 한 행 — FR-202 최종 스키마(prompt85).
  *
- * <p>{@code stage}는 ROS2가 단계별 결과를 줄 때만 채워지며 현재 규격이 미확정이라 nullable이다.
- * {@code payload}는 발행한 MQTT JSON 원문(감사·재발행 참고용).
+ * <p>7컬럼으로 줄었다. 제거된 것: 대리키 {@code id}(이제 {@code commandId} 가 PK),
+ * {@code taskCode}(taskId 로 조인), {@code commandType}·{@code stage}·{@code payload}(발행 내용은
+ * DB 에 남기지 않는다), {@code publishedAt}·{@code acknowledgedAt}(중간 시각 미보관), {@code updatedAt}.
+ *
+ * <p>발행 시각·ACK 시각이 사라져 "얼마나 걸렸는지"는 더 이상 DB 로 추적할 수 없다 — 상태 전이만 남는다.
  */
 public class TransportCommand {
 
-    private Long id;
     private String commandId;
     private Long taskId;
-    private String taskCode;
     private String vehicleId;
-    private String commandType;
-    private String stage;
     private TransportCommandStatus status;
-    private String payload;
     private String failureReason;
-    private LocalDateTime publishedAt;
-    private LocalDateTime acknowledgedAt;
     private LocalDateTime completedAt;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-
-    public TransportCommand() {
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public String getCommandId() {
         return commandId;
@@ -54,36 +37,12 @@ public class TransportCommand {
         this.taskId = taskId;
     }
 
-    public String getTaskCode() {
-        return taskCode;
-    }
-
-    public void setTaskCode(String taskCode) {
-        this.taskCode = taskCode;
-    }
-
     public String getVehicleId() {
         return vehicleId;
     }
 
     public void setVehicleId(String vehicleId) {
         this.vehicleId = vehicleId;
-    }
-
-    public String getCommandType() {
-        return commandType;
-    }
-
-    public void setCommandType(String commandType) {
-        this.commandType = commandType;
-    }
-
-    public String getStage() {
-        return stage;
-    }
-
-    public void setStage(String stage) {
-        this.stage = stage;
     }
 
     public TransportCommandStatus getStatus() {
@@ -94,36 +53,12 @@ public class TransportCommand {
         this.status = status;
     }
 
-    public String getPayload() {
-        return payload;
-    }
-
-    public void setPayload(String payload) {
-        this.payload = payload;
-    }
-
     public String getFailureReason() {
         return failureReason;
     }
 
     public void setFailureReason(String failureReason) {
         this.failureReason = failureReason;
-    }
-
-    public LocalDateTime getPublishedAt() {
-        return publishedAt;
-    }
-
-    public void setPublishedAt(LocalDateTime publishedAt) {
-        this.publishedAt = publishedAt;
-    }
-
-    public LocalDateTime getAcknowledgedAt() {
-        return acknowledgedAt;
-    }
-
-    public void setAcknowledgedAt(LocalDateTime acknowledgedAt) {
-        this.acknowledgedAt = acknowledgedAt;
     }
 
     public LocalDateTime getCompletedAt() {
@@ -142,11 +77,4 @@ public class TransportCommand {
         this.createdAt = createdAt;
     }
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 }

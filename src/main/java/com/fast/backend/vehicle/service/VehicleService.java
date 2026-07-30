@@ -64,9 +64,7 @@ public class VehicleService {
         VehicleCurrentStatus initialStatus = new VehicleCurrentStatus();
         initialStatus.setVehicleId(vehicle.getVehicleId());
         initialStatus.setStatus(VehicleStatus.UNKNOWN);
-        initialStatus.setMessageAt(null);
         initialStatus.setReceivedAt(now);
-        initialStatus.setUpdatedAt(now);
         vehicleCurrentStatusMapper.upsert(initialStatus);
 
         log.info("Vehicle registered: vehicleId={}, source={}", vehicle.getVehicleId(), vehicle.getSource());

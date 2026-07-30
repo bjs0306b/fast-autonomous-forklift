@@ -4,10 +4,10 @@ import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.embedded.domain.EmbeddedForkState;
-import com.fast.backend.embedded.domain.VehicleForkCurrentStatus;
 import com.fast.backend.embedded.dto.EmbeddedForkStatusMessage;
 import com.fast.backend.embedded.dto.EmbeddedForkStatusResponse;
-import com.fast.backend.embedded.mapper.VehicleForkCurrentStatusMapper;
+import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import com.fast.backend.vehicle.websocket.EmbeddedForkStatusEventData;
 import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
@@ -23,6 +23,10 @@ import java.time.OffsetDateTime;
  * {@code forklift/{id}/fork-status} 메시지를 검증·저장·브로드캐스트한다(prompt29.md 8장·16장
  * {@code EmbeddedForkStatusService}). 포크 높이·{@code limitTop}은 절대 사용하지 않는다
  * (작업 원칙 12·13번, {@link EmbeddedForkStatusMessage} Javadoc 참고).
+ *
+ * <p>FR-202 스키마 전환(prompt85): 전용 테이블 {@code vehicle_fork_current_status} 가 사라지고
+ * {@code vehicle_current_status.fork_state/fork_error_code} 로 흡수됐다. {@code limitBottom} 은
+ * 저장 위치가 없어 <b>DB 에 남지 않고</b> WebSocket 중계에만 쓰인다.
  */
 @Service
 public class EmbeddedForkStatusService {
@@ -30,13 +34,13 @@ public class EmbeddedForkStatusService {
     private static final Logger log = LoggerFactory.getLogger(EmbeddedForkStatusService.class);
 
     private final VehicleMapper vehicleMapper;
-    private final VehicleForkCurrentStatusMapper forkStatusMapper;
+    private final VehicleCurrentStatusMapper currentStatusMapper;
     private final VehicleWebSocketBroadcaster broadcaster;
 
-    public EmbeddedForkStatusService(VehicleMapper vehicleMapper, VehicleForkCurrentStatusMapper forkStatusMapper,
+    public EmbeddedForkStatusService(VehicleMapper vehicleMapper, VehicleCurrentStatusMapper currentStatusMapper,
             VehicleWebSocketBroadcaster broadcaster) {
         this.vehicleMapper = vehicleMapper;
-        this.forkStatusMapper = forkStatusMapper;
+        this.currentStatusMapper = currentStatusMapper;
         this.broadcaster = broadcaster;
     }
 
@@ -69,15 +73,11 @@ public class EmbeddedForkStatusService {
             }
 
             OffsetDateTime receivedAt = CommunicationTime.nowOffset();
-            VehicleForkCurrentStatus entity = new VehicleForkCurrentStatus();
-            entity.setForkliftId(message.forkliftId());
-            entity.setForkState(forkState);
-            entity.setLimitBottom(message.limitBottom());
-            entity.setErrorCode(message.errorCode());
-            entity.setMessageAt(CommunicationTime.toLocal(message.timestamp()));
-            entity.setReceivedAt(CommunicationTime.toLocal(receivedAt));
-            entity.setUpdatedAt(CommunicationTime.toLocal(receivedAt));
-            forkStatusMapper.upsert(entity);
+            // FR-202 스키마에서 포크 상태는 vehicle_current_status 로 흡수됐다.
+            // limitBottom 은 대응 컬럼이 없어 저장하지 않고 아래 WebSocket 중계로만 전달한다.
+            currentStatusMapper.updateForkStatus(
+                    message.forkliftId(), forkState.name(), message.errorCode(),
+                    CommunicationTime.toLocal(receivedAt));
 
             EmbeddedForkStatusEventData data = new EmbeddedForkStatusEventData(
                     message.forkliftId(), message.forkState(), message.limitBottom(), message.errorCode(),
@@ -94,15 +94,15 @@ public class EmbeddedForkStatusService {
         vehicleMapper.findByVehicleId(forkliftId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.VEHICLE_NOT_FOUND,
                         "등록되지 않은 차량입니다: " + forkliftId));
-        VehicleForkCurrentStatus status = forkStatusMapper.findByForkliftId(forkliftId)
+        VehicleCurrentStatus status = currentStatusMapper.findByVehicleId(forkliftId)
+                .filter(row -> row.getForkState() != null)
                 .orElseThrow(() -> new BusinessException(ErrorCode.EMBEDDED_FORK_STATUS_NOT_FOUND,
                         "포크 상태 정보가 없습니다: " + forkliftId));
+        // limitBottom·messageAt 은 FR-202 스키마에 저장되지 않는다(응답 필드에서도 제거).
         return new EmbeddedForkStatusResponse(
-                status.getForkliftId(),
-                status.getForkState() != null ? status.getForkState().name() : null,
-                status.getLimitBottom(),
-                status.getErrorCode(),
-                CommunicationTime.toOffset(status.getMessageAt()),
+                status.getVehicleId(),
+                status.getForkState(),
+                status.getForkErrorCode(),
                 CommunicationTime.toOffset(status.getReceivedAt()));
     }
 

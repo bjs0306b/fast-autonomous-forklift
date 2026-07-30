@@ -3,25 +3,22 @@ package com.fast.backend.storage.placement;
 import com.fast.backend.storage.domain.StorageSlotStatus;
 
 /**
- * 추천 알고리즘의 입력 읽기 모델(prompt46.md 7장). 영속 계층(추후 구현)이 slot·level·rack 조인 결과를
- * 이 레코드로 만들어 {@link PlacementService}에 넘긴다 — 알고리즘을 특정 Mapper/조인 구조에 묶지 않고
- * 순수하게(단위 테스트 가능하게) 유지하기 위해서다.
+ * 추천 알고리즘의 입력 읽기 모델 — FR-202 최종 스키마(prompt85).
  *
- * <p>단위: {@code slotWidth}/{@code slotLength}/{@code slotHeight}, {@code destinationX/Y}, {@code forkHeight}는 m,
- * {@code destinationHeading}은 degree.
+ * <p><b>평면 치수가 없다.</b> 최종 스키마의 {@code storage_slot} 은 {@code usable_height} 와
+ * {@code fork_height} 만 갖는다(랙 계층·슬롯 폭/길이 제거). 그래서 후보 판정은 높이 적합성과
+ * 거리로만 이뤄진다 — 자세한 한계는 {@link PlacementService} Javadoc 참고.
+ *
+ * <p>단위: {@code usableHeight}/{@code forkHeight}/{@code destinationX,Y} 는 m,
+ * {@code destinationHeading} 은 degree.
  */
 public record PlacementCandidate(
-        Long slotId,
         String slotCode,
-        String rackCode,
-        int levelNumber,
-        double slotWidth,
-        double slotLength,
-        double slotHeight,
+        double usableHeight,
+        Double forkHeight,
         Double destinationX,
         Double destinationY,
         Double destinationHeading,
-        Double forkHeight,
         StorageSlotStatus status
 ) {
 }

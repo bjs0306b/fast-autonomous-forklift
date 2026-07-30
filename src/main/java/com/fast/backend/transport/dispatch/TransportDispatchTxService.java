@@ -83,30 +83,26 @@ public class TransportDispatchTxService {
         }
 
         String commandId = "TCMD-" + UUID.randomUUID();
-        String slotCode = task.getDestinationSlotId() == null ? null
-                : storageSlotMapper.findById(task.getDestinationSlotId()).map(StorageSlot::getSlotCode).orElse(null);
+        // FR-202: 작업이 슬롯 코드를 직접 들고 있어 조회가 필요 없다(옛 구조는 id → code 조회였다).
+        String slotCode = task.getDestinationSlotCode();
 
         TransportCommandMessage message = new TransportCommandMessage(
                 commandId, taskCode, task.getVehicleId(), COMMAND_TYPE_TRANSPORT,
                 new TransportCommandMessage.Pickup(
-                        task.getPalletId(), task.getSourceX(), task.getSourceY(), task.getSourceHeading()),
+                        task.getSourceX(), task.getSourceY(), task.getSourceHeading()),
                 new TransportCommandMessage.Destination(
                         slotCode, task.getDestinationX(), task.getDestinationY(), task.getDestinationHeading(),
-                        task.getForkHeight(),
-                        task.getCargoOrientation() == null ? null : task.getCargoOrientation().name()),
+                        task.getForkHeight()),
                 CommunicationTime.nowOffset());
 
         LocalDateTime now = LocalDateTime.now();
         TransportCommand command = new TransportCommand();
         command.setCommandId(commandId);
         command.setTaskId(task.getId());
-        command.setTaskCode(taskCode);
         command.setVehicleId(task.getVehicleId());
-        command.setCommandType(COMMAND_TYPE_TRANSPORT);
         command.setStatus(TransportCommandStatus.CREATED);
-        command.setPayload(serialize(message));
+        // FR-202: task_code / command_type / payload 컬럼이 없다. 발행 내용은 DB 에 남기지 않는다.
         command.setCreatedAt(now);
-        command.setUpdatedAt(now);
         transportCommandMapper.insert(command);
         return message;
     }
@@ -115,7 +111,7 @@ public class TransportDispatchTxService {
     @Transactional
     public void confirmPublished(String commandId, String taskCode) {
         LocalDateTime now = LocalDateTime.now();
-        int published = transportCommandMapper.markPublished(commandId, now, now);
+        int published = transportCommandMapper.markPublished(commandId);
         if (published != 1) {
             throw new BusinessException(ErrorCode.INVALID_TRANSPORT_COMMAND_STATUS,
                     "PUBLISHED 전이에 실패했습니다(현재 CREATED 아님): commandId=" + commandId);
@@ -130,7 +126,7 @@ public class TransportDispatchTxService {
     /** publish 실패: command PUBLISH_FAILED. Task는 ASSIGNED 유지(재디스패치 가능). */
     @Transactional
     public void markPublishFailed(String commandId, String reason) {
-        transportCommandMapper.markPublishFailed(commandId, truncate(reason), LocalDateTime.now());
+        transportCommandMapper.markPublishFailed(commandId, truncate(reason));
     }
 
     private void requirePublishableVehicle(String vehicleId) {

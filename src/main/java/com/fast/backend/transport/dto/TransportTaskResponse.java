@@ -1,24 +1,25 @@
 package com.fast.backend.transport.dto;
 
-import com.fast.backend.storage.domain.Cargo;
-import com.fast.backend.storage.mapper.StorageSlotPlacementRow;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 
 import java.time.LocalDateTime;
 
 /**
- * 운반 작업 응답(prompt47.md 8·10장). 생성/상세/배정/상태변경 응답이 공유한다.
- * {@code cargo}/{@code placement}는 정보가 있을 때만 채워진다(목록 응답 등에서는 null일 수 있다).
+ * 운반 작업 응답 — FR-202 최종 스키마(prompt85).
+ *
+ * <p>옛 응답에서 빠진 것: {@code palletId}(파렛트 개념 제거), {@code cargo}(치수 컬럼이 없어 실어
+ * 보낼 값이 없다), {@code placement.rackCode/levelNumber}(랙 계층 제거),
+ * {@code placement.orientation}(평면 치수가 없어 방향 판정 불가).
+ * 새로 들어간 것: {@code measurementId} — 이 배치를 어떤 측정 결과로 판단했는지.
  */
 public record TransportTaskResponse(
         String taskId,
         String cargoId,
-        String palletId,
+        String measurementId,
         String vehicleId,
         TaskStatus status,
         Pickup pickup,
-        CargoView cargo,
         Placement placement,
         LocalDateTime createdAt,
         LocalDateTime assignedAt,
@@ -31,15 +32,8 @@ public record TransportTaskResponse(
     public record Pickup(Double x, Double y, Double heading) {
     }
 
-    public record CargoView(double width, double length, double height, double volume) {
-    }
-
     public record Placement(
-            String rackCode,
-            Integer levelNumber,
             String slotCode,
-            Long slotId,
-            String orientation,
             Double destinationX,
             Double destinationY,
             Double destinationHeading,
@@ -47,23 +41,25 @@ public record TransportTaskResponse(
     ) {
     }
 
-    public static TransportTaskResponse of(TransportTask task, Cargo cargo, StorageSlotPlacementRow slot) {
-        Placement placement = new Placement(
-                slot != null ? slot.getRackCode() : null,
-                slot != null ? slot.getLevelNumber() : null,
-                slot != null ? slot.getSlotCode() : null,
-                task.getDestinationSlotId(),
-                task.getCargoOrientation() != null ? task.getCargoOrientation().name() : null,
-                task.getDestinationX(), task.getDestinationY(), task.getDestinationHeading(),
-                task.getForkHeight());
-        CargoView cargoView = cargo != null
-                ? new CargoView(cargo.getWidth(), cargo.getLength(), cargo.getHeight(), cargo.getVolume())
-                : null;
+    public static TransportTaskResponse of(TransportTask task) {
         return new TransportTaskResponse(
-                task.getTaskCode(), task.getCargoId(), task.getPalletId(), task.getVehicleId(), task.getStatus(),
+                task.getTaskCode(),
+                task.getCargoId(),
+                task.getMeasurementId(),
+                task.getVehicleId(),
+                task.getStatus(),
                 new Pickup(task.getSourceX(), task.getSourceY(), task.getSourceHeading()),
-                cargoView, placement,
-                task.getCreatedAt(), task.getAssignedAt(), task.getStartedAt(), task.getPickedUpAt(),
-                task.getCompletedAt(), task.getFailedAt());
+                new Placement(
+                        task.getDestinationSlotCode(),
+                        task.getDestinationX(),
+                        task.getDestinationY(),
+                        task.getDestinationHeading(),
+                        task.getForkHeight()),
+                task.getCreatedAt(),
+                task.getAssignedAt(),
+                task.getStartedAt(),
+                task.getPickedUpAt(),
+                task.getCompletedAt(),
+                task.getFailedAt());
     }
 }

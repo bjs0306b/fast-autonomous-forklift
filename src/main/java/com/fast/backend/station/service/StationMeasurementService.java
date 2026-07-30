@@ -5,11 +5,11 @@ import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.station.adapter.StationMeasurementAdapter;
 import com.fast.backend.station.domain.StationDirection;
 import com.fast.backend.station.domain.StationMeasurement;
-import com.fast.backend.station.domain.StationMeasurementBox;
 import com.fast.backend.station.domain.StationMeasurementStatus;
 import com.fast.backend.station.dto.StationMeasurementMessage;
 import com.fast.backend.station.dto.StationMeasurementResponse;
-import com.fast.backend.station.mapper.StationMeasurementBoxMapper;
+import com.fast.backend.station.domain.StationSession;
+import com.fast.backend.station.mapper.StationSessionMapper;
 import com.fast.backend.station.mapper.StationMeasurementMapper;
 import com.fast.backend.station.websocket.StationMeasurementBroadcaster;
 import org.slf4j.Logger;
@@ -45,17 +45,53 @@ public class StationMeasurementService {
     private static final double TOLERANCE = 0.001;
 
     private final StationMeasurementMapper measurementMapper;
-    private final StationMeasurementBoxMapper boxMapper;
+    private final StationSessionMapper sessionMapper;
     private final StationMeasurementAdapter adapter;
     private final StationMeasurementBroadcaster broadcaster;
 
     public StationMeasurementService(StationMeasurementMapper measurementMapper,
-            StationMeasurementBoxMapper boxMapper, StationMeasurementAdapter adapter,
+            StationSessionMapper sessionMapper, StationMeasurementAdapter adapter,
             StationMeasurementBroadcaster broadcaster) {
         this.measurementMapper = measurementMapper;
-        this.boxMapper = boxMapper;
+        this.sessionMapper = sessionMapper;
         this.adapter = adapter;
         this.broadcaster = broadcaster;
+    }
+
+    /**
+     * 화물 하나에 대한 측정 세션을 연다(FR-202 신규, prompt85).
+     *
+     * <p>설비는 하나뿐이라 동시에 한 세션만 점유할 수 있다. 점유는 조건부 UPDATE 한 문장으로 하며,
+     * 두 요청이 동시에 와도 하나만 이긴다(진 쪽은 409). SELECT 로 먼저 확인하고 UPDATE 하면
+     * 둘 다 빈 상태를 보고 동시에 점유할 수 있다.
+     */
+    @Transactional
+    public StationSession openSession(String cargoId) {
+        String sessionId = java.util.UUID.randomUUID().toString();
+        sessionMapper.insert(new StationSession(sessionId, cargoId));
+        if (sessionMapper.acquireStation(sessionId) == 0) {
+            throw new BusinessException(ErrorCode.STATION_ALREADY_OCCUPIED,
+                    "측정 설비가 이미 점유 중입니다. 기존 세션을 먼저 종료하세요.");
+        }
+        log.info("Station session opened: sessionId={}, cargoId={}", sessionId, cargoId);
+        return new StationSession(sessionId, cargoId);
+    }
+
+    /** 세션 점유를 해제한다. 세션 행 자체는 남긴다 — 측정 결과가 FK 로 참조하기 때문이다. */
+    @Transactional
+    public void closeSession(String sessionId) {
+        if (sessionMapper.releaseStation(sessionId) == 0) {
+            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
+                    "활성 세션이 아닙니다: " + sessionId);
+        }
+        log.info("Station session closed: sessionId={}", sessionId);
+    }
+
+    @Transactional(readOnly = true)
+    public StationSession findActiveSession() {
+        return sessionMapper.findActiveSession()
+                .orElseThrow(() -> new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
+                        "활성화된 측정 세션이 없습니다."));
     }
 
     @Transactional
@@ -69,21 +105,21 @@ public class StationMeasurementService {
                 return;
             }
 
+            // FR-202: 측정 결과는 반드시 활성 세션에 귀속된다. 세션이 없으면 "어느 화물의 측정인지"를
+            // 알 수 없으므로 저장하지 않는다(임의로 세션을 만들어 붙이지 않는다).
+            StationSession session = sessionMapper.findActiveSession()
+                    .orElseThrow(() -> new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
+                            "활성 세션이 없어 측정 결과를 저장할 수 없습니다: measurementId="
+                                    + message.measurementId()));
+
             LocalDateTime receivedAt = LocalDateTime.now();
-            List<StationDirection> directions = parseDirections(message.loadBalance());
-            StationMeasurement entity = adapter.toEntity(message, status, directions, receivedAt);
+            StationMeasurement entity = adapter.toEntity(message, status, session.getSessionId(), receivedAt);
             measurementMapper.insert(entity);
 
-            List<StationMeasurementBox> boxes = adapter.toBoxes(message, receivedAt);
-            for (StationMeasurementBox box : boxes) {
-                box.setStationMeasurementId(entity.getId());
-                boxMapper.insert(box);
-            }
+            log.info("Station measurement stored: measurementId={}, sessionId={}, cargoId={}, status={}",
+                    entity.getMeasurementId(), session.getSessionId(), session.getCargoId(), status);
 
-            log.info("Station measurement stored: measurementId={}, stationId={}, status={}, boxes={}",
-                    entity.getMeasurementId(), entity.getStationId(), status, boxes.size());
-
-            StationMeasurementResponse response = adapter.toResponse(entity, boxes);
+            StationMeasurementResponse response = adapter.toResponse(entity, session.getCargoId());
             broadcaster.broadcast(response, receivedAt);
         } catch (BusinessException e) {
             log.warn("Station measurement message rejected: measurementId={}, errorCode={}, message={}",
@@ -96,15 +132,27 @@ public class StationMeasurementService {
         StationMeasurement m = measurementMapper.findByMeasurementId(measurementId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STATION_MEASUREMENT_NOT_FOUND,
                         "존재하지 않는 측정 결과입니다: " + measurementId));
-        return adapter.toResponse(m, boxMapper.findByStationMeasurementId(m.getId()));
+        return adapter.toResponse(m, cargoIdOf(m.getSessionId()));
     }
 
+    /**
+     * 세션의 최신 측정 결과(FR-202).
+     *
+     * <p>옛 "스테이션별 최신 조회"를 대체한다 — {@code station_id} 컬럼이 사라져 스테이션 기준으로는
+     * 더 이상 조회할 수 없다.
+     */
     @Transactional(readOnly = true)
-    public StationMeasurementResponse findLatestByStationId(String stationId) {
-        StationMeasurement m = measurementMapper.findLatestByStationId(stationId)
+    public StationMeasurementResponse findLatestBySessionId(String sessionId) {
+        StationMeasurement m = measurementMapper.findLatestBySessionId(sessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STATION_MEASUREMENT_NOT_FOUND,
-                        "스테이션의 측정 결과가 없습니다: " + stationId));
-        return adapter.toResponse(m, boxMapper.findByStationMeasurementId(m.getId()));
+                        "세션의 측정 결과가 없습니다: " + sessionId));
+        return adapter.toResponse(m, cargoIdOf(sessionId));
+    }
+
+    private String cargoIdOf(String sessionId) {
+        return sessionMapper.findBySessionId(sessionId)
+                .map(StationSession::getCargoId)
+                .orElse(null);
     }
 
     // ── 검증 ────────────────────────────────────────────────────────────────

@@ -2,15 +2,11 @@ package com.fast.backend.transport.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
-import com.fast.backend.storage.domain.Cargo;
-import com.fast.backend.storage.domain.Pallet;
-import com.fast.backend.storage.domain.PalletStatus;
+import com.fast.backend.station.domain.StationMeasurement;
+import com.fast.backend.station.mapper.StationMeasurementMapper;
 import com.fast.backend.storage.domain.StorageSlot;
-import com.fast.backend.storage.domain.StorageSlotStatus;
 import com.fast.backend.storage.mapper.CargoMapper;
-import com.fast.backend.storage.mapper.PalletMapper;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
-import com.fast.backend.storage.mapper.StorageSlotPlacementRow;
 import com.fast.backend.storage.placement.PlacementCandidate;
 import com.fast.backend.storage.placement.PlacementRecommendation;
 import com.fast.backend.storage.placement.PlacementService;
@@ -30,26 +26,34 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * 운반 작업 생성·배정·조회·상태변경(prompt47.md 8·9·10·11장). 추천은 기존 {@link PlacementService},
- * 상태 전이는 기존 {@link TaskStatus#validateTransition}, 슬롯 전이는 {@link StorageSlotStatus}를 재사용한다.
+ * 운반 작업 생성·배정·상태 전이 — FR-202 최종 스키마(prompt85)로 재작성.
  *
- * <p>동시성·중복 방지의 핵심은 <b>조건부 UPDATE</b>다: 슬롯은
- * {@link StorageSlotMapper#reserveIfEmpty}({@code WHERE status='EMPTY'}), 배정은
- * {@link TransportTaskMapper#updateAssignment}({@code WHERE status='PENDING' AND vehicle_id IS NULL}).
- * update count가 1일 때만 성공으로 판정한다(조회 후 save 방식 금지).
+ * <p>옛 구현과 달라진 점
+ * <ul>
+ *   <li>파렛트가 사라졌다. 픽업 좌표는 <b>요청이 직접</b> 준다({@link TransportTaskCreateRequest}),
+ *       중복 작업 검사도 파렛트 기준 → <b>화물 기준</b>이다.</li>
+ *   <li>배치 판단 입력이 화물 치수 → <b>측정 결과의 화물 높이</b>({@code station_measurement.cargo_height})다.
+ *       평면 적합성은 판단하지 않는다 — 그 데이터가 스키마에 없다
+ *       ({@link PlacementService} Javadoc 의 경고 참고).</li>
+ *   <li>슬롯 참조가 id → {@code slot_code}. 예약/점유 전이도 코드 기준이다.</li>
+ *   <li>{@code updated_at} 컬럼이 없어 상태 전이 시각은 각 전용 컬럼에만 남는다.</li>
+ * </ul>
  */
 @Service
 public class TransportTaskService {
 
     private static final Logger log = LoggerFactory.getLogger(TransportTaskService.class);
 
+    private static final DateTimeFormatter TASK_CODE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+
     private final CargoMapper cargoMapper;
-    private final PalletMapper palletMapper;
+    private final StationMeasurementMapper measurementMapper;
     private final StorageSlotMapper storageSlotMapper;
     private final TransportTaskMapper transportTaskMapper;
     private final PlacementService placementService;
@@ -57,11 +61,12 @@ public class TransportTaskService {
     private final VehicleCurrentStatusMapper vehicleCurrentStatusMapper;
 
     public TransportTaskService(
-            CargoMapper cargoMapper, PalletMapper palletMapper, StorageSlotMapper storageSlotMapper,
-            TransportTaskMapper transportTaskMapper, PlacementService placementService,
-            VehicleMapper vehicleMapper, VehicleCurrentStatusMapper vehicleCurrentStatusMapper) {
+            CargoMapper cargoMapper, StationMeasurementMapper measurementMapper,
+            StorageSlotMapper storageSlotMapper, TransportTaskMapper transportTaskMapper,
+            PlacementService placementService, VehicleMapper vehicleMapper,
+            VehicleCurrentStatusMapper vehicleCurrentStatusMapper) {
         this.cargoMapper = cargoMapper;
-        this.palletMapper = palletMapper;
+        this.measurementMapper = measurementMapper;
         this.storageSlotMapper = storageSlotMapper;
         this.transportTaskMapper = transportTaskMapper;
         this.placementService = placementService;
@@ -69,63 +74,55 @@ public class TransportTaskService {
         this.vehicleCurrentStatusMapper = vehicleCurrentStatusMapper;
     }
 
-    /** 추천 + 슬롯 조건부 예약 + Task insert를 하나의 트랜잭션으로 처리한다(prompt47.md 8장). */
+    /** 추천 + 슬롯 조건부 예약 + Task insert 를 하나의 트랜잭션으로 처리한다. */
     @Transactional
     public TransportTaskResponse createTask(TransportTaskCreateRequest request) {
-        Cargo cargo = cargoMapper.findByCargoId(request.cargoId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.CARGO_NOT_FOUND,
-                        "등록되지 않은 화물입니다: " + request.cargoId()));
-        Pallet pallet = palletMapper.findByPalletId(request.palletId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.PALLET_NOT_FOUND,
-                        "등록되지 않은 팔레트입니다: " + request.palletId()));
-        if (!pallet.getCargoId().equals(cargo.getCargoId())) {
-            throw new BusinessException(ErrorCode.PALLET_CARGO_MISMATCH,
-                    "팔레트의 화물과 요청 화물이 다릅니다: pallet=" + pallet.getCargoId() + ", request=" + cargo.getCargoId());
+        if (!cargoMapper.existsByCargoId(request.cargoId())) {
+            throw new BusinessException(ErrorCode.CARGO_NOT_FOUND,
+                    "등록되지 않은 화물입니다: " + request.cargoId());
         }
-        if (transportTaskMapper.existsOpenTaskByPalletId(pallet.getPalletId())) {
-            throw new BusinessException(ErrorCode.PALLET_ALREADY_ASSIGNED,
-                    "이미 진행 중인 작업이 있는 팔레트입니다: " + pallet.getPalletId());
+        StationMeasurement measurement = measurementMapper.findByMeasurementId(request.measurementId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.STATION_MEASUREMENT_NOT_FOUND,
+                        "존재하지 않는 측정 결과입니다: " + request.measurementId()));
+        if (transportTaskMapper.existsOpenTaskByCargoId(request.cargoId())) {
+            throw new BusinessException(ErrorCode.CARGO_ALREADY_ASSIGNED,
+                    "이미 진행 중인 작업이 있는 화물입니다: " + request.cargoId());
         }
 
-        List<PlacementCandidate> candidates = loadEmptyCandidates();
-        PlacementRecommendation rec =
-                placementService.recommend(cargo, candidates, pallet.getPickupX(), pallet.getPickupY());
+        PlacementRecommendation rec = placementService.recommend(
+                measurement.getCargoHeight(), loadEmptyCandidates(), request.sourceX(), request.sourceY());
 
         LocalDateTime now = LocalDateTime.now();
         TransportTask task = new TransportTask();
         task.setTaskCode(generateTaskCode());
-        task.setCargoId(cargo.getCargoId());
-        task.setPalletId(pallet.getPalletId());
+        task.setCargoId(request.cargoId());
+        task.setMeasurementId(measurement.getMeasurementId());
         task.setVehicleId(null);
-        task.setSourceX(pallet.getPickupX());
-        task.setSourceY(pallet.getPickupY());
-        task.setSourceHeading(pallet.getPickupHeading());
-        task.setDestinationSlotId(rec.slotId());
+        task.setSourceX(request.sourceX());
+        task.setSourceY(request.sourceY());
+        task.setSourceHeading(request.sourceHeading());
+        task.setDestinationSlotCode(rec.slotCode());
         task.setDestinationX(rec.destinationX());
         task.setDestinationY(rec.destinationY());
         task.setDestinationHeading(rec.destinationHeading());
         task.setForkHeight(rec.forkHeight());
-        task.setCargoOrientation(rec.orientation());
         task.setStatus(TaskStatus.PENDING);
         task.setCreatedAt(now);
-        task.setUpdatedAt(now);
         transportTaskMapper.insert(task);
 
-        // 조건부 예약: EMPTY일 때만 성공. 실패하면 예외로 트랜잭션 전체(Task insert 포함) 롤백.
-        int reserved = storageSlotMapper.reserveIfEmpty(rec.slotId(), task.getTaskCode(), now);
+        // 조건부 예약: EMPTY 일 때만 성공. 실패하면 예외로 트랜잭션 전체(Task insert 포함)를 롤백한다.
+        int reserved = storageSlotMapper.reserveIfEmpty(rec.slotCode(), task.getId());
         if (reserved != 1) {
             throw new BusinessException(ErrorCode.STORAGE_SLOT_ALREADY_RESERVED,
-                    "추천 슬롯이 이미 예약되었습니다: slotId=" + rec.slotId());
+                    "추천 슬롯이 이미 예약되었습니다: slotCode=" + rec.slotCode());
         }
 
-        log.info("Transport task created: taskCode={}, cargoId={}, slotId={}, orientation={}",
-                task.getTaskCode(), cargo.getCargoId(), rec.slotId(), rec.orientation());
-
-        StorageSlotPlacementRow slot = storageSlotMapper.findPlacementRowById(rec.slotId()).orElse(null);
-        return TransportTaskResponse.of(task, cargo, slot);
+        log.info("Transport task created: taskCode={}, cargoId={}, measurementId={}, slotCode={}",
+                task.getTaskCode(), request.cargoId(), measurement.getMeasurementId(), rec.slotCode());
+        return TransportTaskResponse.of(task);
     }
 
-    /** 수동 차량 배정(prompt47.md 9장). 사전 검증 후 조건부 UPDATE로 원자적 배정. */
+    /** 수동 차량 배정. 사전 검증 후 조건부 UPDATE 로 원자적 배정. */
     @Transactional
     public TransportTaskResponse assign(String taskCode, String vehicleId) {
         TransportTask task = getTaskOrThrow(taskCode);
@@ -141,49 +138,37 @@ public class TransportTaskService {
             throw new BusinessException(ErrorCode.VEHICLE_ALREADY_ASSIGNED,
                     "이미 활성 작업이 있는 차량입니다: " + vehicleId);
         }
-        if (transportTaskMapper.existsActiveTaskByPalletId(task.getPalletId())) {
-            throw new BusinessException(ErrorCode.PALLET_ALREADY_ASSIGNED,
-                    "이미 다른 활성 작업이 사용 중인 팔레트입니다: " + task.getPalletId());
-        }
 
-        LocalDateTime now = LocalDateTime.now();
-        int updated = transportTaskMapper.updateAssignment(taskCode, vehicleId, now, now);
+        int updated = transportTaskMapper.updateAssignment(taskCode, vehicleId, LocalDateTime.now());
         if (updated != 1) {
-            // 사전 검증과 UPDATE 사이에 다른 요청이 먼저 배정한 경우(경쟁) — 조건부 UPDATE가 최종 방어선.
+            // 사전 검증과 UPDATE 사이에 다른 요청이 먼저 배정한 경우(경쟁) — 조건부 UPDATE 가 최종 방어선.
             throw new BusinessException(ErrorCode.TASK_ALREADY_ASSIGNED,
                     "동시 배정 경쟁으로 배정에 실패했습니다: " + taskCode);
         }
-        palletMapper.updateStatus(task.getPalletId(), PalletStatus.ASSIGNED, now);
         log.info("Transport task assigned: taskCode={}, vehicleId={}", taskCode, vehicleId);
         return getDetail(taskCode);
     }
 
     @Transactional(readOnly = true)
     public TransportTaskResponse getDetail(String taskCode) {
-        TransportTask task = getTaskOrThrow(taskCode);
-        Cargo cargo = cargoMapper.findByCargoId(task.getCargoId()).orElse(null);
-        StorageSlotPlacementRow slot = task.getDestinationSlotId() != null
-                ? storageSlotMapper.findPlacementRowById(task.getDestinationSlotId()).orElse(null)
-                : null;
-        return TransportTaskResponse.of(task, cargo, slot);
+        return TransportTaskResponse.of(getTaskOrThrow(taskCode));
     }
 
     @Transactional(readOnly = true)
-    public TransportTaskListResponse list(
-            int page, int size, TaskStatus status, String vehicleId, String palletId) {
+    public TransportTaskListResponse list(int page, int size, TaskStatus status, String vehicleId) {
         int safePage = Math.max(page, 0);
         int safeSize = size <= 0 ? 20 : Math.min(size, 200);
         int offset = safePage * safeSize;
-        List<TransportTask> tasks = transportTaskMapper.findAll(status, vehicleId, palletId, safeSize, offset);
-        long total = transportTaskMapper.countAll(status, vehicleId, palletId);
+        List<TransportTask> tasks = transportTaskMapper.findAll(status, vehicleId, safeSize, offset);
+        long total = transportTaskMapper.countAll(status, vehicleId);
         List<TransportTaskResponse> items = new ArrayList<>();
         for (TransportTask task : tasks) {
-            items.add(TransportTaskResponse.of(task, null, null));
+            items.add(TransportTaskResponse.of(task));
         }
         return new TransportTaskListResponse(items, safePage, safeSize, total);
     }
 
-    /** 상태 변경 + 연관(Pallet/StorageSlot) 상태 처리(prompt47.md 11장). 전체가 하나의 트랜잭션. */
+    /** 상태 변경 + 슬롯 상태 처리. 전체가 하나의 트랜잭션이다. */
     @Transactional
     public TransportTaskResponse changeStatus(String taskCode, String rawStatus) {
         TransportTask task = getTaskOrThrow(taskCode);
@@ -204,137 +189,102 @@ public class TransportTaskService {
                 }
             }
             case MOVING_TO_PICKUP -> startedAt = now;
-            case PICKING_UP -> {
-                pickedUpAt = now;
-                palletMapper.updateStatus(task.getPalletId(), PalletStatus.PICKED_UP, now);
-            }
-            case TRANSPORTING -> palletMapper.updateStatus(task.getPalletId(), PalletStatus.TRANSPORTING, now);
-            case PLACING -> { /* 별도 연관 변경 없음 */ }
+            case PICKING_UP -> pickedUpAt = now;
             case COMPLETED -> {
                 completedAt = now;
-                transitionSlot(task.getDestinationSlotId(), StorageSlotStatus.OCCUPIED, task.getCargoId(), now);
-                palletMapper.updateStatus(task.getPalletId(), PalletStatus.STORED, now);
+                // RESERVED → OCCUPIED. CHECK 제약상 예약과 적재는 동시에 설정될 수 없어 Mapper 가 함께 정리한다.
+                storageSlotMapper.markOccupied(task.getDestinationSlotCode(), task.getCargoId());
             }
             case FAILED -> {
                 failedAt = now;
-                transitionSlot(task.getDestinationSlotId(), StorageSlotStatus.EMPTY, null, now);
-                // 정책 미확정: 실패 시 팔레트는 보수적으로 FAILED로 둔다(prompt47.md 11장, 문서화 대상).
-                palletMapper.updateStatus(task.getPalletId(), PalletStatus.FAILED, now);
+                storageSlotMapper.releaseReservation(task.getDestinationSlotCode());
             }
-            case CANCELLED -> {
-                transitionSlot(task.getDestinationSlotId(), StorageSlotStatus.EMPTY, null, now);
-                palletMapper.updateStatus(task.getPalletId(), PalletStatus.WAITING, now);
-            }
-            default -> { /* PENDING 등: 진입 불가(validateTransition에서 차단됨) */ }
+            case CANCELLED -> storageSlotMapper.releaseReservation(task.getDestinationSlotCode());
+            default -> { /* PENDING/TRANSPORTING/PLACING: 슬롯 상태 변화 없음 */ }
         }
 
-        transportTaskMapper.updateStatus(taskCode, target, startedAt, pickedUpAt, completedAt, failedAt, now);
+        transportTaskMapper.updateStatus(taskCode, target, startedAt, pickedUpAt, completedAt, failedAt);
         log.info("Transport task status changed: taskCode={}, {} -> {}", taskCode, task.getStatus(), target);
         return getDetail(taskCode);
     }
 
-    /** taskCode로 Task 엔티티를 조회한다(디스패치·결과 처리에서 재사용). */
+    /**
+     * MQTT 운반 결과가 성공일 때 작업을 종료 상태로 보낸다(prompt48.md 흐름 유지).
+     *
+     * <p>중간 상태를 일일이 거치지 않고 곧바로 COMPLETED 로 전이한다 — 차량이 이미 끝냈다고 보고한
+     * 시점이라 중간 단계를 되짚는 것이 의미가 없다. 슬롯은 RESERVED → OCCUPIED 로 확정한다.
+     */
+    @Transactional
+    public void driveToCompleted(String taskCode) {
+        TransportTask task = getTaskOrThrow(taskCode);
+        LocalDateTime now = LocalDateTime.now();
+        storageSlotMapper.markOccupied(task.getDestinationSlotCode(), task.getCargoId());
+        transportTaskMapper.updateStatus(taskCode, TaskStatus.COMPLETED, null, null, now, null);
+        log.info("Transport task completed by command result: taskCode={}", taskCode);
+    }
+
+    /** MQTT 운반 결과가 실패일 때. 예약한 슬롯을 반드시 되돌린다(잡아 둔 자리가 남으면 안 된다). */
+    @Transactional
+    public void driveToFailed(String taskCode) {
+        TransportTask task = getTaskOrThrow(taskCode);
+        LocalDateTime now = LocalDateTime.now();
+        storageSlotMapper.releaseReservation(task.getDestinationSlotCode());
+        transportTaskMapper.updateStatus(taskCode, TaskStatus.FAILED, null, null, null, now);
+        log.info("Transport task failed by command result: taskCode={}", taskCode);
+    }
+
+    /** taskCode 로 Task 엔티티를 조회한다(디스패치·결과 처리에서 재사용). */
     @Transactional(readOnly = true)
     public TransportTask getTask(String taskCode) {
         return getTaskOrThrow(taskCode);
     }
 
-    /**
-     * 최종 성공 결과 반영용: 현재 상태에서 COMPLETED까지 정상 흐름을 순차 전이한다(prompt48.md 11·13장).
-     * 차량이 최종 결과만 보내는 경우(단계 미보고)에도 기존 {@link #changeStatus} 완료 처리(슬롯 OCCUPIED,
-     * 화물 STORED)를 그대로 재사용하기 위해, 중간 상태를 백엔드가 추측 생성하지 않고 "정상 경로를 빠르게
-     * 통과"시키는 방식이다. 각 단계는 {@link TaskStatus#validateTransition}으로 검증된다.
-     */
-    @Transactional
-    public void driveToCompleted(String taskCode) {
-        List<TaskStatus> happyPath = List.of(
-                TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP, TaskStatus.PICKING_UP,
-                TaskStatus.TRANSPORTING, TaskStatus.PLACING, TaskStatus.COMPLETED);
-        TransportTask task = getTaskOrThrow(taskCode);
-        int start = happyPath.indexOf(task.getStatus());
-        if (start < 0) {
-            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION,
-                    "완료 처리할 수 없는 현재 상태입니다: " + task.getStatus());
-        }
-        for (int i = start + 1; i < happyPath.size(); i++) {
-            changeStatus(taskCode, happyPath.get(i).name());
-        }
-    }
-
-    /** 최종 실패 결과 반영용: 현재 상태에서 FAILED로 전이한다(기존 완료 처리 재사용). */
-    @Transactional
-    public void driveToFailed(String taskCode) {
-        changeStatus(taskCode, TaskStatus.FAILED.name());
-    }
-
-    /** 슬롯 상태 전이를 방어적으로 검증한 뒤 조건부 UPDATE를 실행한다(prompt47.md 12장). */
-    private void transitionSlot(Long slotId, StorageSlotStatus target, String storedCargoId, LocalDateTime now) {
-        if (slotId == null) {
-            return;
-        }
-        StorageSlot slot = storageSlotMapper.findById(slotId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.STORAGE_SLOT_NOT_FOUND,
-                        "존재하지 않는 슬롯입니다: " + slotId));
-        if (!slot.getStatus().canTransitionTo(target)) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "허용되지 않는 슬롯 상태 전이입니다: " + slot.getStatus() + " → " + target);
-        }
-        int affected = switch (target) {
-            case OCCUPIED -> storageSlotMapper.markOccupied(slotId, storedCargoId, now);
-            case EMPTY -> storageSlotMapper.releaseReservation(slotId, now);
-            default -> 0;
-        };
-        if (affected != 1) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "슬롯 상태 전이에 실패했습니다: slotId=" + slotId + ", target=" + target);
-        }
-    }
-
-    /**
-     * 배정 가능한 차량인지 검증한다. 이 프로젝트에는 별도 online 플래그 컬럼이 없어(prompt44 확인),
-     * {@code vehicle_current_status.status}로 판단한다 — status가 IDLE이면 온라인·비오류로 간주하고,
-     * OFFLINE/ERROR/ESTOP 등은 IDLE이 아니므로 자연히 제외된다. 상태 행 자체가 없으면 배정 불가.
-     */
-    private void requireAssignableVehicle(String vehicleId) {
-        VehicleCurrentStatus current = vehicleCurrentStatusMapper.findByVehicleId(vehicleId).orElse(null);
-        if (current == null || current.getStatus() != VehicleStatus.IDLE) {
-            throw new BusinessException(ErrorCode.VEHICLE_NOT_AVAILABLE,
-                    "IDLE 상태의 차량만 배정할 수 있습니다: " + vehicleId
-                            + ", status=" + (current == null ? "NONE" : current.getStatus()));
-        }
-    }
-
     private List<PlacementCandidate> loadEmptyCandidates() {
         List<PlacementCandidate> candidates = new ArrayList<>();
-        for (StorageSlotPlacementRow row : storageSlotMapper.findAllEmptySlotsForPlacement()) {
+        for (StorageSlot slot : storageSlotMapper.findAllEmptySlots()) {
             candidates.add(new PlacementCandidate(
-                    row.getSlotId(), row.getSlotCode(), row.getRackCode(), row.getLevelNumber(),
-                    row.getSlotWidth(), row.getSlotLength(), row.getSlotHeight(),
-                    row.getDestinationX(), row.getDestinationY(), row.getDestinationHeading(),
-                    row.getForkHeight(), row.getStatus()));
+                    slot.getSlotCode(),
+                    slot.getUsableHeight() == null ? 0.0 : slot.getUsableHeight(),
+                    slot.getForkHeight(),
+                    slot.getDestinationX(),
+                    slot.getDestinationY(),
+                    slot.getDestinationHeading(),
+                    slot.getStatus()));
         }
         return candidates;
+    }
+
+    private void requireAssignableVehicle(String vehicleId) {
+        VehicleCurrentStatus status = vehicleCurrentStatusMapper.findByVehicleId(vehicleId).orElse(null);
+        if (status == null || status.getStatus() == null) {
+            throw new BusinessException(ErrorCode.VEHICLE_NOT_AVAILABLE,
+                    "상태를 알 수 없는 차량에는 배정할 수 없습니다: " + vehicleId);
+        }
+        if (status.getStatus() != VehicleStatus.IDLE) {
+            throw new BusinessException(ErrorCode.VEHICLE_NOT_AVAILABLE,
+                    "IDLE 상태가 아닌 차량입니다: vehicleId=" + vehicleId + ", status=" + status.getStatus());
+        }
     }
 
     private TransportTask getTaskOrThrow(String taskCode) {
         return transportTaskMapper.findByTaskCode(taskCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TRANSPORT_TASK_NOT_FOUND,
-                        "존재하지 않는 운반 작업입니다: " + taskCode));
+                        "존재하지 않는 작업입니다: " + taskCode));
     }
 
-    private TaskStatus parseStatus(String raw) {
+    private TaskStatus parseStatus(String rawStatus) {
+        if (rawStatus == null || rawStatus.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION, "status는 필수입니다.");
+        }
         try {
-            return TaskStatus.valueOf(raw.trim().toUpperCase());
+            return TaskStatus.valueOf(rawStatus.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "알 수 없는 작업 상태입니다: " + raw);
+            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION, "알 수 없는 status입니다: " + rawStatus);
         }
     }
 
-    /**
-     * 충돌 안전한 taskCode 생성(prompt47.md 8장 "단순 건수+1 금지"). UUID 기반이라 동시 생성에도 충돌하지
-     * 않으며, task_code UNIQUE 제약이 최종 방어선이다.
-     */
     private String generateTaskCode() {
-        return "TASK-" + UUID.randomUUID();
+        return "TASK-" + LocalDateTime.now().format(TASK_CODE_TIME)
+                + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 }

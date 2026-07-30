@@ -33,16 +33,18 @@ public class InMemoryLatestVehicleLocationProvider implements LatestVehicleLocat
      * {@link ConcurrentHashMap#compute}로 원자적으로 수행해 동시 수신에도 안전하다.
      */
     @Override
-    public void update(VehicleLocationSnapshot snapshot) {
+    public boolean update(VehicleLocationSnapshot snapshot) {
         if (snapshot == null || snapshot.vehicleId() == null) {
-            return;
+            return false;
         }
-        latestByVehicleId.compute(snapshot.vehicleId(), (id, existing) -> {
+        VehicleLocationSnapshot result = latestByVehicleId.compute(snapshot.vehicleId(), (id, existing) -> {
             if (existing != null && existing.messageAt() != null && snapshot.messageAt() != null
                     && !snapshot.messageAt().isAfter(existing.messageAt())) {
                 return existing; // 오래되었거나 동일한 시각 → 유지
             }
             return snapshot;
         });
+        // compute 는 원자적이므로, 반환된 것이 방금 넣은 객체면 이 호출이 승자다.
+        return result == snapshot;
     }
 }

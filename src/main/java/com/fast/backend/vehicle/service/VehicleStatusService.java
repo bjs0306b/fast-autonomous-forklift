@@ -5,12 +5,10 @@ import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
 import com.fast.backend.vehicle.domain.VehicleStatus;
-import com.fast.backend.vehicle.domain.VehicleStatusHistory;
 import com.fast.backend.vehicle.dto.VehicleStatusResponse;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
 import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
-import com.fast.backend.vehicle.mapper.VehicleStatusHistoryMapper;
 import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,17 +60,14 @@ public class VehicleStatusService {
 
     private final VehicleMapper vehicleMapper;
     private final VehicleCurrentStatusMapper vehicleCurrentStatusMapper;
-    private final VehicleStatusHistoryMapper vehicleStatusHistoryMapper;
     private final VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster;
 
     public VehicleStatusService(
             VehicleMapper vehicleMapper,
             VehicleCurrentStatusMapper vehicleCurrentStatusMapper,
-            VehicleStatusHistoryMapper vehicleStatusHistoryMapper,
             VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster) {
         this.vehicleMapper = vehicleMapper;
         this.vehicleCurrentStatusMapper = vehicleCurrentStatusMapper;
-        this.vehicleStatusHistoryMapper = vehicleStatusHistoryMapper;
         this.vehicleWebSocketBroadcaster = vehicleWebSocketBroadcaster;
     }
 
@@ -91,16 +86,17 @@ public class VehicleStatusService {
         validateBatteryRange(command.battery());
 
         LocalDateTime receivedAt = CommunicationTime.nowLocal();
-        LocalDateTime effectiveMessageAt = command.messageAt() != null
-                ? CommunicationTime.toLocal(command.messageAt())
-                : receivedAt;
+        // 송신 측 메시지 시각은 브로드캐스트 occurredAt 으로만 쓴다 — FR-202 스키마에는 저장 컬럼이 없다.
+        OffsetDateTime messageAtForBroadcast = command.messageAt() != null
+                ? command.messageAt()
+                : CommunicationTime.toOffset(receivedAt);
 
-        // 4. 기존 최신 상태와 비교 — 오래된 메시지가 최신 상태를 덮어쓰지 않도록 함
+        // 4. 기존 최신 상태와 비교 — 오래된 메시지가 최신 상태를 덮어쓰지 않도록 함(received_at 기준)
         VehicleCurrentStatus existing = vehicleCurrentStatusMapper.findByVehicleId(vehicleId).orElse(null);
-        if (isStale(existing, effectiveMessageAt)) {
-            log.warn("Stale vehicle status message ignored: vehicleId={}, incomingMessageAt={}, "
-                            + "existingMessageAt={}",
-                    vehicleId, effectiveMessageAt, existing.getMessageAt());
+        if (isStale(existing, receivedAt)) {
+            log.warn("Stale vehicle status message ignored: vehicleId={}, incomingReceivedAt={}, "
+                            + "existingReceivedAt={}",
+                    vehicleId, receivedAt, existing.getReceivedAt());
             return toStatusResponse(existing);
         }
 
@@ -114,16 +110,16 @@ public class VehicleStatusService {
         newStatus.setHeading(command.heading());
         newStatus.setSpeed(command.speed());
         applyIsaacExtras(newStatus, command.isaacExtras(), existing);
-        newStatus.setMessageAt(effectiveMessageAt);
+        newStatus.setMessageAt(CommunicationTime.toLocal(messageAtForBroadcast));
         newStatus.setReceivedAt(receivedAt);
-        newStatus.setUpdatedAt(receivedAt);
+        // 포크 상태는 fork-status 토픽 전용이라 상태 메시지가 덮어쓰지 않는다(기존 값 보존).
+        if (existing != null) {
+            newStatus.setForkState(existing.getForkState());
+            newStatus.setForkErrorCode(existing.getForkErrorCode());
+        }
         vehicleCurrentStatusMapper.upsert(newStatus);
 
-        // 6. vehicle_status_history insert — upsert와 같은 트랜잭션(@Transactional)에서 실행되어,
-        //    이력 insert가 실패하면 방금 반영한 current status upsert도 함께 롤백된다(prompt22.md 4장,
-        //    "부분 성공이 발생하지 않도록 한다"). 병합이 끝난 newStatus를 그대로 변환하므로 이력과
-        //    현재 상태가 서로 다른 값을 가질 수 없다.
-        vehicleStatusHistoryMapper.insert(toHistory(newStatus, receivedAt));
+        // FR-202 스키마 전환(prompt85)으로 vehicle_status_history 가 사라졌다 — 이력 insert 없음.
 
         log.info("Vehicle current status updated: vehicleId={}, status={}, battery={}, receivedAt={}",
                 vehicleId, normalizedStatus, command.battery(), receivedAt);
@@ -132,7 +128,7 @@ public class VehicleStatusService {
         //    아직 저장되지 않은 상태를 관제에 먼저 전송하지 않는다. Broadcaster는 자체적으로 전송
         //    예외를 흡수하므로 커밋된 DB 결과에는 영향을 주지 않는다.
         VehicleStatusResponse statusResponse = toStatusResponse(newStatus);
-        broadcastStatusAfterCommit(vehicleId, statusResponse, CommunicationTime.toOffset(effectiveMessageAt));
+        broadcastStatusAfterCommit(vehicleId, statusResponse, messageAtForBroadcast);
 
         return statusResponse;
     }
@@ -186,35 +182,21 @@ public class VehicleStatusService {
     }
 
     /**
-     * 기존 상태가 없으면(최초 수신) 당연히 stale이 아니다. 기존 상태가 있고, 그 messageAt이 새로
-     * 들어온 메시지의 messageAt보다 같거나 늦으면(더 최신이면) 새 메시지를 stale로 간주해 무시한다.
+     * FR-202 스키마에서 {@code message_at} 컬럼이 사라져 <b>수신 시각(received_at) 기준</b>으로
+     * 비교한다(prompt85).
+     *
+     * <p>정확도가 낮아진 것은 사실이다 — 송신 측이 찍은 메시지 시각이 아니라 백엔드가 받은 시각이라,
+     * 네트워크 지연으로 순서가 뒤바뀐 두 메시지를 구분하지 못한다. 그래도 "이미 더 나중에 받은 상태가
+     * 있으면 덮어쓰지 않는다"는 최소 보호는 유지된다. 메시지 시각 기준 판정이 다시 필요해지면
+     * 컬럼을 되살리는 것이 맞다(이 결정은 스키마 축소의 대가다).
      */
-    private boolean isStale(VehicleCurrentStatus existing, LocalDateTime incomingMessageAt) {
-        if (existing == null || existing.getMessageAt() == null) {
+    private boolean isStale(VehicleCurrentStatus existing, LocalDateTime incomingReceivedAt) {
+        if (existing == null || existing.getReceivedAt() == null) {
             return false;
         }
-        return !incomingMessageAt.isAfter(existing.getMessageAt());
+        return incomingReceivedAt.isBefore(existing.getReceivedAt());
     }
 
-    private VehicleStatusHistory toHistory(VehicleCurrentStatus status, LocalDateTime createdAt) {
-        VehicleStatusHistory history = new VehicleStatusHistory();
-        history.setVehicleId(status.getVehicleId());
-        history.setStatus(status.getStatus());
-        history.setBattery(status.getBattery());
-        history.setPositionX(status.getPositionX());
-        history.setPositionY(status.getPositionY());
-        history.setHeading(status.getHeading());
-        history.setSpeed(status.getSpeed());
-        history.setForkHeight(status.getForkHeight());
-        history.setHasCargo(status.getHasCargo());
-        history.setCargoId(status.getCargoId());
-        history.setFootprintLength(status.getFootprintLength());
-        history.setFootprintWidth(status.getFootprintWidth());
-        history.setMessageAt(status.getMessageAt());
-        history.setReceivedAt(status.getReceivedAt());
-        history.setCreatedAt(createdAt);
-        return history;
-    }
 
     private VehicleStatusResponse toStatusResponse(VehicleCurrentStatus status) {
         return new VehicleStatusResponse(

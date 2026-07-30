@@ -30,7 +30,8 @@ class LocationProviderWiringTest {
         when(vehicleMapper.existsByVehicleId("REAL-F01")).thenReturn(true);
         InMemoryLatestVehicleLocationProvider provider = new InMemoryLatestVehicleLocationProvider();
         ForkliftLocationService service = new ForkliftLocationService(
-                vehicleMapper, mock(VehicleWebSocketBroadcaster.class), provider);
+                vehicleMapper, mock(com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper.class),
+                mock(VehicleWebSocketBroadcaster.class), provider);
 
         ForkliftLocationMessage message = new ForkliftLocationMessage(
                 "REAL-F01", "MOVING",
@@ -69,7 +70,8 @@ class LocationProviderWiringTest {
         when(vehicleMapper.existsByVehicleId("GHOST")).thenReturn(false);
         InMemoryLatestVehicleLocationProvider provider = new InMemoryLatestVehicleLocationProvider();
         ForkliftLocationService service = new ForkliftLocationService(
-                vehicleMapper, mock(VehicleWebSocketBroadcaster.class), provider);
+                vehicleMapper, mock(com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper.class),
+                mock(VehicleWebSocketBroadcaster.class), provider);
 
         service.handleLocation(new ForkliftLocationMessage(
                 "GHOST", null, new ForkliftLocationMessage.Position(1.0, 2.0, "map"), 0.0, null, 0.0, MSG_AT));

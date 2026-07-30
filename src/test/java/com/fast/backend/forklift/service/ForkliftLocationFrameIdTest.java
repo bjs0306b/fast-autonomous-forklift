@@ -20,11 +20,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 확정 좌표계 규격(prompt32.md 1장 5번: 단위 m, 허용 frameId는 {@code map}/{@code odom}, 기본값
- * {@code map})을 검증한다.
+ * 최종 합의 좌표계 규격(prompt84 3항: 단위 m, frameId는 <b>{@code map}만</b> 허용, 생략도 위반)을
+ * 검증한다.
  *
- * <p>허용되지 않은 frameId는 메시지를 폐기한다 — 알 수 없는 좌표계의 위치를 관제 화면에 그리면 차량이
- * 엉뚱한 곳에 표시되므로, 다음 정상 메시지를 기다리는 편이 안전하다.
+ * <p>이전 규격(prompt32.md 1장 5번)은 {@code odom}을 허용하고 생략 시 {@code map}으로 보정했다.
+ * 최종 합의에서 둘 다 <b>규격 위반</b>이 됐다 — odom은 주행거리계 기준 상대 좌표라 전역 지도
+ * 좌표로 해석하면 차량이 엉뚱한 곳에 그려지고, 생략을 map으로 채우면 발행 측 위반이 드러나지 않는다.
+ * 위반 메시지는 저장도 중계도 하지 않고 폐기한다.
  */
 class ForkliftLocationFrameIdTest {
 
@@ -39,7 +41,8 @@ class ForkliftLocationFrameIdTest {
     void setUp() {
         vehicleMapper = mock(VehicleMapper.class);
         broadcaster = mock(VehicleWebSocketBroadcaster.class);
-        service = new ForkliftLocationService(vehicleMapper, broadcaster,
+        service = new ForkliftLocationService(vehicleMapper,
+                mock(com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper.class), broadcaster,
                 new com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider());
         when(vehicleMapper.existsByVehicleId("REAL-F01")).thenReturn(true);
     }
@@ -51,25 +54,27 @@ class ForkliftLocationFrameIdTest {
         assertThat(captureBroadcastData().position().frameId()).isEqualTo("map");
     }
 
+    /** odom은 더 이상 허용하지 않는다 — 저장은 물론 중계도 하지 않는다(prompt84 3항). */
     @Test
-    void odomFrameId_isAccepted() {
+    void odomFrameId_isRejectedAndNeverBroadcast() {
         service.handleLocation(message("odom"));
 
-        assertThat(captureBroadcastData().position().frameId()).isEqualTo("odom");
+        verify(broadcaster, never()).broadcastLocation(any(), any(), any());
     }
 
+    /** 생략을 map으로 자동 보정하지 않는다 — 합의 payload에서 frameId는 필수다. */
     @Test
-    void missingFrameId_defaultsToMap() {
+    void missingFrameId_isRejected() {
         service.handleLocation(message(null));
 
-        assertThat(captureBroadcastData().position().frameId()).isEqualTo("map");
+        verify(broadcaster, never()).broadcastLocation(any(), any(), any());
     }
 
     @Test
-    void blankFrameId_defaultsToMap() {
+    void blankFrameId_isRejected() {
         service.handleLocation(message("   "));
 
-        assertThat(captureBroadcastData().position().frameId()).isEqualTo("map");
+        verify(broadcaster, never()).broadcastLocation(any(), any(), any());
     }
 
     @Test

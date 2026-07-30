@@ -51,11 +51,11 @@ public class StationMeasurementBroadcaster {
                 response);
         try {
             messagingTemplate.convertAndSend(StationMeasurementTopics.ALL, event);
-            if (response.stationId() != null && !response.stationId().isBlank()) {
-                messagingTemplate.convertAndSend(StationMeasurementTopics.byStationId(response.stationId()), event);
+            if (response.sessionId() != null && !response.sessionId().isBlank()) {
+                messagingTemplate.convertAndSend(StationMeasurementTopics.bySessionId(response.sessionId()), event);
             }
-            log.debug("Station measurement broadcast sent: measurementId={}, stationId={}",
-                    response.measurementId(), response.stationId());
+            log.debug("Station measurement broadcast sent: measurementId={}, sessionId={}",
+                    response.measurementId(), response.sessionId());
         } catch (Exception e) {
             log.error("Failed to broadcast station measurement event: measurementId={}, error={}",
                     response.measurementId(), e.getMessage());

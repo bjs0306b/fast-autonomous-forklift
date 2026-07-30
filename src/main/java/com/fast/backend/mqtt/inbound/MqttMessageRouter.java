@@ -3,8 +3,6 @@ package com.fast.backend.mqtt.inbound;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fast.backend.ai.dto.AiCargoAnalysisMessage;
-import com.fast.backend.ai.service.AiCargoAnalysisService;
 import com.fast.backend.command.dto.VehicleCommandResultMessage;
 import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.config.mqtt.MqttTopics;
@@ -22,8 +20,6 @@ import com.fast.backend.isaac.dto.IsaacForkliftStatusMessage;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
 import com.fast.backend.isaac.service.IsaacForkliftStatusService;
-import com.fast.backend.loadsafety.dto.LoadSafetyMessage;
-import com.fast.backend.loadsafety.service.LoadSafetyService;
 import com.fast.backend.station.dto.StationMeasurementMessage;
 import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
@@ -51,7 +47,6 @@ public class MqttMessageRouter {
     private final MqttTopics mqttTopics;
     private final ForkliftStatusService forkliftStatusService;
     private final ForkliftLocationService forkliftLocationService;
-    private final AiCargoAnalysisService aiCargoAnalysisService;
     private final IsaacForkliftLocationService isaacForkliftLocationService;
     private final IsaacForkliftStatusService isaacForkliftStatusService;
     private final IsaacForkliftPathService isaacForkliftPathService;
@@ -60,11 +55,9 @@ public class MqttMessageRouter {
     private final EmbeddedErrorService embeddedErrorService;
     private final StationMeasurementService stationMeasurementService;
     private final TransportCommandResultService transportCommandResultService;
-    private final LoadSafetyService loadSafetyService;
 
     public MqttMessageRouter(ObjectMapper objectMapper, MqttTopics mqttTopics,
             ForkliftStatusService forkliftStatusService, ForkliftLocationService forkliftLocationService,
-            AiCargoAnalysisService aiCargoAnalysisService,
             IsaacForkliftLocationService isaacForkliftLocationService,
             IsaacForkliftStatusService isaacForkliftStatusService,
             IsaacForkliftPathService isaacForkliftPathService,
@@ -72,13 +65,11 @@ public class MqttMessageRouter {
             EmbeddedForkStatusService embeddedForkStatusService,
             EmbeddedErrorService embeddedErrorService,
             StationMeasurementService stationMeasurementService,
-            TransportCommandResultService transportCommandResultService,
-            LoadSafetyService loadSafetyService) {
+            TransportCommandResultService transportCommandResultService) {
         this.objectMapper = objectMapper;
         this.mqttTopics = mqttTopics;
         this.forkliftStatusService = forkliftStatusService;
         this.forkliftLocationService = forkliftLocationService;
-        this.aiCargoAnalysisService = aiCargoAnalysisService;
         this.isaacForkliftLocationService = isaacForkliftLocationService;
         this.isaacForkliftStatusService = isaacForkliftStatusService;
         this.isaacForkliftPathService = isaacForkliftPathService;
@@ -87,7 +78,6 @@ public class MqttMessageRouter {
         this.embeddedErrorService = embeddedErrorService;
         this.stationMeasurementService = stationMeasurementService;
         this.transportCommandResultService = transportCommandResultService;
-        this.loadSafetyService = loadSafetyService;
     }
 
     public void route(String topic, String payload) {
@@ -123,12 +113,8 @@ public class MqttMessageRouter {
                 routeForkStatus(topic, payload);
             } else if (mqttTopics.isForkliftErrorTopic(topic)) {
                 routeEmbeddedError(topic, payload);
-            } else if (mqttTopics.isCargoDetectedTopic(topic)) {
-                routeCargoDetected(payload);
             } else if (mqttTopics.isStationMeasurementTopic(topic)) {
                 routeStationMeasurement(topic, payload);
-            } else if (mqttTopics.isForkliftLoadSafetyTopic(topic)) {
-                routeLoadSafety(topic, payload);
             }
         } catch (JsonProcessingException e) {
             log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
@@ -145,29 +131,9 @@ public class MqttMessageRouter {
                 || mqttTopics.isForkliftCommandResultTopic(topic)
                 || mqttTopics.isForkliftForkStatusTopic(topic)
                 || mqttTopics.isForkliftErrorTopic(topic)
-                || mqttTopics.isCargoDetectedTopic(topic)
-                || mqttTopics.isStationMeasurementTopic(topic)
-                || mqttTopics.isForkliftLoadSafetyTopic(topic);
+                || mqttTopics.isStationMeasurementTopic(topic);
     }
 
-    /**
-     * forklift/{id}/load-safety 라우팅(prompt63.md 4장). 이 토픽을 쓰는 기존 규격이 없어 판별 분기 없이
-     * 곧바로 처리한다. 토픽의 vehicleId와 payload의 vehicleId가 다르면 다른 차량의 안전 상태를 덮어쓰게
-     * 되므로 반드시 대조한 뒤 폐기한다.
-     */
-    private void routeLoadSafety(String topic, String payload) {
-        try {
-            LoadSafetyMessage message = objectMapper.readValue(payload, LoadSafetyMessage.class);
-            if (!isVehicleIdConsistentWithTopic(topic, message.vehicleId())) {
-                return;
-            }
-            loadSafetyService.handleLoadSafety(message);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse load safety message: topic={}, error={}", topic, e.getMessage());
-        } catch (RuntimeException e) {
-            log.error("Load safety processing failed unexpectedly: topic={}, error={}", topic, e.getMessage());
-        }
-    }
 
     /**
      * forklift/{id}/status 라우팅. Isaac 상태 payload는 forkHeight/hasCargo/footprint 중 하나라도
@@ -217,7 +183,8 @@ public class MqttMessageRouter {
                 if (!isVehicleIdConsistentWithTopic(topic, message.vehicleId())) {
                     return;
                 }
-                forkliftLocationService.handleLocation(message);
+                // topic을 함께 넘긴다 — 폐기·stale 로그에 어느 토픽의 메시지였는지 남겨야 추적된다.
+                forkliftLocationService.handleLocation(topic, message);
             }
         } catch (JsonProcessingException e) {
             log.error("Failed to parse forklift location message: topic={}, error={}", topic, e.getMessage());
@@ -288,27 +255,6 @@ public class MqttMessageRouter {
         }
     }
 
-    /**
-     * cargo/detected는 AI 화물·파렛트 분석 결과 규격이 확정되어(prompt26.md) {@link AiCargoAnalysisMessage}로
-     * 역직렬화하고 {@link AiCargoAnalysisService#process}에 위임한다. JSON 역직렬화 실패는 다른 라우팅
-     * 메서드와 동일하게 여기서 잡아 해당 메시지만 폐기한다.
-     *
-     * <p>{@code AiCargoAnalysisService#process}는 검증 실패(BusinessException)만 자체적으로 흡수하고,
-     * DB insert 단계에서 발생하는 예상치 못한 {@link RuntimeException}은 트랜잭션 롤백을 위해 일부러
-     * 밖으로 전파한다(그 클래스 Javadoc 참고) — 그 예외가 MQTT 소비 스레드까지 올라와 애플리케이션을
-     * 죽이지 않도록 여기서 최종적으로 받아 로그만 남긴다.
-     */
-    private void routeCargoDetected(String payload) {
-        try {
-            AiCargoAnalysisMessage message = objectMapper.readValue(payload, AiCargoAnalysisMessage.class);
-            aiCargoAnalysisService.process(message);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse AI cargo analysis message: topic={}, error={}",
-                    mqttTopics.cargoDetectedTopic(), e.getMessage());
-        } catch (RuntimeException e) {
-            log.error("AI cargo analysis processing failed unexpectedly: error={}", e.getMessage());
-        }
-    }
 
     /**
      * fast/station/{station_id}/measurement 라우팅(prompt16.md 2·8단계, MR !36, FR-101-5). 토픽의

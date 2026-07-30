@@ -33,6 +33,7 @@ class ForkliftLocationServiceTest {
     private static final OffsetDateTime MESSAGE_AT = LocalDateTime.of(2026, 7, 22, 13, 30, 0).atOffset(java.time.ZoneOffset.ofHours(9));
 
     private VehicleMapper vehicleMapper;
+    private com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper currentStatusMapper;
     private VehicleWebSocketBroadcaster broadcaster;
     private ForkliftLocationService forkliftLocationService;
 
@@ -40,7 +41,8 @@ class ForkliftLocationServiceTest {
     void setUp() {
         vehicleMapper = mock(VehicleMapper.class);
         broadcaster = mock(VehicleWebSocketBroadcaster.class);
-        forkliftLocationService = new ForkliftLocationService(vehicleMapper, broadcaster,
+        currentStatusMapper = mock(com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper.class);
+        forkliftLocationService = new ForkliftLocationService(vehicleMapper, currentStatusMapper, broadcaster,
                 new com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider());
     }
 
@@ -302,8 +304,12 @@ class ForkliftLocationServiceTest {
         verify(broadcaster, never()).broadcastLocation(any(), any(), any());
     }
 
+    /**
+     * 최종 합의(prompt84 3항)로 blank frameId는 더 이상 map으로 보정되지 않고 폐기된다.
+     * 예전에는 이 테스트가 "map으로 정규화"를 검증했다.
+     */
     @Test
-    void handleLocation_blankFrameId_normalizesToMap() {
+    void handleLocation_blankFrameId_isRejected() {
         when(vehicleMapper.existsByVehicleId("FORKLIFT-01")).thenReturn(true);
         ForkliftLocationMessage message = new ForkliftLocationMessage(
                 "FORKLIFT-01", null, new ForkliftLocationMessage.Position(1.0, 1.0, "  "),
@@ -311,9 +317,7 @@ class ForkliftLocationServiceTest {
 
         forkliftLocationService.handleLocation(message);
 
-        ArgumentCaptor<VehicleLocationEventData> captor = ArgumentCaptor.forClass(VehicleLocationEventData.class);
-        verify(broadcaster).broadcastLocation(eq("FORKLIFT-01"), captor.capture(), any());
-        assertThat(captor.getValue().position().frameId()).isEqualTo("map");
+        verify(broadcaster, never()).broadcastLocation(any(), any(), any());
     }
 
     @Test

@@ -104,7 +104,7 @@ public class MonitoringService {
         Map<String, VehicleLocationSnapshot> locationByVehicleId = locationProvider.findAllLatest().stream()
                 .collect(Collectors.toMap(VehicleLocationSnapshot::vehicleId, s -> s, (a, b) -> a));
 
-        List<TransportTask> recentTasks = transportTaskMapper.findAll(null, null, null, DASHBOARD_TASK_LIMIT, 0);
+        List<TransportTask> recentTasks = transportTaskMapper.findAll(null, null, DASHBOARD_TASK_LIMIT, 0);
         List<TransportTask> activeTasks = transportTaskMapper.findActiveTasksWithVehicle();
 
         // 두 목록에 등장한 taskId 전체를 한 번에 조회한다(중복 taskId는 Set으로 제거).
@@ -176,7 +176,8 @@ public class MonitoringService {
                         currentTask.getTaskCode(),
                         currentTask.getStatus() == null ? null : currentTask.getStatus().name(),
                         commandStatusName(latestCommandByTaskId.get(currentTask.getId())),
-                        CommunicationTime.toOffset(currentTask.getUpdatedAt()));
+                        // FR-202: updated_at 컬럼이 없어 생성 시각으로 대체한다(prompt85).
+                        CommunicationTime.toOffset(currentTask.getCreatedAt()));
         OffsetDateTime lastUpdatedAt = s.messageAt() != null ? s.messageAt() : s.receivedAt();
         return new DashboardResponse.VehicleView(
                 vr.vehicleId(), vr.name(), vr.source(), vr.active(),
@@ -189,7 +190,7 @@ public class MonitoringService {
                 task.getVehicleId(),
                 task.getStatus() == null ? null : task.getStatus().name(),
                 commandStatusName(latest),
-                CommunicationTime.toOffset(task.getUpdatedAt()));
+                CommunicationTime.toOffset(task.getCreatedAt()));
     }
 
     private static String commandStatusName(TransportCommand command) {

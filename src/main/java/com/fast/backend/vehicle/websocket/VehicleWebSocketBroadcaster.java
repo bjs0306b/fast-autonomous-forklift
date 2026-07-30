@@ -3,7 +3,6 @@ package com.fast.backend.vehicle.websocket;
 import com.fast.backend.command.websocket.VehicleCommandResultEventData;
 import com.fast.backend.common.websocket.RealtimeEvent;
 import com.fast.backend.common.websocket.RealtimeEventType;
-import com.fast.backend.loadsafety.dto.LoadSafetyResponse;
 import com.fast.backend.vehicle.dto.VehicleStatusResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,16 +91,6 @@ public class VehicleWebSocketBroadcaster {
                 VehicleWebSocketTopics.FORK_STATUS_ALL, VehicleWebSocketTopics.forkStatus(vehicleId));
     }
 
-    /**
-     * 적재 화물 안전 상태 전용(prompt63.md 3장 3번). {@code occurredAt}에는 서버 처리 시각이 아니라
-     * 센서가 실제로 감지한 시각({@code detectedAt})을 넣는다 — 화면이 "이 값이 얼마나 오래된 것인가"를
-     * 판단해야 하기 때문이다(3장 7번).
-     */
-    public void broadcastLoadSafety(
-            String vehicleId, LoadSafetyResponse data, OffsetDateTime occurredAt) {
-        send(RealtimeEventType.VEHICLE_LOAD_SAFETY_UPDATED, vehicleId, occurredAt, data,
-                VehicleWebSocketTopics.LOAD_SAFETY_ALL, VehicleWebSocketTopics.loadSafety(vehicleId));
-    }
 
     /** 실물 임베디드 오류 전용. */
     public void broadcastEmbeddedError(

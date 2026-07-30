@@ -12,7 +12,7 @@ public final class StationMeasurementTopics {
     private StationMeasurementTopics() {
     }
 
-    public static String byStationId(String stationId) {
-        return "/topic/stations/" + stationId + "/measurements";
+    public static String bySessionId(String sessionId) {
+        return "/topic/stations/" + sessionId + "/measurements";
     }
 }

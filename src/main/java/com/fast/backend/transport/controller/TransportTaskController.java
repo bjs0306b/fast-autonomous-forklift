@@ -53,10 +53,9 @@ public class TransportTaskController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String vehicleId,
-            @RequestParam(required = false) String palletId) {
+            @RequestParam(required = false) String vehicleId) {
         return ApiResponse.success(
-                transportTaskService.list(page, size, parseStatus(status), vehicleId, palletId));
+                transportTaskService.list(page, size, parseStatus(status), vehicleId));
     }
 
     @GetMapping("/{taskId}")

@@ -16,7 +16,6 @@ public enum RealtimeEventType {
     VEHICLE_FORK_STATUS_UPDATED,
     VEHICLE_ERROR_OCCURRED,
     /** 적재 화물 안전 상태 갱신(prompt63.md 3장 3번). */
-    VEHICLE_LOAD_SAFETY_UPDATED,
     AI_CARGO_ANALYSIS_COMPLETED,
     STATION_MEASUREMENT_COMPLETED
 }

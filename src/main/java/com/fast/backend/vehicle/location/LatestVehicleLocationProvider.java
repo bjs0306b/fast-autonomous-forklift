@@ -18,5 +18,13 @@ public interface LatestVehicleLocationProvider {
     List<VehicleLocationSnapshot> findAllLatest();
 
     /** 위치 수신 시 vehicleId별 최신값을 덮어쓴다. */
-    void update(VehicleLocationSnapshot snapshot);
+    /**
+     * 최신 위치를 갱신한다.
+     *
+     * @return 실제로 반영됐으면 true, 더 오래됐거나 같은 시각이라 무시했으면 false.
+     *         FR-202 스키마에서 {@code vehicle_current_status.message_at} 이 사라져(prompt85)
+     *         "오래된 위치 메시지 무시" 판정을 이 구현이 단독으로 맡는다 — 호출자는 이 반환값으로
+     *         DB 반영 여부를 정한다.
+     */
+    boolean update(VehicleLocationSnapshot snapshot);
 }

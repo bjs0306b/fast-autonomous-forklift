@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+    측정 세션과 단일 설비 점유(FR-202, prompt85).
+
+    점유/해제를 조건부 UPDATE 한 문장으로 처리하는 이유: SELECT 로 비어 있는지 확인한 뒤 UPDATE 하면
+    두 요청이 같은 빈 상태를 보고 둘 다 점유에 성공할 수 있다. WHERE 절에 조건을 넣어 DB 가
+    한 번에 판정하게 하고, 영향받은 행 수로 승패를 가른다.
+-->
+<mapper namespace="com.fast.backend.station.mapper.StationSessionMapper">
+
+    <resultMap id="stationSessionResultMap" type="com.fast.backend.station.domain.StationSession">
+        <id property="sessionId" column="session_id"/>
+        <result property="cargoId" column="cargo_id"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fast.backend.station.domain.StationSession">
+        INSERT INTO station_session (session_id, cargo_id)
+        VALUES (#{sessionId}, #{cargoId})
+    </insert>
+
+    <select id="findBySessionId" resultMap="stationSessionResultMap">
+        SELECT session_id, cargo_id
+        FROM station_session
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <select id="findActiveSession" resultMap="stationSessionResultMap">
+        SELECT s.session_id, s.cargo_id
+        FROM station_state st
+        JOIN station_session s ON s.session_id = st.active_session_id
+        WHERE st.singleton_id = 1
+    </select>
+
+    <update id="acquireStation">
+        UPDATE station_state
+        SET active_session_id = #{sessionId}
+        WHERE singleton_id = 1
+          AND active_session_id IS NULL
+    </update>
+
+    <update id="releaseStation">
+        UPDATE station_state
+        SET active_session_id = NULL
+        WHERE singleton_id = 1
+          AND active_session_id = #{sessionId}
+    </update>
+
+</mapper>

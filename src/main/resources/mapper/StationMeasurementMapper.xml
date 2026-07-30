@@ -1,84 +1,51 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+    FR-202 세션 기반 station_measurement(prompt85).
+    옛 31컬럼(station_id/measured_at_utc/bbox/miniature/eccentric/ratio/threshold ...)은 사라졌다.
+-->
 <mapper namespace="com.fast.backend.station.mapper.StationMeasurementMapper">
 
     <resultMap id="stationMeasurementResultMap" type="com.fast.backend.station.domain.StationMeasurement">
-        <id property="id" column="id"/>
+        <id property="sequenceNo" column="sequence_no"/>
         <result property="measurementId" column="measurement_id"/>
-        <result property="stationId" column="station_id"/>
-        <result property="schemaVersion" column="schema_version"/>
-        <result property="measuredAtUtc" column="measured_at_utc"/>
-        <result property="measuredAtOffsetMinutes" column="measured_at_offset_minutes"/>
+        <result property="sessionId" column="session_id"/>
         <result property="status" column="status"/>
-        <result property="boxCount" column="box_count"/>
-        <result property="palletBboxX" column="pallet_bbox_x"/>
-        <result property="palletBboxY" column="pallet_bbox_y"/>
-        <result property="palletBboxWidth" column="pallet_bbox_width"/>
-        <result property="palletBboxHeight" column="pallet_bbox_height"/>
-        <result property="palletScore" column="pallet_score"/>
-        <result property="frontCm" column="front_cm"/>
-        <result property="distanceStdCm" column="distance_std_cm"/>
-        <result property="framesUsed" column="frames_used"/>
-        <result property="heightCm" column="height_cm"/>
-        <result property="widthCm" column="width_cm"/>
-        <result property="depthCm" column="depth_cm"/>
-        <result property="miniatureScale" column="miniature_scale"/>
-        <result property="miniatureHeightMm" column="miniature_height_mm"/>
-        <result property="miniatureWidthMm" column="miniature_width_mm"/>
-        <result property="eccentric" column="eccentric"/>
-        <result property="loadDirection" column="load_direction"/>
-        <result property="ratioX" column="ratio_x"/>
-        <result property="ratioY" column="ratio_y"/>
-        <result property="magnitude" column="magnitude"/>
-        <result property="threshold" column="threshold"/>
-        <result property="loadMessage" column="load_message"/>
-        <result property="receivedAt" column="received_at"/>
+        <result property="cargoHeight" column="cargo_height"/>
+        <result property="tippingLevel" column="tipping_level"/>
+        <result property="overhangRatio" column="overhang_ratio"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
+    <sql id="measurementColumns">
+        sequence_no, measurement_id, session_id, status, cargo_height,
+        tipping_level, overhang_ratio, created_at
+    </sql>
+
     <insert id="insert" parameterType="com.fast.backend.station.domain.StationMeasurement"
-            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
-        INSERT INTO station_measurement (
-            measurement_id, station_id, schema_version,
-            measured_at_utc, measured_at_offset_minutes, status,
-            box_count,
-            pallet_bbox_x, pallet_bbox_y, pallet_bbox_width, pallet_bbox_height, pallet_score,
-            front_cm, distance_std_cm, frames_used,
-            height_cm, width_cm, depth_cm,
-            miniature_scale, miniature_height_mm, miniature_width_mm,
-            eccentric, load_direction, ratio_x, ratio_y, magnitude, threshold, load_message,
-            received_at, created_at
-        )
-        VALUES (
-            #{measurementId}, #{stationId}, #{schemaVersion},
-            #{measuredAtUtc}, #{measuredAtOffsetMinutes}, #{status},
-            #{boxCount},
-            #{palletBboxX}, #{palletBboxY}, #{palletBboxWidth}, #{palletBboxHeight}, #{palletScore},
-            #{frontCm}, #{distanceStdCm}, #{framesUsed},
-            #{heightCm}, #{widthCm}, #{depthCm},
-            #{miniatureScale}, #{miniatureHeightMm}, #{miniatureWidthMm},
-            #{eccentric}, #{loadDirection}, #{ratioX}, #{ratioY}, #{magnitude}, #{threshold}, #{loadMessage},
-            #{receivedAt}, #{createdAt}
-        )
+            useGeneratedKeys="true" keyProperty="sequenceNo" keyColumn="sequence_no">
+        INSERT INTO station_measurement
+            (measurement_id, session_id, status, cargo_height, tipping_level, overhang_ratio, created_at)
+        VALUES
+            (#{measurementId}, #{sessionId}, #{status}, #{cargoHeight},
+             #{tippingLevel}, #{overhangRatio}, #{createdAt})
     </insert>
 
     <select id="existsByMeasurementId" resultType="boolean">
-        SELECT COUNT(*) > 0
-        FROM station_measurement
-        WHERE measurement_id = #{measurementId}
+        SELECT COUNT(*) > 0 FROM station_measurement WHERE measurement_id = #{measurementId}
     </select>
 
     <select id="findByMeasurementId" resultMap="stationMeasurementResultMap">
-        SELECT *
+        SELECT <include refid="measurementColumns"/>
         FROM station_measurement
         WHERE measurement_id = #{measurementId}
     </select>
 
-    <select id="findLatestByStationId" resultMap="stationMeasurementResultMap">
-        SELECT *
+    <select id="findLatestBySessionId" resultMap="stationMeasurementResultMap">
+        SELECT <include refid="measurementColumns"/>
         FROM station_measurement
-        WHERE station_id = #{stationId}
-        ORDER BY measured_at_utc DESC, id DESC
+        WHERE session_id = #{sessionId}
+        ORDER BY sequence_no DESC
         LIMIT 1
     </select>
 

@@ -1,46 +1,33 @@
 package com.fast.backend.storage.domain;
 
-import java.time.LocalDateTime;
-
 /**
- * 선반 층({@link RackLevel}) 안의 개별 적재 슬롯(prompt46.md 5장). 화물이 실제로 들어가는 최소 단위.
+ * {@code storage_slot} 한 행 — FR-202 최종 스키마(prompt85).
  *
+ * <p>옛 구조와 달라진 점
  * <ul>
- *   <li>{@code width}/{@code length}/{@code height} — 슬롯 내부 유효 크기(m). 모두 0 초과여야 한다.</li>
- *   <li>{@code destinationX}/{@code destinationY} — 이 슬롯에 적재하기 위해 지게차가 정차할 좌표(m).
- *       {@code destinationHeading}은 정차 방향(degree). 실제 값은 팀 협의 대상(prompt46.md 20장).</li>
- *   <li>{@code status} — {@link StorageSlotStatus}. 추천 대상은 EMPTY뿐이다.</li>
- *   <li>{@code reservedTaskId} — 이 슬롯을 예약한 운반 작업의 taskCode(예약 시 설정, 해제 시 null).</li>
- *   <li>{@code storedCargoId} — 실제 적재된 화물의 cargo_id(OCCUPIED 시 설정).</li>
+ *   <li>PK 가 대리키 {@code id} → 자연키 {@code slotCode}</li>
+ *   <li>랙 계층({@code rack_level_id})이 사라졌다 — 슬롯이 최상위다</li>
+ *   <li>{@code width}/{@code length}/{@code height} → {@code usableHeight}/{@code forkHeight}.
+ *       <b>평면 치수가 없다</b></li>
+ *   <li>{@code reservedTaskId} 가 문자열(task_code) → {@code Long}(transport_task.id FK)</li>
+ *   <li>{@code createdAt}/{@code updatedAt} 이 없다</li>
  * </ul>
  */
 public class StorageSlot {
 
-    private Long id;
     private String slotCode;
-    private Long rackLevelId;
-    private double width;
-    private double length;
-    private double height;
+    /** 화물을 넣을 수 있는 수직 가용 높이(m). */
+    private Double usableHeight;
+    /** 적재 시 목표 포크 높이(m). */
+    private Double forkHeight;
     private Double destinationX;
     private Double destinationY;
     private Double destinationHeading;
     private StorageSlotStatus status;
-    private String reservedTaskId;
+    /** 이 슬롯을 예약한 운반 작업의 내부 id. RESERVED 일 때만 값이 있다. */
+    private Long reservedTaskId;
+    /** 적재된 화물. OCCUPIED 일 때만 값이 있다. */
     private String storedCargoId;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-
-    public StorageSlot() {
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public String getSlotCode() {
         return slotCode;
@@ -50,36 +37,20 @@ public class StorageSlot {
         this.slotCode = slotCode;
     }
 
-    public Long getRackLevelId() {
-        return rackLevelId;
+    public Double getUsableHeight() {
+        return usableHeight;
     }
 
-    public void setRackLevelId(Long rackLevelId) {
-        this.rackLevelId = rackLevelId;
+    public void setUsableHeight(Double usableHeight) {
+        this.usableHeight = usableHeight;
     }
 
-    public double getWidth() {
-        return width;
+    public Double getForkHeight() {
+        return forkHeight;
     }
 
-    public void setWidth(double width) {
-        this.width = width;
-    }
-
-    public double getLength() {
-        return length;
-    }
-
-    public void setLength(double length) {
-        this.length = length;
-    }
-
-    public double getHeight() {
-        return height;
-    }
-
-    public void setHeight(double height) {
-        this.height = height;
+    public void setForkHeight(Double forkHeight) {
+        this.forkHeight = forkHeight;
     }
 
     public Double getDestinationX() {
@@ -114,11 +85,11 @@ public class StorageSlot {
         this.status = status;
     }
 
-    public String getReservedTaskId() {
+    public Long getReservedTaskId() {
         return reservedTaskId;
     }
 
-    public void setReservedTaskId(String reservedTaskId) {
+    public void setReservedTaskId(Long reservedTaskId) {
         this.reservedTaskId = reservedTaskId;
     }
 
@@ -128,21 +99,5 @@ public class StorageSlot {
 
     public void setStoredCargoId(String storedCargoId) {
         this.storedCargoId = storedCargoId;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
     }
 }

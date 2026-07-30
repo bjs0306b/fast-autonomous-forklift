@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+    FR-202 최종 스키마 기준(prompt85).
+
+    옛 스키마와 달라진 점
+      - updated_at 컬럼이 없다. 시각은 message_at(송신 시각) / received_at(수신 시각) 둘이다.
+      - fork_state / fork_error_code 가 이 테이블로 흡수됐다(구 vehicle_fork_current_status).
+      - message_at 은 FR-202 축소 때 뺐다가 prompt86 A안으로 되살렸다 — 위치 메시지의 stale/중복
+        판정 기준이다. 서비스(절대시각 비교)와 이 XML(조건부 CASE) 양쪽에서 이중으로 막는다.
+-->
 <mapper namespace="com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper">
 
     <resultMap id="vehicleCurrentStatusResultMap" type="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
@@ -11,19 +20,20 @@
         <result property="heading" column="heading"/>
         <result property="speed" column="speed"/>
         <result property="forkHeight" column="fork_height"/>
+        <result property="forkState" column="fork_state"/>
+        <result property="forkErrorCode" column="fork_error_code"/>
         <result property="hasCargo" column="has_cargo"/>
         <result property="cargoId" column="cargo_id"/>
         <result property="footprintLength" column="footprint_length"/>
         <result property="footprintWidth" column="footprint_width"/>
         <result property="messageAt" column="message_at"/>
         <result property="receivedAt" column="received_at"/>
-        <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
     <sql id="currentStatusColumns">
         vehicle_id, status, battery, position_x, position_y, heading, speed,
-        fork_height, has_cargo, cargo_id, footprint_length, footprint_width,
-        message_at, received_at, updated_at
+        fork_height, fork_state, fork_error_code, has_cargo, cargo_id,
+        footprint_length, footprint_width, message_at, received_at
     </sql>
 
     <select id="findByVehicleId" resultMap="vehicleCurrentStatusResultMap">
@@ -42,22 +52,20 @@
     </select>
 
     <!--
-        Isaac 확장 컬럼도 다른 컬럼과 동일하게 "전달된 값으로 그대로 덮어쓴다". 여기서 COALESCE로
-        보존하지 않는 이유: 어떤 값을 유지하고 어떤 값을 지울지는 "메시지 종류"에 달린 판단인데,
-        SQL은 호출자가 ROS2인지 Isaac인지 알 수 없다. 그래서 병합 판단은 전부
-        VehicleStatusService가 하고(그 클래스는 이미 stale 비교를 위해 기존 행을 읽어둔다),
-        Mapper는 "결정된 최종 상태를 쓴다"는 단일 책임만 갖는다. 이렇게 두면 이력 테이블에 저장되는
-        값과 현재 상태 테이블에 저장되는 값이 항상 같은 객체에서 나와 서로 어긋날 수 없다.
+        상태 토픽 전용 전체 upsert. 병합 판단(Isaac 확장 필드 보존 등)은 VehicleStatusService 가
+        전부 끝낸 뒤 "결정된 최종 상태"를 넘긴다 — SQL 은 호출자가 ROS2인지 Isaac인지 알 수 없다.
+        fork_state / fork_error_code 는 여기서 건드리지 않는다(fork-status 토픽 전용 컬럼이라,
+        상태 메시지가 null 로 덮으면 안 된다).
     -->
     <insert id="upsert" parameterType="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
         INSERT INTO vehicle_current_status
             (vehicle_id, status, battery, position_x, position_y, heading, speed,
              fork_height, has_cargo, cargo_id, footprint_length, footprint_width,
-             message_at, received_at, updated_at)
+             message_at, received_at)
         VALUES
             (#{vehicleId}, #{status}, #{battery}, #{positionX}, #{positionY}, #{heading}, #{speed},
              #{forkHeight}, #{hasCargo}, #{cargoId}, #{footprintLength}, #{footprintWidth},
-             #{messageAt}, #{receivedAt}, #{updatedAt})
+             #{messageAt}, #{receivedAt})
         ON DUPLICATE KEY UPDATE
             status = VALUES(status),
             battery = VALUES(battery),
@@ -71,16 +79,73 @@
             footprint_length = VALUES(footprint_length),
             footprint_width = VALUES(footprint_width),
             message_at = VALUES(message_at),
-            received_at = VALUES(received_at),
-            updated_at = VALUES(updated_at)
+            received_at = VALUES(received_at)
     </insert>
 
     <!--
-        활성 차량 기준 상태별 집계. vehicle_current_status에 아직 행이 없는(=한 번도 상태를 받은 적
-        없는) 활성 차량도 LEFT JOIN + COALESCE로 UNKNOWN에 포함시킨다(prompt16.md 14장 분석 결과,
-        answer15.md 11장에서 상세 설명). 상태 enum이 10종으로 확장돼도(prompt32.md 1장 3번) 이 쿼리는
-        상태 값을 문자열로 GROUP BY할 뿐이라 그대로 동작한다 — 응답에 10종을 0으로 채우는 책임은
-        VehicleService#countByStatus에 있다.
+        위치 메시지 전용 부분 갱신(prompt83·84 → prompt86 A안으로 조건부 갱신 복원).
+
+        1) 위치 3컬럼 + message_at/received_at 만 건드린다.
+           status/battery/speed/fork_*/Isaac 확장 필드는 목록에 없다 — 위치 메시지에 그 값이 없으므로
+           함께 쓰면 다른 토픽이 채워 둔 값을 null 로 지운다.
+
+        2) 행이 없으면 INSERT 되며 그때만 status='UNKNOWN' 이다(위치만으로 주행 상태를 단정하지 않는다).
+
+        3) **조건부 갱신** — 기존 message_at 이 null 이거나 새 message_at 이 더 최신일 때만 값을 바꾼다.
+           서비스가 이미 stale 을 거르지만 두 메시지가 거의 동시에 처리되면 둘 다 통과할 수 있어,
+           마지막 방어선을 DB 에 둔다. 조건을 못 맞추면 received_at 도 그대로다(received_at 정의 유지).
+
+        ★ message_at 을 **맨 마지막에** 대입한다.
+          MySQL 의 ON DUPLICATE KEY UPDATE 는 대입을 왼쪽→오른쪽으로 평가하며 뒤쪽 식이 앞에서 이미
+          바뀐 값을 본다. message_at 을 먼저 갱신하면 이후 CASE 조건이 "새 값 vs 새 값"이 되어 전부
+          거짓이 되고, 좌표만 갱신되지 않는 어긋난 행이 남는다.
+          (표준 UPDATE 의미론을 따르는 H2 에서는 모든 식이 옛 값을 보므로 이 순서면 양쪽 다 안전하다.)
+
+        ★ CASE 안에서 VALUES(column) 을 쓰지 않고 바인드 파라미터(#{...})를 직접 참조한다.
+          H2(MySQL 모드)는 VALUES(col) 을 대입식 오른쪽에서만 받고 CASE 식 안에서는 테이블 생성자로
+          해석해 파싱 오류를 낸다(prompt84 에서 실제로 확인). 값은 같고 MySQL·H2 모두에서 동작한다.
+    -->
+    <insert id="updateLocation">
+        INSERT INTO vehicle_current_status
+            (vehicle_id, status, position_x, position_y, heading, message_at, received_at)
+        VALUES
+            (#{vehicleId}, 'UNKNOWN', #{positionX}, #{positionY}, #{heading}, #{messageAt}, #{receivedAt})
+        ON DUPLICATE KEY UPDATE
+            position_x = CASE
+                WHEN message_at IS NULL OR #{messageAt} &gt; message_at
+                THEN #{positionX} ELSE position_x END,
+            position_y = CASE
+                WHEN message_at IS NULL OR #{messageAt} &gt; message_at
+                THEN #{positionY} ELSE position_y END,
+            heading = CASE
+                WHEN message_at IS NULL OR #{messageAt} &gt; message_at
+                THEN #{heading} ELSE heading END,
+            received_at = CASE
+                WHEN message_at IS NULL OR #{messageAt} &gt; message_at
+                THEN #{receivedAt} ELSE received_at END,
+            message_at = CASE
+                WHEN message_at IS NULL OR #{messageAt} &gt; message_at
+                THEN #{messageAt} ELSE message_at END
+    </insert>
+
+    <!--
+        포크 상태 전용 부분 갱신(구 vehicle_fork_current_status.upsert 대체).
+        limit_bottom 은 최종 스키마에 대응 컬럼이 없어 저장하지 않는다 — WebSocket 중계로만 쓴다.
+    -->
+    <insert id="updateForkStatus">
+        INSERT INTO vehicle_current_status
+            (vehicle_id, status, fork_state, fork_error_code, received_at)
+        VALUES
+            (#{vehicleId}, 'UNKNOWN', #{forkState}, #{forkErrorCode}, #{receivedAt})
+        ON DUPLICATE KEY UPDATE
+            fork_state = VALUES(fork_state),
+            fork_error_code = VALUES(fork_error_code),
+            received_at = VALUES(received_at)
+    </insert>
+
+    <!--
+        활성 차량 기준 상태별 집계. vehicle_current_status 에 아직 행이 없는(=한 번도 상태를 받은 적
+        없는) 활성 차량도 LEFT JOIN + COALESCE 로 UNKNOWN 에 포함시킨다.
     -->
     <select id="countByStatusForActiveVehicles" resultType="com.fast.backend.vehicle.mapper.VehicleStatusCountRow">
         SELECT COALESCE(s.status, 'UNKNOWN') AS status, COUNT(*) AS count

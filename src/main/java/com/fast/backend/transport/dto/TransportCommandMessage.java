@@ -20,10 +20,11 @@ public record TransportCommandMessage(
         Destination destination,
         OffsetDateTime timestamp
 ) {
-    public record Pickup(String palletId, Double x, Double y, Double heading) {
+    /** FR-202: 파렛트 개념이 사라져 palletId 를 싣지 않는다(prompt85). */
+    public record Pickup(Double x, Double y, Double heading) {
     }
 
     public record Destination(
-            String slotCode, Double x, Double y, Double heading, Double forkHeight, String orientation) {
+            String slotCode, Double x, Double y, Double heading, Double forkHeight) {
     }
 }
