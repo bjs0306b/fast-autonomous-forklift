@@ -14,8 +14,11 @@ hole 최대 4개**를 그려야 하고 208장을 연속으로 처리하므로, �
     1 / 2         클래스 전환 — 1=pallet, 2=hole
     U             마지막 박스 취소        C  이 프레임 전부 지우기
     SPACE / ENTER 저장하고 다음          B  이전
-    G             프레임 번호로 이동      Z  돋보기 켜기/끄기
+    G             프레임 번호로 이동
     S             지금 저장              Q / ESC  저장하고 종료
+
+구멍이 작아 경계가 안 보이면 ``--view-width``를 올린다(예: 1920). 화면 전체가
+확대되므로 별도 돋보기 창 없이 같은 효과가 난다.
 
 **진행 상황은 `<out>.progress.json`에 따로 남긴다.** "아직 안 본 프레임"과
 "보고 나서 라벨이 없다고 판정한 프레임"은 다르다 — 네거티브(구간 8) 7장이 후자이고,
@@ -135,8 +138,6 @@ class Labeler:
         self.cursor = self._first_todo()
         self.drag_start: tuple[int, int] | None = None
         self.rect: tuple[int, int, int, int] | None = None
-        self.loupe = True
-        self.mouse = (0, 0)
 
     def _first_todo(self) -> int:
         for i, p in enumerate(self.files):
@@ -145,7 +146,6 @@ class Labeler:
         return 0
 
     def on_mouse(self, event, x, y, _flags, _param):
-        self.mouse = (x, y)
         if event == cv2.EVENT_LBUTTONDOWN:
             self.drag_start = (x, y)
             self.rect = None
@@ -182,28 +182,6 @@ class Labeler:
         self.progress_path.write_text(json.dumps(
             {"done": sorted(self.done)}, ensure_ascii=False), encoding="utf-8")
 
-    # --- 그리기 ---
-    def draw_loupe(self, view, frame_view):
-        """구멍은 세로 25px 남짓이라 1:1로는 경계가 안 보인다. 3배 확대해 곁들인다."""
-        mx, my = self.mouse
-        r, z = 60, 3
-        h, w = frame_view.shape[:2]
-        x0, y0 = max(mx - r, 0), max(my - r, 0)
-        x1, y1 = min(mx + r, w), min(my + r, h)
-        if x1 - x0 < 10 or y1 - y0 < 10:
-            return
-        patch = cv2.resize(frame_view[y0:y1, x0:x1], None, fx=z, fy=z,
-                           interpolation=cv2.INTER_NEAREST)
-        ph, pw = patch.shape[:2]
-        px, py = w - pw - 10, 44
-        if py + ph > h:
-            patch = patch[:h - py]
-            ph = patch.shape[0]
-        view[py:py + ph, px:px + pw] = patch
-        cv2.rectangle(view, (px, py), (px + pw, py + ph), (200, 200, 200), 1)
-        cv2.drawMarker(view, (px + pw // 2, py + ph // 2), (0, 255, 255),
-                       cv2.MARKER_CROSS, 14, 1)
-
     def run(self) -> None:
         win = "label_onboard"
         cv2.namedWindow(win)
@@ -233,8 +211,6 @@ class Labeler:
                 if self.rect:
                     x1, y1, x2, y2 = self.rect
                     cv2.rectangle(view, (x1, y1), (x2, y2), DRAW_COLOR, 2)
-                if self.loupe:
-                    self.draw_loupe(view, base)
 
                 n_p = sum(1 for a in anns if a["category_id"] == PALLET_ID)
                 n_h = sum(1 for a in anns if a["category_id"] == HOLE_ID)
@@ -269,8 +245,6 @@ class Labeler:
                         anns.pop()
                 elif key == ord("c"):
                     self.anns[path.name] = []
-                elif key == ord("z"):
-                    self.loupe = not self.loupe
                 elif key == ord("s"):
                     self.save()
                 elif key == ord("b"):
@@ -316,8 +290,8 @@ def main(argv: list[str] | None = None) -> int:
     if lab.unreadable:
         print(f"⚠️ 읽을 수 없는 파일 {len(lab.unreadable)}장: {lab.unreadable[:3]}")
     print(f"{len(files)}장 / 완료 {len(lab.done)}장 — {lab.cursor + 1}번째부터 시작")
-    print("드래그=박스 추가  1=pallet 2=hole  U=취소  SPACE=다음  B=이전  "
-          "Z=돋보기  G=이동  Q=종료")
+    print("드래그=박스 추가  1=pallet 2=hole  U=취소  C=전부지우기  "
+          "SPACE=다음  B=이전  G=이동  S=저장  Q=종료")
     lab.run()
 
     labeled = sum(1 for v in lab.anns.values() if v)
