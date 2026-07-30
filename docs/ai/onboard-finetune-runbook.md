@@ -34,6 +34,43 @@ exp8은 실물 리그의 **검은 플라스틱 파렛트**로 적응된 모델�
 
 → CVAT에서 **빈 화면부터 사람이 그린다.** 규약은 `onboard-hole-label-guide.md` §3.
 
+### 358장을 다 그리지는 않는다 — 버스트 61개
+
+`shoot.py --burst 6`으로 찍었으므로 358장은 **61개 버스트**(6장 ×57 · 7장 ×2 · 1장 ×2)다. 버스트 안에서 피사체가 안 움직였다면 6장을 따로 그리는 건 같은 그림을 여섯 번 그리는 것이다.
+
+`dataset.onboard_bursts`가 버스트별 이동량을 재서 그릴 프레임을 고른다.
+
+```bash
+python -m dataset.onboard_bursts plan \
+    --images data/raw/onboard/train_20260729/b01_upright \
+    --out data/labels/onboard_burst_plan.json \
+    --keyframe-dir data/processed/cvat_onboard_pass1     # CVAT에 이 폴더만 올린다
+```
+
+| | 값 |
+|---|---|
+| 전파 가능 버스트 | **32개** (182장) → 키프레임 32장만 그린다 |
+| 개별 라벨 버스트 | 29개 (176장) |
+| **그릴 프레임** | **208장 / 358장 (58%)** — 150장 절감 |
+| 그중 구간 8 네거티브 | 7장 (라벨 없음 확인만) |
+
+CVAT 태스크의 라벨은 `ai/configs/cvat_onboard_labels.json`을 그대로 붙여 만든다. **순서가 box → pallet → hole이어야 한다** — CVAT은 정의 순서로 `category_id`를 매기고, 이게 어긋나면 config의 클래스와 뒤섞인다(`expand`·`split_onboard`가 경고한다).
+
+라벨 후 키프레임 라벨을 버스트 전체로 펼친다. 출력은 `split_onboard`가 그대로 받는다 (확인: 291 train / 67 val 재현).
+
+```bash
+python -m dataset.onboard_bursts expand \
+    --plan data/labels/onboard_burst_plan.json \
+    --coco data/labels/onboard_cvat_pass1.json \
+    --out data/labels/onboard_cvat.json
+```
+
+⚠️ **판정은 밝기가 아니라 이동량으로 한다.** 처음엔 프레임 간 평균절대차를 썼는데 **자동 노출 때문에 양쪽으로 다 틀린다** — 버스트 353~358은 차이 12.3으로 '움직임'이 나왔지만 실제 이동은 2.6px(카펫만 찍힌 네거티브에서 노출이 튄 것)이고, 반대로 버스트 135~140은 차이 7.8로 '정지'인데 실제로는 4.3px 밀려 있었다. 그래서 파렛트가 들어오는 하단-중앙(x320~1088 · y300~640)을 밝기·콘트라스트 정규화한 뒤 `phaseCorrelate`로 **몇 px 밀렸는지**를 잰다.
+
+임계 **4px**의 근거는 `hole`이다. 개구부는 1280×800에서 세로 약 25~60px(가이드 하한 16px)이므로 4px는 그 1/6 이하이고, 사람이 그은 bbox 자체의 흔들림과 같은 수준이다. `pallet`·`box`는 훨씬 크므로 더 관대하다.
+
+구간 5(79장)와 구간 8(42장)은 거의 전부 정지라 절감이 여기서 나온다. 반대로 구간 2(회전)는 12개 버스트 중 **11개가 개별 라벨**이다 — 손으로 돌리며 찍었으니 당연하다.
+
 ### 고전 CV 자동 라벨도 시도했다 — 폐기
 
 이 장면은 흰 파렛트 / 갈색 박스 / 회색 카펫이 색으로 갈리므로 자동 라벨이 될 법했다. 세 가지를 시도했고 전부 실패했다.

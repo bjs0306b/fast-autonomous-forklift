@@ -1,0 +1,20 @@
+[
+ {
+  "name": "box",
+  "color": "#c8a165",
+  "type": "rectangle",
+  "attributes": []
+ },
+ {
+  "name": "pallet",
+  "color": "#33ddff",
+  "type": "rectangle",
+  "attributes": []
+ },
+ {
+  "name": "hole",
+  "color": "#ff3838",
+  "type": "rectangle",
+  "attributes": []
+ }
+]
