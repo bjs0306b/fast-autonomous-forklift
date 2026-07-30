@@ -143,10 +143,37 @@ python -m dataset.onboard_bursts plan \
 
 config: `ai/configs/rtmdet_s_640_onboard_forklift.py`
 
+### 선행: warm-start 체크포인트 strip (한 번만)
+
+exp7 -s가 (box,pallet) 2클래스라 새 (pallet,hole)와 rtm_cls 채널이 같아, 그대로 로드하면 box 가중치가 pallet 자리에 들어간다(config 결정 3). 분류 헤드를 떼어낸 사본을 만든다:
+
 ```bash
-# GPU 서버 (Device1만 사용)
-CUDA_VISIBLE_DEVICES=1 bash scripts/train_rtmdet.sh configs/rtmdet_s_640_onboard_forklift.py
+# GPU 서버, ai/ 에서. rtmdet_s_forklift_nocls.pth 생성 (6키 제거, 40.5MB)
+python -c "import torch; c=torch.load('work_dirs/rtmdet_s_forklift/best_coco_bbox_mAP_epoch_5.pth', map_location='cpu'); \
+    sd=c['state_dict']; [sd.pop(k) for k in list(sd) if 'bbox_head.rtm_cls' in k]; \
+    torch.save(c, 'work_dirs/rtmdet_s_forklift/rtmdet_s_forklift_nocls.pth')"
 ```
+
+로그에 `missing keys ... bbox_head.rtm_cls...`가 뜨면 정상(그 헤드만 랜덤 초기화). `load checkpoint from ...nocls.pth`도 확인한다.
+
+### 실행
+
+⚠️ **`train_rtmdet.sh`는 config를 인자가 아니라 `CONFIG` 환경변수로 받는다.** 첫 인자(`$1`)는 **모드**(`smoke`/`full`)다. config를 인자로 넘기면 **조용히 기본 config(`rtmdet_s_forklift.py`, 옛 box 학습)로 돈다** — 에러 없이. (2026-07-30에 실제로 이 함정에 걸려 5분치 GPU를 날렸다.)
+
+```bash
+# GPU 서버, ai/ 에서. conda 활성화 필수 — 없으면 mim을 못 찾는다
+source /opt/tljh/user/etc/profile.d/conda.sh && conda activate rtmdet
+CONFIG=configs/rtmdet_s_640_onboard_forklift.py \
+    WORKDIR=work_dirs/onboard_s_2class GPU=1 \
+    bash scripts/train_rtmdet.sh
+```
+
+- **`CONFIG=`** — 안 주면 기본값(옛 config). 반드시 명시.
+- **`WORKDIR=`** — 안 주면 `work_dirs/rtmdet_s_forklift`에 써서 **warm-start 원본 체크포인트와 섞인다.** 새 디렉토리로 분리. `load_from`은 config대로 원본 위치의 nocls.pth를 읽으므로 충돌 없다.
+- **`GPU=1`** — Device1 고정. `smoke`(200장·1ep)는 첫 인자로: `... bash scripts/train_rtmdet.sh smoke`.
+- 스크립트가 내부에서 nohup detached로 던지고 PID·로그 경로를 출력한다.
+
+**진행 확인**: `iter/epoch`가 **19**여야 한다(291장 batch16). 329처럼 크면 잘못된 config·batch다. loss_cls는 rtm_cls 랜덤 초기화라 처음 높게(≈1.5) 시작하는 게 정상.
 
 config에 박아둔 결정 (근거는 파일 상단 주석):
 
