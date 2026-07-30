@@ -1,15 +1,13 @@
--- FR-202 최적 적재 위치 산출용 전체 스키마 설계 초안
---
--- 빈 데이터베이스에 적용하는 clean-install 기준 설계 문서다.
--- 현재 애플리케이션 시작 시 자동 실행되는 스키마가 아니며, 기존 schema.sql을 대체하지 않는다.
--- 길이와 좌표의 단위는 m, heading의 단위는 degree다. 모든 시각은 마이크로초 정밀도로 저장한다.
--- 고정 설비 규격과 시뮬레이션 배율은 애플리케이션 설정에서 관리하며 이 스키마에 저장하지 않는다.
+-- FR-202 최적 적재 위치 산출 스키마 초안
+-- 상세 규격: docs/backend-api/optimal-placement.md
+-- 빈 DB용 설계 문서이며 자동 실행되거나 기존 schema.sql을 대체하지 않는다.
+-- 길이·좌표는 m, heading은 degree, 시각은 마이크로초 정밀도를 사용한다.
+-- 고정 설비 규격과 시뮬레이션 배율은 애플리케이션 설정에서 관리한다.
 
 -- 트랜잭션 잠금 계약
--- 1. 설비 관련 흐름은 station_state -> station_session -> cargo -> transport_task/storage_slot 순서로 잠근다.
--- 2. 세션 해제와 운영자 reset은 한 트랜잭션에서 station_state를 먼저 잠근 뒤 station_session을 잠근다.
--- 3. 세션 해제 시 소유 세션이 일치할 때만 active_session_id를 비운다.
--- 4. 설비를 사용하지 않는 작업 흐름은 cargo부터 잠그며 이후 설비 행을 요청하지 않는다.
+-- 1. 잠금 순서: station_state -> station_session -> cargo -> transport_task/storage_slot.
+-- 2. 세션 해제·reset은 state와 session을 차례로 잠그고 소유 세션을 확인한다.
+-- 3. 설비를 사용하지 않는 흐름은 cargo부터 잠그고 설비 행은 요청하지 않는다.
 
 -- =============================================================================
 -- FR-202 소유 영역: 화물과 단일 측정 설비
@@ -28,8 +26,7 @@ CREATE TABLE station_session (
         ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
--- session_id는 acquire 요청자가 제공하지 않는다. 백엔드가 매번 새 UUIDv4를 생성하며,
--- 종료된 행도 계속 보존하여 과거 토큰의 재사용을 데이터베이스 기본 키로 차단한다.
+-- session_id는 백엔드가 UUIDv4로 생성하며 종료된 세션도 보존한다.
 
 CREATE TABLE station_state (
     singleton_id      INT          NOT NULL PRIMARY KEY COMMENT '단일 스테이션 행 고정값',
@@ -42,7 +39,7 @@ CREATE TABLE station_state (
         ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
--- 빈 데이터베이스에서는 정확히 한 번 실행되는 엄격한 초기값이다.
+-- 빈 DB에서 한 번만 실행한다.
 INSERT INTO station_state (singleton_id, active_session_id)
 VALUES (1, NULL);
 
@@ -71,12 +68,12 @@ CREATE TABLE station_measurement (
     INDEX idx_station_measurement_session_latest (session_id, sequence_no DESC)
 );
 
--- sequence_no는 설비 잠금 안에서 배정되는 수신 순서다. 센서 측정 시각이나 커밋 시각을 뜻하지 않는다.
--- 배치는 활성 세션에서 sequence_no가 가장 큰 행을 먼저 선택한 뒤 상태와 안전 값을 판정한다.
--- 결과 조합의 교차 필드 규칙은 애플리케이션 검증기가 담당하고, 이 테이블은 스칼라 범위만 제한한다.
+-- sequence_no는 수신 순서이며 센서 측정 시각이 아니다.
+-- 활성 세션의 최신 행을 선택한 뒤 상태와 안전 값을 검증한다.
+-- 교차 필드 검증은 애플리케이션이 담당한다.
 
 -- =============================================================================
--- 동결된 차량 및 임베디드 영역
+-- 차량 및 임베디드 영역
 -- =============================================================================
 
 CREATE TABLE vehicle (
@@ -108,7 +105,7 @@ CREATE TABLE vehicle_current_status (
         ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
--- 차량 상태 메시지는 화물 등록보다 먼저 도착할 수 있으므로 cargo_id는 관측값으로만 보존한다.
+-- cargo_id는 차량이 보고한 관측값으로 저장한다.
 
 CREATE TABLE embedded_vehicle_command (
     command_id             VARCHAR(100)  NOT NULL PRIMARY KEY COMMENT '명령 고유 식별자',
@@ -157,8 +154,8 @@ CREATE TABLE embedded_error_history (
 -- FR-202 소유 영역: 적재 위치, 운반 작업과 명령
 -- =============================================================================
 
--- slot_code는 시뮬레이션에 미리 정의된 적재 위치를 식별한다.
--- usable_height는 적재 가능한 수직 여유, fork_height는 적재 시 포크 목표 높이다.
+-- slot_code는 사전 정의된 적재 위치를 식별한다.
+-- usable_height는 수직 가용 높이, fork_height는 목표 포크 높이다.
 CREATE TABLE storage_slot (
     slot_code           VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '적재 위치 고유 식별자',
     usable_height       DOUBLE      NOT NULL COMMENT '화물을 넣을 수 있는 수직 가용 높이',
@@ -241,7 +238,7 @@ CREATE TABLE transport_task (
     INDEX idx_transport_task_created (created_at DESC, id DESC)
 );
 
--- 슬롯과 작업의 순환 참조는 작업 테이블 생성 후 예약 FK를 추가하여 해소한다.
+-- 작업 테이블 생성 후 슬롯 예약 FK를 추가한다.
 ALTER TABLE storage_slot
     ADD CONSTRAINT fk_storage_slot_reserved_task
     FOREIGN KEY (reserved_task_id) REFERENCES transport_task (id)
