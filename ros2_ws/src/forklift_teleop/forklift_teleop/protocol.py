@@ -9,6 +9,15 @@ class AckFrame:
     status: str
 
 
+@dataclass(frozen=True)
+class LiftStatusFrame:
+    sequence: int
+    state: str
+    completed_steps: int
+    total_steps: int
+    lower_limit_active: bool
+
+
 def crc16_ccitt_false(data: bytes) -> int:
     """Return CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF)."""
     crc = 0xFFFF
@@ -45,29 +54,47 @@ def encode_command(sequence: int, drive_percent: int, steering_cdeg: int) -> byt
     return frame_body(f"CMD,{sequence},{drive_percent},{steering_cdeg}")
 
 
-def parse_ack(frame: bytes) -> AckFrame:
+def encode_lift_command(sequence: int, action: str) -> bytes:
+    if not 0 <= sequence <= 0xFFFFFFFF:
+        raise ValueError("sequence must fit uint32")
+    normalized_action = action.strip().upper()
+    if normalized_action not in {"UP", "DOWN", "STOP"}:
+        raise ValueError("lift action must be UP, DOWN, or STOP")
+    return frame_body(f"LIFT,{sequence},{normalized_action}")
+
+
+def _decode_frame_body(frame: bytes, kind: str) -> str:
     try:
         text = frame.decode("ascii").strip()
     except UnicodeDecodeError as error:
-        raise ValueError("ACK is not ASCII") from error
+        raise ValueError(f"{kind} is not ASCII") from error
 
     if not text.startswith("@") or "*" not in text:
-        raise ValueError("invalid ACK framing")
+        raise ValueError(f"invalid {kind} framing")
 
     body, separator, crc_text = text[1:].rpartition("*")
     if not separator or len(crc_text) != 4:
-        raise ValueError("invalid ACK CRC field")
+        raise ValueError(f"invalid {kind} CRC field")
 
     try:
         received_crc = int(crc_text, 16)
     except ValueError as error:
-        raise ValueError("invalid ACK CRC encoding") from error
+        raise ValueError(f"invalid {kind} CRC encoding") from error
 
     if received_crc != crc16_ccitt_false(body.encode("ascii")):
-        raise ValueError("ACK CRC mismatch")
+        raise ValueError(f"{kind} CRC mismatch")
+    return body
+
+
+def parse_ack(frame: bytes) -> AckFrame:
+    body = _decode_frame_body(frame, "ACK")
 
     fields = body.split(",")
-    if len(fields) != 3 or fields[0] != "ACK" or fields[2] != "OK":
+    if (
+        len(fields) != 3
+        or fields[0] != "ACK"
+        or fields[2] not in {"OK", "ERROR"}
+    ):
         raise ValueError("invalid ACK body")
 
     try:
@@ -78,3 +105,39 @@ def parse_ack(frame: bytes) -> AckFrame:
     if not 0 <= sequence <= 0xFFFFFFFF:
         raise ValueError("ACK sequence must fit uint32")
     return AckFrame(sequence=sequence, status=fields[2])
+
+
+def parse_lift_status(frame: bytes) -> LiftStatusFrame:
+    body = _decode_frame_body(frame, "lift status")
+    fields = body.split(",")
+    if (
+        len(fields) != 6
+        or fields[0] != "LIFT_STATUS"
+        or fields[2] not in {"RUNNING", "DONE", "ERROR"}
+    ):
+        raise ValueError("invalid lift status body")
+
+    try:
+        sequence = int(fields[1])
+        completed_steps = int(fields[3])
+        total_steps = int(fields[4])
+        lower_limit = int(fields[5])
+    except ValueError as error:
+        raise ValueError("invalid lift status number") from error
+
+    if not 0 <= sequence <= 0xFFFFFFFF:
+        raise ValueError("lift status sequence must fit uint32")
+    if not 0 <= completed_steps <= 0xFFFFFFFF:
+        raise ValueError("completed_steps must fit uint32")
+    if not 0 <= total_steps <= 0xFFFFFFFF:
+        raise ValueError("total_steps must fit uint32")
+    if lower_limit not in {0, 1}:
+        raise ValueError("lower limit flag must be 0 or 1")
+
+    return LiftStatusFrame(
+        sequence=sequence,
+        state=fields[2],
+        completed_steps=completed_steps,
+        total_steps=total_steps,
+        lower_limit_active=bool(lower_limit),
+    )

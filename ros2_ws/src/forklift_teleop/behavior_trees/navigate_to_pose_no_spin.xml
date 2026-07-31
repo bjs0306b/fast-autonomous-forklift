@@ -1,0 +1,22 @@
+<!--
+  Forklift-safe NavigateToPose tree.
+
+  The vehicle cannot rotate in place, so this tree deliberately omits Spin and
+  every recovery subtree that can request Spin. Any planning or tracking
+  failure aborts the action; the mission coordinator then stops the fork and
+  the UART bridge watchdog stops traction.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="NavigateWithoutSpinRecovery">
+      <ComputePathToPose
+        goal="{goal}"
+        path="{path}"
+        planner_id="GridBased"/>
+      <FollowPath
+        path="{path}"
+        controller_id="FollowPath"
+        goal_checker_id="general_goal_checker"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

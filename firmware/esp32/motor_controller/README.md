@@ -126,3 +126,107 @@ idf.py -p /dev/ttyACM0 flash monitor
 | 3 스케일 | 제자리 360° 회전 후 적분 | 6.283 rad ±5% (6.0~6.6) |
 
 Jetson 측 절차는 [`ros2_ws/src/forklift_teleop/README.md`](../../../ros2_ws/src/forklift_teleop/README.md)를 참고합니다.
+
+## 무부하 통합 시나리오 시연
+
+S15P11A304-100 무인 이동·운반 MVP는 차량을 안정적인 받침대에 올려 구동 바퀴를 공중에 띄운 무부하 상태에서 검증한다.
+
+검증 순서는 다음과 같다.
+
+1. 전진 명령에 따라 DC 구동 바퀴가 전진 방향으로 회전한다.
+2. 정지 명령 후 바퀴가 완전히 정지한다.
+3. 차량 정지 후 포크가 상승한다.
+4. 포크 상태가 `RUNNING`에서 `DONE`으로 전환된다.
+5. 시연 후 포크를 하단 리밋까지 내리고 자동 백오프 상태로 복귀한다.
+
+공중 부양 상태에서는 차체와 LiDAR가 이동하지 않으므로 RF2O `/odom`이 전진 거리를 생성하지 않는다. 따라서 이 시연에는 Nav2, AMCL 및 LiDAR odometry를 사용하지 않는다. 공중 부양 상태에서 Nav2를 실행하면 progress checker의 `Failed to make progress`로 중단되는 것이 정상이다.
+
+### 안전 조건
+
+- 차량을 흔들리지 않는 받침대에 고정한다.
+- 구동 바퀴, 포크, 체인 및 스테퍼 모터 주변에서 사람을 물린다.
+- 포크에는 적재물을 올리지 않는다.
+- 비상 전원 차단과 `STOP` 명령을 준비한다.
+- 모든 터미널에서 `ROS_DOMAIN_ID=100`을 사용한다.
+
+### 터미널 1: UART 브리지
+
+```bash
+export ROS_DOMAIN_ID=100
+source /opt/ros/humble/setup.bash
+source ~/S15P11A304/ros2_ws/install/setup.bash
+
+ros2 run forklift_teleop uart_teleop_bridge --ros-args \
+  --params-file ~/S15P11A304/ros2_ws/src/forklift_teleop/config/teleop.yaml \
+  --log-level uart_teleop_bridge:=debug
+```
+
+`ACK sequence=... status=OK`가 계속 수신되는지 확인한다.
+
+### 터미널 2: 포크 상태 감시
+
+```bash
+export ROS_DOMAIN_ID=100
+source /opt/ros/humble/setup.bash
+source ~/S15P11A304/ros2_ws/install/setup.bash
+
+ros2 topic echo /fork/status
+```
+
+### 터미널 3: 자동 시연
+
+```bash
+export ROS_DOMAIN_ID=100
+source /opt/ros/humble/setup.bash
+source ~/S15P11A304/ros2_ws/install/setup.bash
+
+echo "[1/3] Simulated forward travel"
+
+timeout 3 ros2 topic pub -r 20 \
+  /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.10}, angular: {z: 0.0}}"
+
+echo "[2/3] Drive stop"
+
+ros2 topic pub --once \
+  /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.0}, angular: {z: 0.0}}"
+
+sleep 1
+
+echo "[3/3] Fork lift"
+
+ros2 topic pub --once \
+  /fork/command std_msgs/msg/String \
+  "{data: UP}"
+```
+
+### 비상 정지
+
+```bash
+ros2 topic pub --once \
+  /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.0}, angular: {z: 0.0}}"
+
+ros2 topic pub --once \
+  /fork/command std_msgs/msg/String \
+  "{data: STOP}"
+```
+
+### 시연 종료 후 포크 호밍
+
+이전 명령이 `DONE`인 것을 확인하면서 `DOWN`을 한 번씩 전송한다.
+
+```bash
+ros2 topic pub --once \
+  /fork/command std_msgs/msg/String \
+  "{data: DOWN}"
+```
+
+하단 리밋 접촉 후 정지하고, 500ms 뒤 조금 상승해 스위치가 해제된 상태에서 `DONE`이 나오면 호밍 완료다.
+
+### 검증 결과와 범위
+
+S15P11A304-100에서 무부하 공중 부양 상태의 `전진 구동 → 정지 → 포크 상승` 자동 순차 동작과 포크의 `RUNNING → DONE` 상태 전환을 실차 하드웨어로 확인했다.
+
+본 시험은 차체 이동을 제외한 무부하 벤치 통합 검증이다. 실제 지면에서의 위치 이동, AMCL 수렴 및 Nav2 경로 추종은 후속 실차 검증 범위다.

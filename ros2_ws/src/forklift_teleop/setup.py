@@ -14,6 +14,10 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
+        (
+            "share/" + package_name + "/behavior_trees",
+            glob("behavior_trees/*.xml"),
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -29,6 +33,7 @@ setup(
         "console_scripts": [
             "uart_teleop_bridge = forklift_teleop.uart_teleop_bridge:main",
             "imu_bridge = forklift_teleop.imu_bridge:main",
+            "unmanned_mission = forklift_teleop.unmanned_mission:main",
         ],
     },
 )
