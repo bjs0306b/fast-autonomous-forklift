@@ -142,7 +142,7 @@
 #define IMU_SAMPLE_RATE_DIVIDER         9U
 #define IMU_DLPF_CONFIG                 0x03U   /* 41 Hz */
 #define IMU_GYRO_FULL_SCALE_CONFIG      0x00U   /* +-250 dps */
-#define IMU_GYRO_SENSITIVITY_LSB_DPS    83.4f
+#define IMU_GYRO_SENSITIVITY_LSB_DPS    131.0f
 
 /* Gyro bias tracking; see the idle-detection note in task_imu.c */
 #define IMU_BIAS_CALIBRATION_SAMPLES    300U
@@ -150,11 +150,70 @@
 #define IMU_BIAS_IDLE_HOLD_MS           1000U
 #define IMU_BIAS_UPDATE_ALPHA           0.001f
 
+/*
+ * The gyro must also *read* still, not merely be commanded still. 2 dps sits
+ * far above the ~0.02 rad/s (1.1 dps) noise floor and far below any real
+ * rotation, so it separates the two without pausing on noise.
+ */
+#define IMU_BIAS_STILL_THRESHOLD_DPS    2.0f
+#define IMU_BIAS_STILL_THRESHOLD_LSB \
+    (IMU_BIAS_STILL_THRESHOLD_DPS * IMU_GYRO_SENSITIVITY_LSB_DPS)
+
+/*
+ * Front obstacle ToF (VL53L8CX x2) on I2C1.
+ *
+ * A4/A5 were reserved for this when the IMU went on SPI. The Motor HAT and
+ * servo keep I2C0 to themselves: a 8x8 ToF readout is a long block transfer and
+ * would otherwise queue up behind servo updates.
+ *
+ *   SDA   A4 / GPIO11    2.2k external pull-up required
+ *   SCL   A5 / GPIO12    2.2k external pull-up required
+ *   LPn   A6 / GPIO13    left  - drives the I2C comms block low
+ *   LPn   A7 / GPIO14    right
+ *   INT   A0 / GPIO1     left
+ *   INT   A1 / GPIO2     right
+ *   PWREN D0 / GPIO43    shared hardware reset for both sensors
+ */
+#define TOF_I2C_PORT                    I2C_NUM_1
+#define TOF_I2C_SDA_GPIO                GPIO_NUM_11
+#define TOF_I2C_SCL_GPIO                GPIO_NUM_12
+#define TOF_LEFT_LPN_GPIO               GPIO_NUM_13
+#define TOF_RIGHT_LPN_GPIO              GPIO_NUM_14
+#define TOF_LEFT_INT_GPIO               GPIO_NUM_1
+#define TOF_RIGHT_INT_GPIO              GPIO_NUM_2
+#define TOF_PWREN_GPIO                  GPIO_NUM_43
+
+/*
+ * 100 kHz cannot carry two 8x8 readouts at 15 Hz. The part is rated to 1 MHz;
+ * 400 kHz leaves margin for the external pull-ups actually fitted.
+ */
+#define TOF_I2C_CLOCK_HZ                400000
+
+/*
+ * Both parts boot at the same address, so the left one is moved out of the way
+ * while the right is held silent. Addresses are 8-bit, matching the ULD API.
+ */
+#define TOF_ADDRESS_DEFAULT_8BIT        0x52
+#define TOF_ADDRESS_LEFT_8BIT           0x54
+
+#define TOF_ZONE_COUNT                  64U
+#define TOF_RANGING_FREQUENCY_HZ        15U     /* 8x8 maximum */
+#define TOF_SENSOR_COUNT                2U
+
+/* Ranging is valid at target_status 5, and 9 with reduced confidence */
+#define TOF_STATUS_VALID                5U
+#define TOF_STATUS_VALID_LOW_CONFIDENCE 9U
+
+#define TOF_TASK_STACK_SIZE             8192
+#define TOF_TASK_PRIORITY               8
+#define TOF_TASK_CORE_ID                0
+
 /* Telemetry uplink: native USB CDC (USB Serial/JTAG) */
 #define TELEMETRY_QUEUE_LENGTH          32U
-#define TELEMETRY_USB_TX_BUFFER_SIZE    1024U
+#define TELEMETRY_TOF_QUEUE_LENGTH      4U      /* 2 sensors x 2 frames */
+#define TELEMETRY_USB_TX_BUFFER_SIZE    2048U
 #define TELEMETRY_USB_RX_BUFFER_SIZE    256U
-#define TELEMETRY_FRAME_MAX_LENGTH      96U
+#define TELEMETRY_FRAME_MAX_LENGTH      384U
 #define TELEMETRY_STATUS_PERIOD_MS      1000U
 
 #endif

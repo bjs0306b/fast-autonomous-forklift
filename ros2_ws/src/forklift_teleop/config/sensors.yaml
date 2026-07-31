@@ -1,15 +1,35 @@
-imu_bridge:
+sensor_bridge:
   ros__parameters:
     # Native USB CDC of the ESP32-S3. Confirm with `ls /dev/ttyACM*`.
     serial_port: /dev/ttyACM0
     baud_rate: 115200
+    # Frames arrive at 100Hz (IMU) plus 15Hz per ToF; read faster so lines are
+    # not batched up.
+    read_rate_hz: 200.0
+    status_log_period_sec: 10.0
+
     imu_topic: /imu/data
     imu_frame_id: imu_link
-    # Frames arrive at 100Hz; read faster so lines are not batched up.
-    read_rate_hz: 200.0
     # Set to -1 if a counter-clockwise turn reports a negative rate (REP-103).
     gyro_z_sign: 1
     # Measured standstill noise, rad/s. Never 0: that makes the EKF discard the
-    # laser odometry entirely.
+    # laser odometry entirely. Re-measure with the motors powered once the IMU
+    # is bolted to the vehicle; a bench figure is optimistically small.
     yaw_rate_stddev: 0.02
-    status_log_period_sec: 10.0
+
+    tof_enabled: true
+    tof_topics: ["/tof/left/points", "/tof/right/points"]
+    tof_frame_ids: ["tof_left_link", "tof_right_link"]
+    # Square FoV spread over the 8x8 grid. Verify against the datasheet:
+    # a wrong value rotates every bearing.
+    tof_fov_deg: 45.0
+    # Which way the zone grid runs. A mirrored column or row order is a
+    # reflection, not a rotation, so the static transform cannot fix it.
+    # Confirm with an object at a known bearing before trusting the cloud.
+    tof_azimuth_sign: 1
+    tof_elevation_sign: 1
+    # Status 9 is a half-confidence return; keep it out of the costmap unless
+    # coverage proves too sparse.
+    tof_accept_low_confidence: false
+    tof_min_range_m: 0.02
+    tof_max_range_m: 3.5

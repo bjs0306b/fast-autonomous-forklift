@@ -2,11 +2,18 @@ import unittest
 
 from forklift_teleop.protocol import frame_body
 from forklift_teleop.sensor_protocol import (
+    TOF_ZONE_COUNT,
     ClockOffsetTracker,
     ImuFrame,
     ImuStatusFrame,
+    TofFrame,
     parse_sensor_line,
 )
+
+
+def tof_payload(zones):
+    """Encode (distance_mm, status) pairs the way the firmware does."""
+    return "".join(f"{d:03X}{s:01X}" for d, s in zones)
 
 
 class SensorProtocolTest(unittest.TestCase):
@@ -59,6 +66,45 @@ class SensorProtocolTest(unittest.TestCase):
     def test_non_numeric_field_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "IMU gyro"):
             parse_sensor_line(frame_body("IMU,881,15243120,abc,3412"))
+
+
+class TofProtocolTest(unittest.TestCase):
+    def test_parse_tof_frame(self):
+        zones = [(100 + index, 5) for index in range(TOF_ZONE_COUNT)]
+        frame = parse_sensor_line(
+            frame_body(f"TOF,1,42,15243120,{tof_payload(zones)}")
+        )
+        self.assertIsInstance(frame, TofFrame)
+        self.assertEqual(frame.sensor_id, 1)
+        self.assertEqual(frame.sequence, 42)
+        self.assertEqual(frame.mcu_time_us, 15243120)
+        self.assertEqual(len(frame.distance_mm), TOF_ZONE_COUNT)
+        self.assertEqual(frame.distance_mm[0], 100)
+        self.assertEqual(frame.distance_mm[63], 163)
+        self.assertEqual(set(frame.status), {5})
+
+    def test_parse_tof_extremes(self):
+        zones = [(0, 0)] * TOF_ZONE_COUNT
+        zones[0] = (4095, 9)
+        frame = parse_sensor_line(
+            frame_body(f"TOF,0,1,2,{tof_payload(zones)}")
+        )
+        self.assertEqual(frame.distance_mm[0], 4095)
+        self.assertEqual(frame.status[0], 9)
+
+    def test_short_payload_is_rejected(self):
+        zones = [(10, 5)] * (TOF_ZONE_COUNT - 1)
+        with self.assertRaisesRegex(ValueError, "256 chars"):
+            parse_sensor_line(frame_body(f"TOF,0,1,2,{tof_payload(zones)}"))
+
+    def test_non_hex_payload_is_rejected(self):
+        payload = "ZZZZ" + tof_payload([(10, 5)] * (TOF_ZONE_COUNT - 1))
+        with self.assertRaisesRegex(ValueError, "zone 0"):
+            parse_sensor_line(frame_body(f"TOF,0,1,2,{payload}"))
+
+    def test_tof_field_count_is_checked(self):
+        with self.assertRaisesRegex(ValueError, "field count"):
+            parse_sensor_line(frame_body("TOF,0,1,2"))
 
 
 class ClockOffsetTrackerTest(unittest.TestCase):

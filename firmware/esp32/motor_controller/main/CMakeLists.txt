@@ -8,9 +8,11 @@ idf_component_register(
         "stepper_motor.c"
         "frame_codec.c"
         "mpu6500.c"
+        "vl53l8cx_pair.c"
         "task_motor.c"
         "task_comm.c"
         "task_imu.c"
+        "task_tof.c"
         "task_telemetry.c"
     INCLUDE_DIRS "."
     REQUIRES

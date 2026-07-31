@@ -70,12 +70,32 @@ YAW_TOLERANCE = 0.08
 (`AlignError.yaw_deg`가 None인 이유). 캘리브레이션이 끝나면 `yaw_deg` 기준으로
 바꾸고 이 값은 버린다."""
 
-# --- 거리(진입면 폭 px). 카메라·해상도에 종속이라 실측 대상. ---
+# --- 거리 임계 ---
+#
+# **두 벌이 있고, 방향이 반대다.** 캘리브레이션 전에는 화면 폭(px)밖에 없고, 초점거리가
+# 들어오면 실제 거리(mm)를 쓸 수 있다.
+#
+#   approach_px  : 가까울수록 **커진다** → `>=` 로 비교
+#   distance_mm  : 가까울수록 **작아진다** → `<=` 로 비교
+#
+# 부호가 뒤집히는 지점이라 실수하기 쉽다. `_reached()` 한 곳에서만 비교한다.
+#
+# ⚠️ px 임계는 **카메라·해상도·장착 높이에 종속**이라 카메라를 조금만 옮겨도 무의미해진다.
+# mm 임계는 자로 잴 수 있고 카메라를 옮겨도 살아남는다 — **캘리브레이션 후에는 mm를 쓴다.**
 ALIGN_ENTER_PX = 260.0
-"""이 폭보다 크게 보이면 정렬 단계로. 대략적인 standoff 진입점."""
+"""(캘리 전) 진입면 폭이 이보다 크면 정렬 단계로."""
 
 INSERT_ENTER_PX = 420.0
-"""이 폭보다 크게 보이면 진입 가능 거리. 여기서 정렬이 안 돼 있으면 ABORT."""
+"""(캘리 전) 진입면 폭이 이보다 크면 진입 가능 거리."""
+
+ALIGN_ENTER_MM = 350.0
+"""(캘리 후) 파렛트까지 이 거리 이내면 정렬 단계로. **실측 대상** — 최소 회전반경
+53.7cm 기준으로 좌우 오프셋 10cm를 지우는 데 전진 45cm가 필요하므로, 정렬 시작은
+그보다 앞이어야 한다. 35cm는 시작값일 뿐이다."""
+
+INSERT_ENTER_MM = 180.0
+"""(캘리 후) 이 거리 이내면 진입 가능. 여기서 정렬이 안 돼 있으면 ABORT.
+**실측 대상** — 너무 가까우면 구멍이 화면 밖으로 나가 정렬 판정 자체를 못 한다."""
 
 INSERT_DURATION_S = 2.5
 """개루프 직진 시간. 거리/속도로 잡되 실물에서 잰다."""
@@ -156,6 +176,8 @@ class ForkServo:
                  yaw_tolerance: float = YAW_TOLERANCE,
                  align_enter_px: float = ALIGN_ENTER_PX,
                  insert_enter_px: float = INSERT_ENTER_PX,
+                 align_enter_mm: float = ALIGN_ENTER_MM,
+                 insert_enter_mm: float = INSERT_ENTER_MM,
                  insert_duration_s: float = INSERT_DURATION_S,
                  lost_grace_s: float = LOST_GRACE_S,
                  k_lateral: float = K_LATERAL,
@@ -165,6 +187,8 @@ class ForkServo:
         self.yaw_tolerance = yaw_tolerance
         self.align_enter_px = align_enter_px
         self.insert_enter_px = insert_enter_px
+        self.align_enter_mm = align_enter_mm
+        self.insert_enter_mm = insert_enter_mm
         self.insert_duration_s = insert_duration_s
         self.lost_grace_s = lost_grace_s
         self.k_lateral = k_lateral
@@ -191,6 +215,20 @@ class ForkServo:
     def aligned(self, error: AlignError) -> bool:
         return (abs(error.lateral_ratio) <= self.lateral_tolerance
                 and abs(error.yaw_signal) <= self.yaw_tolerance)
+
+    def _reached(self, error: AlignError, px_threshold: float,
+                 mm_threshold: float) -> bool:
+        """이 단계에 들어갈 만큼 가까워졌나 — **거리 비교는 전부 여기 한 곳에서** 한다.
+
+        `distance_mm`이 있으면(캘리브레이션 완료) 그쪽을 쓴다. 실제 거리라 카메라를
+        옮겨도 값이 살아남고 자로 검증할 수 있다.
+
+        ⚠️ **부등호 방향이 반대다.** `approach_px`는 가까울수록 커지고 `distance_mm`은
+        가까울수록 작아진다. 두 벌을 각자 비교하면 언젠가 하나를 뒤집어 쓴다.
+        """
+        if error.distance_mm is not None:
+            return error.distance_mm <= mm_threshold
+        return error.approach_px >= px_threshold
 
     def step(self, error: AlignError | None, dt: float) -> DriveCommand:
         """한 프레임 진행한다. `error=None`이면 타깃을 못 본 프레임이다.
@@ -230,7 +268,7 @@ class ForkServo:
         self._lost_for = 0.0
 
         # 진입 거리에 왔다 — 여기서 결판이 난다.
-        if error.approach_px >= self.insert_enter_px:
+        if self._reached(error, self.insert_enter_px, self.insert_enter_mm):
             if self.aligned(error):
                 self.phase = Phase.INSERT
                 self._insert_elapsed = 0.0
@@ -243,7 +281,7 @@ class ForkServo:
             return DriveCommand(phase=Phase.ABORT,
                                 reason="진입 거리인데 미정렬 — 재접근 필요")
 
-        if error.approach_px >= self.align_enter_px:
+        if self._reached(error, self.align_enter_px, self.align_enter_mm):
             self.phase = Phase.ALIGN
             return DriveCommand(
                 linear_x=ALIGN_SPEED,

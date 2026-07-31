@@ -32,7 +32,7 @@ setup(
     entry_points={
         "console_scripts": [
             "uart_teleop_bridge = forklift_teleop.uart_teleop_bridge:main",
-            "imu_bridge = forklift_teleop.imu_bridge:main",
+            "sensor_bridge = forklift_teleop.sensor_bridge:main",
             "unmanned_mission = forklift_teleop.unmanned_mission:main",
         ],
     },

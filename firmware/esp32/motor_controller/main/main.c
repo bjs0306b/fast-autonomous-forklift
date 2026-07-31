@@ -2,6 +2,7 @@
 #include "task_imu.h"
 #include "task_motor.h"
 #include "task_telemetry.h"
+#include "task_tof.h"
 #include "stepper_motor.h"
 #include "config.h"
 
@@ -155,8 +156,20 @@ void app_main(void)
             ESP_LOGE(TAG, "IMU unavailable, continuing without gyro: %s",
                      esp_err_to_name(imu_result));
         }
+
+        /*
+         * Started last: each sensor takes about a second to accept its firmware
+         * over I2C, and nothing else should wait on that.
+         */
+        esp_err_t tof_result = tof_task_start();
+
+        if (tof_result != ESP_OK) {
+            ESP_LOGE(TAG,
+                     "Front ToF unavailable, continuing without it: %s",
+                     esp_err_to_name(tof_result));
+        }
     } else {
-        ESP_LOGW(TAG, "Skipping IMU start; it has nowhere to publish");
+        ESP_LOGW(TAG, "Skipping IMU and ToF start; nowhere to publish");
     }
 
     ESP_LOGI(TAG, "All tasks created successfully");
