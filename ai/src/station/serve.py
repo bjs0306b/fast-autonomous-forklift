@@ -211,10 +211,10 @@ def main(argv: list[str] | None = None) -> int:
             args.out.write_text(text, encoding="utf-8")
         return payload
 
-    def publish(payload: dict) -> bool:
+    def publish(payload: dict, session_id: str | None = None) -> bool:
         # status != ok도 보낸다 — 백엔드가 status별 검증을 하고, 재측정 판단에 쓴다.
         from station.rest_client import send
-        ok = send(payload)
+        ok = send(payload, session_id=session_id)
         print(f"[publish] {'성공' if ok else '실패'} "
               f"POST /api/stations/measurements ({payload.get('measurement_id')})",
               file=sys.stderr)
@@ -245,11 +245,13 @@ def main(argv: list[str] | None = None) -> int:
     from station.rest_client import SessionNotReleased, StationApiError, measurement_session
 
     try:
-        with measurement_session(args.cargo_id):
+        with measurement_session(args.cargo_id) as session_id:
             payload = measure_and_emit()
             if payload is None:
                 return 1
-            ok = publish(payload)
+            # sessionId는 백엔드 필수 필드다(2026-07-31~). 활성 세션 조회로 붙이던
+            # 방식은 TTL 만료 뒤 늦게 도착한 측정이 다음 세션에 오귀속되는 구멍이 있었다.
+            ok = publish(payload, session_id)
     except StationApiError as e:
         # 세션 열기 실패(대개 409 ALREADY_OCCUPIED) — 측정은 시작도 안 했다.
         print(f"[station-api] 세션을 열 수 없어 측정을 건너뜁니다: {e}", file=sys.stderr)

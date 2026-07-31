@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 from control.fork_servo import (
+    ALIGN_ENTER_MM,
     ALIGN_ENTER_PX,
+    INSERT_ENTER_MM,
     INSERT_ENTER_PX,
     MAX_ANGULAR,
     DriveCommand,
@@ -20,8 +22,9 @@ from perception.fork_align import AlignError
 DT = 0.045      # 22fps
 
 
-def err(lateral=0.0, yaw=0.0, approach=200.0) -> AlignError:
-    return AlignError(lateral_ratio=lateral, yaw_signal=yaw, approach_px=approach)
+def err(lateral=0.0, yaw=0.0, approach=200.0, distance_mm=None) -> AlignError:
+    return AlignError(lateral_ratio=lateral, yaw_signal=yaw, approach_px=approach,
+                      distance_mm=distance_mm)
 
 
 ALIGNED_FAR = err(approach=ALIGN_ENTER_PX - 50)
@@ -181,6 +184,46 @@ def test_reset하면_다시_시도할_수_있다() -> None:
 
 
 # --- 에피소드 로깅 ---
+
+# --- 거리 임계: 캘리브레이션 전(px) / 후(mm) ---
+
+def test_거리가_있으면_mm_임계를_쓴다() -> None:
+    """캘리 후에는 실제 거리로 판단한다 — 픽셀 값은 무시한다."""
+    servo = ForkServo()
+    # 폭(px)으로는 아직 멀지만, 실제 거리는 이미 진입 범위다
+    cmd = servo.step(err(approach=10.0, distance_mm=INSERT_ENTER_MM - 10), DT)
+    assert cmd.phase is Phase.INSERT
+
+
+def test_부등호_방향이_반대다() -> None:
+    """approach_px는 가까울수록 크고 distance_mm은 가까울수록 작다.
+
+    한쪽을 뒤집어 쓰면 '멀수록 진입'이 돼 파렛트를 향해 돌진한다.
+    """
+    servo = ForkServo()
+    far = servo.step(err(approach=9999.0, distance_mm=ALIGN_ENTER_MM + 500), DT)
+    assert far.phase is Phase.APPROACH, "거리가 멀면 폭이 커도 접근 단계여야 한다"
+
+    servo.reset()
+    near = servo.step(err(approach=1.0, distance_mm=ALIGN_ENTER_MM - 10), DT)
+    assert near.phase is Phase.ALIGN, "거리가 가까우면 폭이 작아도 정렬 단계여야 한다"
+
+
+def test_거리가_없으면_px_임계로_돌아간다() -> None:
+    """캘리브레이션 전에도 동작해야 한다 — 회귀 방지."""
+    servo = ForkServo()
+    assert servo.step(err(approach=INSERT_ENTER_PX + 10), DT).phase is Phase.INSERT
+    servo.reset()
+    assert servo.step(err(approach=ALIGN_ENTER_PX + 10), DT).phase is Phase.ALIGN
+    servo.reset()
+    assert servo.step(err(approach=ALIGN_ENTER_PX - 50), DT).phase is Phase.APPROACH
+
+
+def test_mm_임계도_미정렬이면_중단한다() -> None:
+    servo = ForkServo()
+    cmd = servo.step(err(lateral=0.5, distance_mm=INSERT_ENTER_MM - 10), DT)
+    assert cmd.phase is Phase.ABORT
+
 
 def test_모든_프레임이_기록된다() -> None:
     """154 판정 근거이자, 나중에 모방학습을 붙일 여지."""

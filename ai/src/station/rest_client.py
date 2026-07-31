@@ -77,14 +77,23 @@ def _get(payload: dict, *path):
     return cur
 
 
-def to_request(payload: dict) -> dict:
-    """측정 JSON → 백엔드 REST 요청 6필드.
+def to_request(payload: dict, session_id: str | None = None) -> dict:
+    """측정 JSON → 백엔드 REST 요청 7필드.
 
     status가 ok가 아니면 치수·전복이 없을 수 있다. 백엔드가 status별로 필수/null을
     검증하므로 여기서 임의로 채우지 않고 None 그대로 보낸다.
+
+    ⚠️ **`sessionId`는 2026-07-31부터 필수다**(백엔드 172 TTL 도입과 함께 변경).
+    종전에는 백엔드가 활성 세션을 조회해 붙였는데, TTL·강제해제로 세션 A가 풀리고 B가
+    열린 뒤 도착한 **A의 늦은 측정이 B에 잘못 귀속**되는 구멍이 있었다. 요청이 자기
+    출처 세션을 밝혀야 백엔드가 걸러낼 수 있다(불일치 시 409 `STATION_SESSION_MISMATCH`).
+
+    ⚠️ **재전송할 때도 측정 시점의 session_id를 유지**해야 한다. 새 세션 값으로 바꾸면
+    막으려던 오귀속이 그대로 발생한다.
     """
     height_cm = _get(payload, "dimensions", "height_cm")
     return {
+        "sessionId": session_id,
         "measurementId": payload.get("measurement_id"),
         "status": payload.get("status"),
         # cm → m. 화물만의 높이다(파렛트 제외) — 백엔드가 파렛트를 따로 더한다.
@@ -103,18 +112,31 @@ class StationApiError(RuntimeError):
 
 
 def post_measurement(payload: dict, base_url: str | None = None,
-                     timeout: float = DEFAULT_TIMEOUT) -> dict:
-    """측정 결과를 백엔드로 POST. 성공 시 저장된 결과, 실패 시 StationApiError."""
+                     timeout: float = DEFAULT_TIMEOUT,
+                     session_id: str | None = None) -> dict:
+    """측정 결과를 백엔드로 POST. 성공 시 저장된 결과, 실패 시 StationApiError.
+
+    `session_id`는 `measurement_session`이 준 값을 그대로 넘긴다. 빠지면 백엔드가
+    400(`sessionId 는 필수입니다`)으로 거부한다.
+    """
     return _call("POST", f"{base_url_of(base_url)}/api/stations/measurements",
-                 to_request(payload), timeout)
+                 to_request(payload, session_id), timeout)
 
 
-def send(payload: dict, base_url: str | None = None) -> bool:
+def send(payload: dict, base_url: str | None = None,
+         session_id: str | None = None) -> bool:
     """serve.py용 얇은 래퍼 — 성공 여부만 돌려주고 사유는 stderr로."""
     try:
-        post_measurement(payload, base_url)
+        post_measurement(payload, base_url, session_id=session_id)
         return True
     except StationApiError as e:
+        if e.status == 409 and "SESSION_MISMATCH" in e.body:
+            # TTL 만료·강제해제로 내 세션이 이미 풀렸고 다른 세션이 열렸다.
+            # **새 세션 id로 바꿔 재전송하면 안 된다** — 그게 막으려던 오귀속이다.
+            print("[station-api] 내 세션이 더 이상 활성이 아니다(TTL 만료 등) — "
+                  "이 측정은 버리고 다시 측정할 것. 세션 id를 바꿔 재전송 금지.",
+                  file=sys.stderr)
+            return False
         if e.status == 409 and "MEASUREMENT_ID_DUPLICATED" in e.body:
             print("[station-api] 이미 저장된 measurement_id — 재전송 불필요", file=sys.stderr)
             return True          # 중복은 실패가 아니다(이미 서버에 있다)
