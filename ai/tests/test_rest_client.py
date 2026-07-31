@@ -24,10 +24,19 @@ FULL = {
 }
 
 
-def test_필드_6개만_보낸다() -> None:
-    r = to_request(FULL)
-    assert set(r) == {"measurementId", "status", "cargoHeight",
+def test_필드_7개를_보낸다() -> None:
+    r = to_request(FULL, "sess-1")
+    assert set(r) == {"sessionId", "measurementId", "status", "cargoHeight",
                       "tippingLevel", "overhangRatio", "measuredAt"}
+
+
+def test_sessionId를_그대로_싣는다() -> None:
+    """2026-07-31 백엔드 변경 — 없으면 400. 활성 세션 조회 방식은 폐기됐다.
+
+    TTL 만료로 세션 A가 풀리고 B가 열린 뒤 도착한 A의 늦은 측정이 B에 오귀속되는
+    구멍 때문이다. 요청이 자기 출처 세션을 밝혀야 백엔드가 거른다.
+    """
+    assert to_request(FULL, "sess-abc")["sessionId"] == "sess-abc"
 
 
 def test_높이는_cm를_m로_바꾼다() -> None:
@@ -48,9 +57,13 @@ def test_전복_필드_매핑() -> None:
 
 
 def test_보내지_않는_필드() -> None:
-    """sessionId·stationId·schemaVersion은 계약에서 빠졌다."""
-    r = to_request(FULL)
-    for k in ("sessionId", "stationId", "schemaVersion", "session_id", "station_id"):
+    """stationId·schemaVersion은 계약에서 빠졌다.
+
+    ⚠️ `sessionId`는 한때 여기 있었으나 2026-07-31에 **필수로 되돌아왔다**
+    (TTL 도입 후 늦게 도착한 측정의 오귀속을 막기 위해).
+    """
+    r = to_request(FULL, "sess-1")
+    for k in ("stationId", "schemaVersion", "station_id", "measurement_id"):
         assert k not in r
 
 
