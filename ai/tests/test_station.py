@@ -91,7 +91,7 @@ def test_정상_측정_페이로드() -> None:
     p = build_payload(_dets(760), DIST, CFG)   # 박스 중심 960 = 파렛트 중심
 
     assert p["status"] == "ok"
-    assert p["schema_version"] == "1.0"
+    assert p["schema_version"] == "1.1"
     # 높이 = 400px × 150cm / 2039.07 ≈ 29.4
     assert p["dimensions"]["height_cm"] == pytest.approx(29.4, abs=0.1)
     assert p["dimensions"]["width_cm"] == pytest.approx(29.6, abs=0.1)
