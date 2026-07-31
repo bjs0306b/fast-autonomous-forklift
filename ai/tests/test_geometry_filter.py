@@ -64,3 +64,13 @@ def test_파렛트가_둘이면_어느_쪽에든_속하면_된다() -> None:
 def test_포함_판정_자체() -> None:
     assert hole_inside_pallet(HOLE_L.box, PALLET.box)
     assert not hole_inside_pallet(BBox(x=50, y=100, w=90, h=25), PALLET.box)
+
+
+# --- 클래스별 임계 ---
+
+def test_pallet_임계만_올린다() -> None:
+    """실측(eval 105장): pallet 0.7에서 재현율 100% 유지, 네거티브 오탐 19.5%→0%.
+    hole은 G1이 걸려 있어 임계로 건드리지 않는다(기하로 거른다)."""
+    from perception.trt_detector import DEFAULT_CLASS_THRESHOLDS
+    assert DEFAULT_CLASS_THRESHOLDS == {"pallet": 0.7}
+    assert "hole" not in DEFAULT_CLASS_THRESHOLDS

@@ -42,6 +42,26 @@ PAD_VALUE = 114
 # 창밖 건물 같은 도메인 밖 오탐(파렛트 자체가 없음)은 그대로 걸린다.
 DEFAULT_SLACK = 24.0
 
+# 클래스별 임계 — pallet만 0.7로 올린다. **재현율 손실이 0이라 공짜다**(실측 근거).
+#
+# 2026-07-31 라이브에서 창밖 흰 건물·커튼이 pallet 0.50으로 잡혔다. eval에서 임계별
+# 대가를 재보니(positive 105장 / 네거티브 87장):
+#
+#   임계  G2 재현율        네거티브 오탐
+#   0.4   100% (105/105)   17/87 (19.5%)   ← 종전
+#   0.5   100%             12/87 (13.8%)
+#   0.6   100%              4/87 ( 4.6%)
+#   0.7   100% (105/105)    0/87 ( 0.0%)   ← 채택
+#
+# 진짜 파렛트는 0.9대로 잡히고 오탐은 0.4~0.6대에 몰려 있어 사이가 깨끗하게 갈린다.
+# CLAUDE.md의 "임계 상향은 재현율을 같이 깎는다"(박스 0.5→0.7에서 95.5%→91.1%)는
+# 여기선 해당하지 않는다 — 그래서 기하가 아닌 임계로 푼다. 0.8도 같은 결과지만
+# 다른 조명·거리에서 진짜 파렛트가 0.75쯤 나올 여지를 두어 0.7을 쓴다.
+#
+# hole은 올리지 않는다. 파렛트 밖 hole 오탐은 `filter_by_geometry`가 기하로 거르고,
+# G1(재현율 ≥95%)이 걸린 클래스라 임계로 건드릴 이유가 없다.
+DEFAULT_CLASS_THRESHOLDS = {"pallet": 0.7}
+
 
 def hole_inside_pallet(hole, pallet, slack: float = DEFAULT_SLACK) -> bool:
     """구멍이 파렛트 bbox 안에 있나 (라벨 가이드 §4-1과 같은 판정)."""
@@ -84,7 +104,7 @@ class TrtDetector:
         engine_path: str | Path,
         plugin: str | Path,
         input_size: int = 640,
-        score_threshold: float = 0.5,
+        score_threshold: float = 0.4,
         class_names: tuple[str, ...] = ("pallet", "hole"),
         norm_mean: tuple[float, float, float] = (103.53, 116.28, 123.675),
         norm_std: tuple[float, float, float] = (57.375, 57.12, 58.395),
@@ -92,6 +112,7 @@ class TrtDetector:
         rotate180: bool = False,
         geometry_filter: bool = True,
     ) -> None:
+        """class_thresholds 기본값은 `DEFAULT_CLASS_THRESHOLDS` — pallet만 0.7로 올린다."""
         import tensorrt as trt
         import pycuda.driver as cuda
         import pycuda.autoinit  # noqa: F401  (컨텍스트 초기화)
@@ -126,7 +147,8 @@ class TrtDetector:
         self.input_size = input_size
         self.score_threshold = score_threshold
         self.class_names = class_names
-        self.class_thresholds = dict(class_thresholds or {})
+        self.class_thresholds = dict(
+            DEFAULT_CLASS_THRESHOLDS if class_thresholds is None else class_thresholds)
         self._mean = np.array(norm_mean, dtype=np.float32)
         self._std = np.array(norm_std, dtype=np.float32)
         self.rotate180 = rotate180
