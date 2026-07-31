@@ -58,6 +58,9 @@ def generate_launch_description():
         ],
     )
 
+    # Each TF link needs exactly one publisher. rf2o hands odom -> base_link
+    # over to the EKF below, so the two are launched together and must stay
+    # together: rf2o alone with publish_tf false would leave the chain broken.
     rf2o_node = Node(
         package="rf2o_laser_odometry",
         executable="rf2o_laser_odometry_node",
@@ -66,13 +69,27 @@ def generate_launch_description():
         parameters=[
             {
                 "laser_scan_topic": "/scan",
-                "odom_topic": "/odom",
-                "publish_tf": True,
+                "odom_topic": "/odom_rf2o",
+                "publish_tf": False,
                 "base_frame_id": "base_link",
                 "odom_frame_id": "odom",
                 "init_pose_from_topic": "",
                 "freq": 10.0,
             }
+        ],
+    )
+
+    ekf_node = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_filter_node",
+        output="screen",
+        parameters=[
+            os.path.join(
+                get_package_share_directory("forklift_teleop"),
+                "config",
+                "ekf.yaml",
+            )
         ],
     )
 
@@ -82,5 +99,6 @@ def generate_launch_description():
             driver_node,
             lidar_tf,
             rf2o_node,
+            ekf_node,
         ]
     )

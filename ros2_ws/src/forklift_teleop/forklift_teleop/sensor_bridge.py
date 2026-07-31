@@ -1,24 +1,31 @@
-"""Publish sensor_msgs/Imu from the ESP32 USB telemetry uplink.
+"""Publish IMU and front ToF data from the ESP32 USB telemetry uplink.
 
-This is a separate node from ``uart_teleop_bridge`` on purpose: the command
-link is a different device file (``/dev/ttyTHS1`` versus ``/dev/ttyACM0``), so
-keeping them apart means telemetry cannot delay commands and the working
-tele-operation path stays untouched.
+One node rather than several because ``/dev/ttyACM0`` can only be opened by a
+single process, and every sensor frame arrives interleaved on that one stream.
+
+This stays separate from ``uart_teleop_bridge`` on purpose: the command link is
+a different device file (``/dev/ttyTHS1``), so telemetry cannot delay commands
+and the working tele-operation path is untouched.
 """
 
 import math
+import struct
 import time
 from typing import Optional
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, PointCloud2, PointField
 import serial
 
 from forklift_teleop.sensor_protocol import (
+    TOF_STATUS_VALID,
+    TOF_STATUS_VALID_LOW_CONFIDENCE,
+    TOF_ZONE_COUNT,
     ClockOffsetTracker,
     ImuFrame,
     ImuStatusFrame,
+    TofFrame,
     parse_sensor_line,
 )
 
@@ -31,10 +38,13 @@ ORIENTATION_UNUSED = -1.0
 # covariance as degenerate.
 UNTRUSTED_VARIANCE = 1e6
 
+TOF_GRID_SIDE = 8
+TOF_SENSOR_NAMES = ("left", "right")
 
-class ImuBridge(Node):
+
+class SensorBridge(Node):
     def __init__(self) -> None:
-        super().__init__("imu_bridge")
+        super().__init__("sensor_bridge")
 
         self.declare_parameter("serial_port", "/dev/ttyACM0")
         self.declare_parameter("baud_rate", 115200)
@@ -44,6 +54,24 @@ class ImuBridge(Node):
         self.declare_parameter("gyro_z_sign", 1)
         self.declare_parameter("yaw_rate_stddev", 0.02)
         self.declare_parameter("status_log_period_sec", 10.0)
+
+        self.declare_parameter("tof_enabled", True)
+        self.declare_parameter("tof_topics", ["/tof/left/points",
+                                              "/tof/right/points"])
+        self.declare_parameter("tof_frame_ids", ["tof_left_link",
+                                                 "tof_right_link"])
+        # Square field of view in degrees, spread over the 8x8 grid. Check this
+        # against the datasheet: get it wrong and every bearing is wrong.
+        self.declare_parameter("tof_fov_deg", 45.0)
+        # Which way the zone grid runs relative to the sensor frame. A mirrored
+        # column or row order is a reflection, not a rotation, so unlike a
+        # mounting offset it cannot be corrected by the static transform.
+        # Verify with an object at a known bearing before trusting the cloud.
+        self.declare_parameter("tof_azimuth_sign", 1)
+        self.declare_parameter("tof_elevation_sign", 1)
+        self.declare_parameter("tof_accept_low_confidence", False)
+        self.declare_parameter("tof_min_range_m", 0.02)
+        self.declare_parameter("tof_max_range_m", 3.5)
 
         self._serial_port = str(self.get_parameter("serial_port").value)
         self._baud_rate = int(self.get_parameter("baud_rate").value)
@@ -77,12 +105,74 @@ class ImuBridge(Node):
 
         imu_topic = str(self.get_parameter("imu_topic").value)
         self._publisher = self.create_publisher(Imu, imu_topic, 10)
+
+        self._tof_enabled = bool(self.get_parameter("tof_enabled").value)
+        self._tof_frame_ids = list(
+            self.get_parameter("tof_frame_ids").value
+        )
+        self._tof_min_range = float(
+            self.get_parameter("tof_min_range_m").value
+        )
+        self._tof_max_range = float(
+            self.get_parameter("tof_max_range_m").value
+        )
+        self._tof_accepted_status = {TOF_STATUS_VALID}
+        if bool(self.get_parameter("tof_accept_low_confidence").value):
+            self._tof_accepted_status.add(TOF_STATUS_VALID_LOW_CONFIDENCE)
+
+        azimuth_sign = int(self.get_parameter("tof_azimuth_sign").value)
+        elevation_sign = int(self.get_parameter("tof_elevation_sign").value)
+        if azimuth_sign not in (-1, 1) or elevation_sign not in (-1, 1):
+            raise ValueError("ToF axis signs must be -1 or 1")
+
+        self._tof_directions = self._build_zone_directions(
+            float(self.get_parameter("tof_fov_deg").value),
+            azimuth_sign,
+            elevation_sign,
+        )
+        self._tof_publishers = []
+        self._tof_clocks = []
+        if self._tof_enabled:
+            for topic in self.get_parameter("tof_topics").value:
+                self._tof_publishers.append(
+                    self.create_publisher(PointCloud2, str(topic), 5)
+                )
+                self._tof_clocks.append(ClockOffsetTracker())
+
         self._timer = self.create_timer(1.0 / read_rate_hz, self._on_timer)
         self.get_logger().info(
-            f"IMU bridge ready: topic={imu_topic}, "
+            f"Sensor bridge ready: imu={imu_topic}, "
             f"port={self._serial_port}, frame={self._frame_id}, "
-            f"gyro_z_sign={self._gyro_z_sign}"
+            f"gyro_z_sign={self._gyro_z_sign}, "
+            f"tof={'on' if self._tof_enabled else 'off'}"
         )
+
+    @staticmethod
+    def _build_zone_directions(
+        fov_deg: float,
+        azimuth_sign: int = 1,
+        elevation_sign: int = 1,
+    ) -> list:
+        """Unit vector per zone, precomputed once.
+
+        Zone spacing is the field of view divided across the grid, measured
+        from the centre of the array. With both signs positive, column 0 sits
+        at +Y and row 0 at +Z. The sensor frame points +X forward, +Y left,
+        +Z up, matching the vehicle convention used for the lidar transform.
+        """
+        step = math.radians(fov_deg) / TOF_GRID_SIDE
+        centre = (TOF_GRID_SIDE - 1) / 2.0
+        directions = []
+        for row in range(TOF_GRID_SIDE):
+            for column in range(TOF_GRID_SIDE):
+                azimuth = azimuth_sign * (centre - column) * step
+                elevation = elevation_sign * (centre - row) * step
+                directions.append((
+                    math.cos(elevation) * math.cos(azimuth),
+                    math.cos(elevation) * math.sin(azimuth),
+                    math.sin(elevation),
+                ))
+        return directions
 
     def _ensure_serial(self, now: float) -> bool:
         if self._serial is not None and self._serial.is_open:
@@ -150,6 +240,61 @@ class ImuBridge(Node):
 
         self._publisher.publish(message)
 
+    def _publish_tof(self, frame: TofFrame) -> None:
+        if frame.sensor_id >= len(self._tof_publishers):
+            self.get_logger().warning(
+                f"Unknown ToF sensor id {frame.sensor_id}"
+            )
+            return
+
+        host_time_ns = self.get_clock().now().nanoseconds
+        stamp_ns = self._tof_clocks[frame.sensor_id].stamp_ns(
+            frame.mcu_time_us, host_time_ns
+        )
+
+        points = bytearray()
+        valid = 0
+        for zone in range(TOF_ZONE_COUNT):
+            if frame.status[zone] not in self._tof_accepted_status:
+                continue
+
+            distance = frame.distance_mm[zone] / 1000.0
+            if not self._tof_min_range <= distance <= self._tof_max_range:
+                continue
+
+            direction = self._tof_directions[zone]
+            points += struct.pack(
+                "<fff",
+                direction[0] * distance,
+                direction[1] * distance,
+                direction[2] * distance,
+            )
+            valid += 1
+
+        message = PointCloud2()
+        message.header.stamp.sec = stamp_ns // 1_000_000_000
+        message.header.stamp.nanosec = stamp_ns % 1_000_000_000
+        message.header.frame_id = self._tof_frame_ids[frame.sensor_id]
+        # Unordered: invalid zones are dropped rather than filled with NaN, so
+        # the costmap never sees a phantom return.
+        message.height = 1
+        message.width = valid
+        message.fields = [
+            PointField(name="x", offset=0,
+                       datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4,
+                       datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8,
+                       datatype=PointField.FLOAT32, count=1),
+        ]
+        message.is_bigendian = False
+        message.point_step = 12
+        message.row_step = 12 * valid
+        message.data = bytes(points)
+        message.is_dense = True
+
+        self._tof_publishers[frame.sensor_id].publish(message)
+
     def _check_sequence(self, sequence: int) -> None:
         if self._expected_sequence is not None:
             missing = (sequence - self._expected_sequence) & 0xFFFFFFFF
@@ -188,6 +333,8 @@ class ImuBridge(Node):
             self._publish_imu(frame)
         elif isinstance(frame, ImuStatusFrame):
             self._log_status(frame, now)
+        elif isinstance(frame, TofFrame) and self._tof_enabled:
+            self._publish_tof(frame)
 
     def _on_timer(self) -> None:
         now = time.monotonic()
@@ -217,7 +364,7 @@ class ImuBridge(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = ImuBridge()
+    node = SensorBridge()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

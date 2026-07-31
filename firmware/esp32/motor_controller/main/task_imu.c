@@ -1,5 +1,6 @@
 #include "task_imu.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -130,15 +131,25 @@ static esp_err_t imu_calibrate_bias(float *bias_lsb)
 }
 
 /*
- * Slow, idle-gated bias tracking. The vehicle is car-like, so a zero drive
- * command means zero yaw rate regardless of steering angle. The alpha is
- * deliberately tiny: it keeps a coasting robot, which reports idle while still
- * rotating, from poisoning the estimate.
+ * Slow, idle-gated bias tracking behind two independent gates.
+ *
+ * The command gate alone is not enough. `s_drive_idle` starts true and only
+ * changes when a UART command arrives, so on a bench rig with no commands the
+ * drive reads idle forever and this filter absorbs real rotation as bias. With
+ * alpha 0.001 at 100 Hz the time constant is 10 s, which measurably ate a
+ * hand-turned 4 x 90 degree test down to 54/22/22/7 degrees.
+ *
+ * So the gyro must also read still. The alpha stays tiny on top of that, to
+ * keep a coasting robot, which reports idle while still rotating, from
+ * poisoning the estimate.
  */
 static void imu_update_bias(float *bias_lsb, float gyro_raw_lsb,
                             uint32_t *idle_ms)
 {
-    if (!motor_task_drive_is_idle()) {
+    bool measured_still = fabsf(gyro_raw_lsb - *bias_lsb) <
+                          IMU_BIAS_STILL_THRESHOLD_LSB;
+
+    if (!motor_task_drive_is_idle() || !measured_still) {
         *idle_ms = 0U;
         return;
     }

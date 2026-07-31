@@ -18,6 +18,7 @@
 static const char *TAG = "TELEMETRY";
 
 static QueueHandle_t s_imu_queue = NULL;
+static QueueHandle_t s_tof_queue = NULL;
 static QueueHandle_t s_imu_status_queue = NULL;
 
 /*
@@ -91,6 +92,45 @@ static void telemetry_write_imu(const imu_sample_t *sample)
     telemetry_write_frame(body);
 }
 
+/*
+ * Zones are packed as fixed-width hex, four characters each: three for the
+ * distance in mm and one for the target status. No separators means the length
+ * is deterministic and the host parser needs no field splitting.
+ */
+static void telemetry_write_tof(const tof_sample_t *sample)
+{
+    char body[TELEMETRY_FRAME_MAX_LENGTH];
+    int body_length = snprintf(
+        body,
+        sizeof(body),
+        "TOF,%u,%lu,%lld,",
+        (unsigned)sample->sensor_id,
+        (unsigned long)sample->sequence,
+        (long long)sample->timestamp_us
+    );
+
+    if (body_length <= 0 ||
+        (size_t)body_length + (TOF_ZONE_COUNT * 4U) >= sizeof(body)) {
+        s_dropped_samples++;
+        return;
+    }
+
+    static const char hex_digits[] = "0123456789ABCDEF";
+    char *cursor = &body[body_length];
+
+    for (size_t zone = 0; zone < TOF_ZONE_COUNT; zone++) {
+        uint16_t distance = sample->distance_mm[zone];
+
+        *cursor++ = hex_digits[(distance >> 8) & 0x0FU];
+        *cursor++ = hex_digits[(distance >> 4) & 0x0FU];
+        *cursor++ = hex_digits[distance & 0x0FU];
+        *cursor++ = hex_digits[sample->status[zone] & 0x0FU];
+    }
+
+    *cursor = '\0';
+    telemetry_write_frame(body);
+}
+
 static void telemetry_write_imu_status(const imu_status_t *status)
 {
     char body[TELEMETRY_FRAME_MAX_LENGTH];
@@ -140,6 +180,16 @@ static void telemetry_task(void *argument)
             telemetry_write_imu(&sample);
         }
 
+        /*
+         * ToF frames are 20x larger but 7x rarer, so they are drained after the
+         * IMU queue rather than competing with it for the same wait.
+         */
+        tof_sample_t tof_sample;
+
+        while (xQueueReceive(s_tof_queue, &tof_sample, 0) == pdTRUE) {
+            telemetry_write_tof(&tof_sample);
+        }
+
         TickType_t elapsed = xTaskGetTickCount() - last_status_tick;
 
         if (elapsed >= pdMS_TO_TICKS(TELEMETRY_STATUS_PERIOD_MS)) {
@@ -172,6 +222,24 @@ esp_err_t telemetry_submit_imu(const imu_sample_t *sample)
     return ESP_OK;
 }
 
+esp_err_t telemetry_submit_tof(const tof_sample_t *sample)
+{
+    if (sample == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_tof_queue == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xQueueSend(s_tof_queue, sample, 0) != pdPASS) {
+        s_dropped_samples++;
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
 void telemetry_publish_imu_status(const imu_status_t *status)
 {
     if (status == NULL || s_imu_status_queue == NULL) {
@@ -197,11 +265,25 @@ esp_err_t telemetry_task_start(void)
         return ESP_ERR_NO_MEM;
     }
 
+    s_tof_queue = xQueueCreate(
+        TELEMETRY_TOF_QUEUE_LENGTH,
+        sizeof(tof_sample_t)
+    );
+
+    if (s_tof_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create ToF telemetry queue");
+        vQueueDelete(s_imu_queue);
+        s_imu_queue = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
     s_imu_status_queue = xQueueCreate(1, sizeof(imu_status_t));
 
     if (s_imu_status_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create telemetry status queue");
+        vQueueDelete(s_tof_queue);
         vQueueDelete(s_imu_queue);
+        s_tof_queue = NULL;
         s_imu_queue = NULL;
         return ESP_ERR_NO_MEM;
     }
@@ -219,8 +301,10 @@ esp_err_t telemetry_task_start(void)
     if (task_result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create telemetry task");
         vQueueDelete(s_imu_status_queue);
+        vQueueDelete(s_tof_queue);
         vQueueDelete(s_imu_queue);
         s_imu_status_queue = NULL;
+        s_tof_queue = NULL;
         s_imu_queue = NULL;
         return ESP_FAIL;
     }

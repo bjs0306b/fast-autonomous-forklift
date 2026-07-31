@@ -1,0 +1,55 @@
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    sensor_timeout: 0.2
+    two_d_mode: true
+    print_diagnostics: true
+    publish_tf: true
+    publish_acceleration: false
+    use_sim_time: false
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    # This filter owns odom -> base_link. AMCL owns map -> odom.
+    world_frame: odom
+
+    # Laser odometry: translational velocity only. Absolute pose is not fused,
+    # because taking position from several sources makes them fight.
+    odom0: /odom_rf2o
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, false,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # IMU: yaw rate only. Orientation is not estimated on the MCU, and the
+    # accelerometer is drowned in motor and stepper vibration.
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 10
+    imu0_differential: false
+    imu0_relative: false
+
+# Field order of the config arrays:
+#   [ x,     y,      z,
+#     roll,  pitch,  yaw,
+#     vx,    vy,     vz,
+#     vroll, vpitch, vyaw,
+#     ax,    ay,     az ]
+#
+# rf2o contributes vx/vy, the IMU contributes vyaw, and the filter integrates
+# them into a pose. If vy turns out to be noise, set it false: an Ackermann
+# vehicle cannot move sideways.
+#
+# With /imu/data absent the filter still runs, degrading to rf2o alone. That is
+# the right mode while the IMU is on a bench rather than bolted to the vehicle:
+# a bench IMU reports zero yaw rate with a tight covariance and would actively
+# suppress real rotation.

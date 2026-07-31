@@ -16,6 +16,17 @@ FRAME_START = b"@"
 
 IMU_FIELD_COUNT = 5
 IMU_STATUS_FIELD_COUNT = 6
+TOF_FIELD_COUNT = 5
+
+# 8x8 multizone, packed as fixed-width hex: three digits of distance in mm
+# followed by one digit of target status, with no separators.
+TOF_ZONE_COUNT = 64
+TOF_ZONE_CHARS = 4
+TOF_PAYLOAD_CHARS = TOF_ZONE_COUNT * TOF_ZONE_CHARS
+
+# The ULD reports 5 for a good measurement and 9 for one with half confidence.
+TOF_STATUS_VALID = 5
+TOF_STATUS_VALID_LOW_CONFIDENCE = 9
 
 # A reboot restarts esp_timer at zero, and NTP can step the host clock. Either
 # invalidates the offset estimate outright.
@@ -43,7 +54,16 @@ class ImuStatusFrame:
     sequence: int
 
 
-SensorFrame = Union[ImuFrame, ImuStatusFrame]
+@dataclass(frozen=True)
+class TofFrame:
+    sensor_id: int
+    sequence: int
+    mcu_time_us: int
+    distance_mm: tuple
+    status: tuple
+
+
+SensorFrame = Union[ImuFrame, ImuStatusFrame, TofFrame]
 
 
 def _split_verified_body(line: bytes) -> Optional[list]:
@@ -115,8 +135,39 @@ def parse_sensor_line(line: bytes) -> Optional[SensorFrame]:
             sequence=_parse_int(fields[5], "IMS sequence"),
         )
 
+    if kind == "TOF":
+        if len(fields) != TOF_FIELD_COUNT:
+            raise ValueError("invalid TOF field count")
+        return _parse_tof(fields)
+
     # An ACK arriving here would mean the links are crossed; treat as unknown.
     return None
+
+
+def _parse_tof(fields: list) -> TofFrame:
+    payload = fields[4]
+    if len(payload) != TOF_PAYLOAD_CHARS:
+        raise ValueError(
+            f"TOF payload must be {TOF_PAYLOAD_CHARS} chars, got {len(payload)}"
+        )
+
+    distance_mm = []
+    status = []
+    for zone in range(TOF_ZONE_COUNT):
+        chunk = payload[zone * TOF_ZONE_CHARS:(zone + 1) * TOF_ZONE_CHARS]
+        try:
+            distance_mm.append(int(chunk[:3], 16))
+            status.append(int(chunk[3], 16))
+        except ValueError as error:
+            raise ValueError(f"invalid TOF zone {zone} encoding") from error
+
+    return TofFrame(
+        sensor_id=_parse_int(fields[1], "TOF sensor id"),
+        sequence=_parse_int(fields[2], "TOF sequence"),
+        mcu_time_us=_parse_int(fields[3], "TOF timestamp"),
+        distance_mm=tuple(distance_mm),
+        status=tuple(status),
+    )
 
 
 class ClockOffsetTracker:
