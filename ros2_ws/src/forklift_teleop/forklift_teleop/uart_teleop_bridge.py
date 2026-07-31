@@ -1,5 +1,7 @@
 """ROS2 /cmd_vel to ESP32 UART bridge."""
 
+from collections import deque
+import json
 import time
 from typing import Optional
 
@@ -7,9 +9,16 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 import serial
+from std_msgs.msg import String
 
 from forklift_teleop.mapping import TeleopLimits, map_twist, select_command
-from forklift_teleop.protocol import encode_command, next_sequence, parse_ack
+from forklift_teleop.protocol import (
+    encode_command,
+    encode_lift_command,
+    next_sequence,
+    parse_ack,
+    parse_lift_status,
+)
 
 
 class UartTeleopBridge(Node):
@@ -17,6 +26,8 @@ class UartTeleopBridge(Node):
         super().__init__("uart_teleop_bridge")
 
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
+        self.declare_parameter("fork_command_topic", "/fork/command")
+        self.declare_parameter("fork_status_topic", "/fork/status")
         self.declare_parameter("serial_port", "/dev/ttyTHS1")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("command_rate_hz", 20.0)
@@ -77,6 +88,7 @@ class UartTeleopBridge(Node):
         self._sequence = 0
         self._last_twist: Optional[Twist] = None
         self._last_twist_time: Optional[float] = None
+        self._pending_lift_commands = deque(maxlen=8)
 
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self._subscription = self.create_subscription(
@@ -85,15 +97,47 @@ class UartTeleopBridge(Node):
             self._on_twist,
             1,
         )
+        fork_command_topic = str(
+            self.get_parameter("fork_command_topic").value
+        )
+        fork_status_topic = str(
+            self.get_parameter("fork_status_topic").value
+        )
+        self._fork_subscription = self.create_subscription(
+            String,
+            fork_command_topic,
+            self._on_fork_command,
+            1,
+        )
+        self._fork_status_publisher = self.create_publisher(
+            String,
+            fork_status_topic,
+            10,
+        )
         self._timer = self.create_timer(1.0 / command_rate_hz, self._on_timer)
         self.get_logger().info(
             f"UART teleop ready: topic={cmd_vel_topic}, "
+            f"fork_command={fork_command_topic}, "
+            f"fork_status={fork_status_topic}, "
             f"port={self._serial_port}, baud={self._baud_rate}"
         )
 
     def _on_twist(self, message: Twist) -> None:
         self._last_twist = message
         self._last_twist_time = time.monotonic()
+
+    def _on_fork_command(self, message: String) -> None:
+        action = message.data.strip().upper()
+        if action not in {"UP", "DOWN", "STOP"}:
+            self.get_logger().warning(
+                f"Rejected fork command {message.data!r}; "
+                "expected UP, DOWN, or STOP"
+            )
+            return
+        if len(self._pending_lift_commands) == self._pending_lift_commands.maxlen:
+            self.get_logger().warning("Fork command queue is full")
+            return
+        self._pending_lift_commands.append(action)
 
     def _ensure_serial(self, now: float) -> bool:
         if self._serial is not None and self._serial.is_open:
@@ -141,7 +185,7 @@ class UartTeleopBridge(Node):
             self._limits,
         )
 
-    def _read_acks(self) -> None:
+    def _read_uart(self) -> None:
         if self._serial is None:
             return
         waiting = self._serial.in_waiting
@@ -152,10 +196,44 @@ class UartTeleopBridge(Node):
             line, _, remainder = self._rx_buffer.partition(b"\n")
             self._rx_buffer = bytearray(remainder)
             try:
-                ack = parse_ack(line + b"\n")
-                self.get_logger().debug(f"ACK sequence={ack.sequence}")
+                framed_line = line + b"\n"
+                if line.startswith(b"@LIFT_STATUS,"):
+                    status = parse_lift_status(framed_line)
+                    message = String()
+                    message.data = json.dumps(
+                        {
+                            "sequence": status.sequence,
+                            "state": status.state,
+                            "completed_steps": status.completed_steps,
+                            "total_steps": status.total_steps,
+                            "lower_limit_active": (
+                                status.lower_limit_active
+                            ),
+                        },
+                        separators=(",", ":"),
+                    )
+                    self._fork_status_publisher.publish(message)
+                    self.get_logger().info(
+                        "Fork status: "
+                        f"sequence={status.sequence}, "
+                        f"state={status.state}, "
+                        f"steps={status.completed_steps}/"
+                        f"{status.total_steps}, "
+                        f"lower_limit={status.lower_limit_active}"
+                    )
+                else:
+                    ack = parse_ack(framed_line)
+                    log = (
+                        self.get_logger().debug
+                        if ack.status == "OK"
+                        else self.get_logger().warning
+                    )
+                    log(
+                        f"ACK sequence={ack.sequence} "
+                        f"status={ack.status}"
+                    )
             except ValueError as error:
-                self.get_logger().warning(f"Invalid UART ACK: {error}")
+                self.get_logger().warning(f"Invalid UART frame: {error}")
 
     def _on_timer(self) -> None:
         now = time.monotonic()
@@ -163,16 +241,27 @@ class UartTeleopBridge(Node):
             return
 
         command = self._current_command(now)
-        frame = encode_command(
-            self._sequence,
-            command.drive_percent,
-            command.steering_cdeg,
-        )
 
         try:
             assert self._serial is not None
-            self._serial.write(frame)
-            self._read_acks()
+            if self._pending_lift_commands:
+                lift_action = self._pending_lift_commands.popleft()
+                self._serial.write(
+                    encode_lift_command(self._sequence, lift_action)
+                )
+                self.get_logger().info(
+                    f"Sent fork command: sequence={self._sequence}, "
+                    f"action={lift_action}"
+                )
+                self._sequence = next_sequence(self._sequence)
+            self._serial.write(
+                encode_command(
+                    self._sequence,
+                    command.drive_percent,
+                    command.steering_cdeg,
+                )
+            )
+            self._read_uart()
             self._sequence = next_sequence(self._sequence)
         except (serial.SerialException, OSError) as error:
             self.get_logger().error(f"UART communication failed: {error}")
@@ -188,6 +277,10 @@ class UartTeleopBridge(Node):
                     self._limits.steering_center_cdeg,
                 )
                 self._serial.write(stop)
+                self._sequence = next_sequence(self._sequence)
+                self._serial.write(
+                    encode_lift_command(self._sequence, "STOP")
+                )
                 self._serial.flush()
             except (serial.SerialException, OSError):
                 pass
