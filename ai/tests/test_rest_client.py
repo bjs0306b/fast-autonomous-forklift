@@ -159,3 +159,24 @@ def test_세션_열기_실패하면_본문을_실행하지_않는다(monkeypatch
         with measurement_session("cargo-1"):
             entered = True
     assert not entered
+
+
+def test_세션을_측정_앞에_연다(monkeypatch, capsys) -> None:
+    """순서가 바뀌면 이 테스트가 깨진다 (2026-07-31 결정).
+
+    설비가 점유 중이면 **측정을 시작하기도 전에** 튕겨야 한다 — 수 초짜리 촬영·추론을
+    다 하고 나서 버리면 헛수고다. 존재하지 않는 이미지를 주고, 그 오류 메시지가
+    **안 나오는 것**으로 측정에 진입조차 안 했음을 확인한다.
+    """
+    from station import serve
+
+    def occupied(method, url, body=None, timeout=None):
+        raise StationApiError(409, "STATION_ALREADY_OCCUPIED")
+
+    monkeypatch.setattr(rest_client, "_call", occupied)
+    rc = serve.main(["--once", "--publish", "--cargo-id", "cargo-1",
+                     "--image", "존재하지-않는-파일.jpg"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "세션을 열 수 없어" in err
+    assert "이미지를 읽을 수 없습니다" not in err

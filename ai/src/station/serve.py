@@ -147,8 +147,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="측정 결과를 백엔드로 전송 "
                              "(POST /api/stations/measurements, STATION_API_BASE 환경변수)")
     parser.add_argument("--cargo-id",
-                        help="이 측정의 화물 ID. 주면 세션을 열고 전송 후 반드시 닫는다. "
-                             "안 주면 남이 연 세션에 측정이 붙는다(오귀속 위험)")
+                        help="이 측정의 화물 ID. 주면 측정 전에 세션을 열고 끝나면 반드시 "
+                             "닫는다. 안 주면 남이 연 세션에 측정이 붙는다(오귀속 위험)")
     parser.add_argument("--release-session", action="store_true",
                         help="잠긴 측정 세션을 조회·해제한다 (측정은 하지 않는다)")
     parser.add_argument("--abandon", action="store_true",
@@ -166,76 +166,97 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = StationConfig()
 
-    if args.image:
-        frame = cv2.imread(str(args.image))
-        if frame is None:
-            print(f"이미지를 읽을 수 없습니다: {args.image}", file=sys.stderr)
-            return 1
-    else:
-        frame = capture(cfg)
-    if args.save_frame:
-        cv2.imwrite(str(args.save_frame), frame)
-
-    if args.distance is not None:
-        distance = Measurement(distance_cm=args.distance, std_cm=0.0,
-                               frames_used=0, frames_seen=0)
-    else:
-        distance = read_distance(cfg)
-
-    detector = OnnxDetector(
-        cfg.model_path, cfg.input_size, cfg.score_threshold,
-        cfg.class_names, cfg.norm_mean, cfg.norm_std,
-        class_thresholds=cfg.class_score_thresholds,
-    )
-    detections = detector.detect(frame)
-
-    # 카메라 롤 추정 — 파렛트 상판이 실제 수평이라는 점을 기준면으로 쓴다.
-    # 파렛트가 없거나 추정이 불안정하면 None이고, 그러면 치수 보정을 건너뛴다.
-    pallets = [d for d in detections
-               if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
-    tilt_deg = None
-    if pallets:
-        best = max(pallets, key=lambda d: d.score)
-        # 박스가 상판을 가리는 구간은 제외한다 — 안 그러면 편심 배치에서 각도가 뒤집힌다
-        occluders = [d.box for d in detections
-                     if d.label == "box" and d.score >= cfg.threshold_for("box")]
-        tilt_deg = estimate_roll_deg(frame, best.box, occluders=occluders)
-
-    payload = build_payload(detections, distance, cfg, tilt_deg=tilt_deg)
-
-    text = json.dumps(payload, ensure_ascii=False, indent=2)
-    print(text)
-    if args.out:
-        args.out.write_text(text, encoding="utf-8")
-
-    if args.publish:
-        # status != ok도 보낸다 — 백엔드가 status별 검증을 하고, 재측정 판단에 쓴다.
-        from station.rest_client import measurement_session, send
-
-        def publish() -> bool:
-            ok = send(payload)
-            print(f"[publish] {'성공' if ok else '실패'} "
-                  f"POST /api/stations/measurements ({payload.get('measurement_id')})",
-                  file=sys.stderr)
-            return ok
-
-        if args.cargo_id:
-            # **세션은 전송 직전에 연다.** 백엔드 문서상 정상 흐름은 "세션 시작 → 측정 →
-            # 결과 등록"이지만, 그렇게 하면 카메라·거리센서가 실패했을 때 측정 없는
-            # 세션이 남고 백엔드가 종료를 거부해(MEASUREMENT_NOT_COMPLETED) 설비가 잠긴다.
-            # 측정은 이미 끝나 있으므로 여기서 열어도 귀속은 동일하고, 못 닫는 구간이
-            # 요청 한 번으로 줄어든다. (설비 점유를 실시간으로 보여주려면 앞으로 옮겨야
-            # 하는데, 그건 팀 합의 사항이다.)
-            with measurement_session(args.cargo_id):
-                ok = publish()
+    def measure_and_emit() -> dict | None:
+        """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None."""
+        if args.image:
+            frame = cv2.imread(str(args.image))
+            if frame is None:
+                print(f"이미지를 읽을 수 없습니다: {args.image}", file=sys.stderr)
+                return None
         else:
-            print("[publish] ⚠️ --cargo-id 없이 보냅니다 — 백엔드는 요청의 화물을 묻지 않고 "
-                  "**현재 활성 세션**에 붙입니다. 남이 연 세션이 있으면 그 화물로 "
-                  "잘못 기록되고, 사후에 알아낼 방법이 없습니다.", file=sys.stderr)
-            ok = publish()
-        if not ok:
+            frame = capture(cfg)
+        if args.save_frame:
+            cv2.imwrite(str(args.save_frame), frame)
+
+        if args.distance is not None:
+            distance = Measurement(distance_cm=args.distance, std_cm=0.0,
+                                   frames_used=0, frames_seen=0)
+        else:
+            distance = read_distance(cfg)
+
+        detector = OnnxDetector(
+            cfg.model_path, cfg.input_size, cfg.score_threshold,
+            cfg.class_names, cfg.norm_mean, cfg.norm_std,
+            class_thresholds=cfg.class_score_thresholds,
+        )
+        detections = detector.detect(frame)
+
+        # 카메라 롤 추정 — 파렛트 상판이 실제 수평이라는 점을 기준면으로 쓴다.
+        # 파렛트가 없거나 추정이 불안정하면 None이고, 그러면 치수 보정을 건너뛴다.
+        pallets = [d for d in detections
+                   if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
+        tilt_deg = None
+        if pallets:
+            best = max(pallets, key=lambda d: d.score)
+            # 박스가 상판을 가리는 구간은 제외한다 — 안 그러면 편심 배치에서 각도가 뒤집힌다
+            occluders = [d.box for d in detections
+                         if d.label == "box" and d.score >= cfg.threshold_for("box")]
+            tilt_deg = estimate_roll_deg(frame, best.box, occluders=occluders)
+
+        payload = build_payload(detections, distance, cfg, tilt_deg=tilt_deg)
+
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        print(text)
+        if args.out:
+            args.out.write_text(text, encoding="utf-8")
+        return payload
+
+    def publish(payload: dict) -> bool:
+        # status != ok도 보낸다 — 백엔드가 status별 검증을 하고, 재측정 판단에 쓴다.
+        from station.rest_client import send
+        ok = send(payload)
+        print(f"[publish] {'성공' if ok else '실패'} "
+              f"POST /api/stations/measurements ({payload.get('measurement_id')})",
+              file=sys.stderr)
+        return ok
+
+    if not (args.publish and args.cargo_id):
+        payload = measure_and_emit()
+        if payload is None:
             return 1
-    return 0
+        if not args.publish:
+            return 0
+        print("[publish] ⚠️ --cargo-id 없이 보냅니다 — 백엔드는 요청의 화물을 묻지 않고 "
+              "**현재 활성 세션**에 붙입니다. 남이 연 세션이 있으면 그 화물로 잘못 "
+              "기록되고, 사후에 알아낼 방법이 없습니다.", file=sys.stderr)
+        return 0 if publish(payload) else 1
+
+    # **세션을 측정 앞에 연다** (2026-07-31 팀 결정). 백엔드 문서상 정상 흐름
+    # ("세션 시작 → 측정 → 결과 등록")이고, 세션이 **"지금 이 화물을 측정 중"** 이라는
+    # 뜻을 갖는다. 얻는 것 둘:
+    #   ① 관제가 `GET /sessions/active`로 설비 점유를 실시간 표시할 수 있다.
+    #   ② 설비가 이미 점유 중이면 **측정을 시작하기 전에** 409로 튕겨 헛수고를 막는다.
+    #
+    # ⚠️ 대가: 측정 도중 예외(카메라 미개방·해상도 불일치·모델 파일 없음)가 나면 측정이
+    # 저장되지 않은 채 세션만 열려 **백엔드가 종료를 거부한다**(MEASUREMENT_NOT_COMPLETED).
+    # `measurement_session`이 세션 ID와 복구 명령을 찍는다. 대안으로 실패 시 unreliable
+    # 측정을 남겨 자동 해제하는 방식도 검토했으나, **측정 실패 행을 DB에 쌓지 않기로**
+    # 했다. 근본 해결(TTL·강제 해제)은 S15P11A304-172.
+    from station.rest_client import SessionNotReleased, StationApiError, measurement_session
+
+    try:
+        with measurement_session(args.cargo_id):
+            payload = measure_and_emit()
+            if payload is None:
+                return 1
+            ok = publish(payload)
+    except StationApiError as e:
+        # 세션 열기 실패(대개 409 ALREADY_OCCUPIED) — 측정은 시작도 안 했다.
+        print(f"[station-api] 세션을 열 수 없어 측정을 건너뜁니다: {e}", file=sys.stderr)
+        return 1
+    except SessionNotReleased:
+        return 2        # 잠긴 세션이 남았다 — 성공(0)·측정실패(1)와 구분한다
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
