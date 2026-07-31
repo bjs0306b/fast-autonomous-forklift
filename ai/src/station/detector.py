@@ -31,8 +31,7 @@ import cv2
 import numpy as np
 
 from perception.load_balance import BBox, Detection
-
-PAD_VALUE = 114
+from perception.preprocess import letterbox, to_tensor
 
 
 class OnnxDetector:
@@ -70,18 +69,8 @@ class OnnxDetector:
         return self._postprocess(dets[0], labels[0], scale)
 
     def _preprocess(self, frame: np.ndarray) -> tuple[np.ndarray, float]:
-        h, w = frame.shape[:2]
-        size = self.input_size
-        scale = min(size / w, size / h)
-        new_w, new_h = int(round(w * scale)), int(round(h * scale))
-        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-        padded = np.full((size, size, 3), PAD_VALUE, dtype=np.uint8)
-        padded[:new_h, :new_w] = resized
-
-        normalized = (padded.astype(np.float32) - self._mean) / self._std
-        tensor = normalized.transpose(2, 0, 1)[np.newaxis]  # HWC → NCHW
-        return np.ascontiguousarray(tensor), scale
+        padded, scale = letterbox(frame, self.input_size)
+        return to_tensor(padded, self._mean, self._std), scale
 
     def _postprocess(
         self, dets: np.ndarray, labels: np.ndarray, scale: float

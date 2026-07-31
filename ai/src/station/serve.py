@@ -135,6 +135,59 @@ def release_session(abandon: bool = False) -> int:
     return 0
 
 
+def check_wiring(args) -> int:
+    """시연 전 점검 — 측정하지 않고 연결만 확인한다 (`--check`).
+
+    시연 도중에 "왜 안 되지"를 찾는 대신, 시작 전에 **어디가 끊겼는지** 알려준다.
+    셋 다 초록이어야 "카메라는 노트북, 추론은 보드, 저장은 백엔드"가 성립한다.
+    """
+    from station.rest_client import active_session, base_url_of
+
+    ok = True
+
+    print("=== 온보드 추론 서버 ===")
+    if args.infer_url:
+        from station.remote_detector import RemoteDetector
+        h = RemoteDetector(args.infer_url).health()
+        if h and h.get("ok"):
+            print(f"  ✅ {args.infer_url}  엔진 {h.get('engine')}  입력 {h.get('input_size')}")
+        else:
+            print(f"  ❌ {args.infer_url} 응답 없음 — 측정하면 **로컬로 폴백**된다")
+            ok = False
+    else:
+        print("  ○ --infer-url 없음 — 로컬(노트북)에서 추론한다")
+
+    print("=== 백엔드 ===")
+    base = base_url_of(None)
+    try:
+        sess = active_session()
+        print(f"  ✅ {base}")
+        print(f"  {'⚠️ 활성 세션 있음: ' + str(sess) if sess else '○ 활성 세션 없음(정상)'}")
+    except Exception as e:
+        print(f"  ❌ {base} — {e}")
+        ok = False
+
+    print("=== 카메라 ===")
+    cfg = StationConfig()
+    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        match = (w, h) == (cfg.frame_width, cfg.frame_height)
+        print(f"  {'✅' if match else '❌'} index {cfg.camera_index}: {w}x{h}"
+              + ("" if match else f" — 캘리브레이션 기준 {cfg.frame_width}x{cfg.frame_height}와 다르다"))
+        ok = ok and match
+    else:
+        print(f"  ❌ index {cfg.camera_index} 안 열림 (--probe로 확인)")
+        ok = False
+    cap.release()
+
+    print(f"\n{'✅ 준비됨' if ok else '❌ 위 항목을 고칠 것'}")
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="측정 스테이션 (FR-101-5)")
     parser.add_argument("--once", action="store_true", help="1회 측정 후 종료")
@@ -154,6 +207,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--abandon", action="store_true",
                         help="--release-session 전용. 측정이 없어 닫히지 않는 세션을 "
                              "unreliable 측정을 남겨 강제로 푼다")
+    parser.add_argument("--infer-url",
+                        help="온보드 추론 서버 주소 (예: http://70.12.247.81:8877). "
+                             "주면 보드에서 추론하고, 실패 시 로컬로 폴백한다. "
+                             "안 주면 지금까지처럼 로컬에서 추론")
+    parser.add_argument("--check", action="store_true",
+                        help="측정하지 않고 점검만 — 추론 서버·백엔드 연결 확인 (시연 전용)")
     args = parser.parse_args(argv)
 
     if args.probe:
@@ -161,12 +220,33 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.release_session:
         return release_session(abandon=args.abandon)
+    if args.check:
+        return check_wiring(args)
     if not args.once:
         parser.error("--once 또는 --probe를 지정하세요 (상시 서비스 모드는 추후)")
 
     cfg = StationConfig()
 
-    def measure_and_emit() -> dict | None:
+    def build_detector():
+        """추론기를 만든다 — 기본은 로컬 ONNX, `--infer-url`이면 온보드 보드.
+
+        보드 경로여도 **로컬을 폴백으로 항상 함께 준다.** 시연 중 WiFi가 끊겨도 측정이
+        죽지 않아야 하기 때문이다. 대신 어느 경로로 돌았는지 측정 JSON에 기록한다
+        (`inference.path`) — 조용히 로컬로 떨어지면 "보드가 추론한다"는 설명이 사실과
+        달라진다.
+        """
+        local = OnnxDetector(
+            cfg.model_path, cfg.input_size, cfg.score_threshold,
+            cfg.class_names, cfg.norm_mean, cfg.norm_std,
+            class_thresholds=cfg.class_score_thresholds,
+        )
+        if not args.infer_url:
+            return local
+        from station.remote_detector import RemoteDetector
+        return RemoteDetector(args.infer_url, input_size=cfg.input_size,
+                              local_detector=local)
+
+    def measure_and_emit(detector=None) -> dict | None:
         """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None."""
         if args.image:
             frame = cv2.imread(str(args.image))
@@ -184,11 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             distance = read_distance(cfg)
 
-        detector = OnnxDetector(
-            cfg.model_path, cfg.input_size, cfg.score_threshold,
-            cfg.class_names, cfg.norm_mean, cfg.norm_std,
-            class_thresholds=cfg.class_score_thresholds,
-        )
+        if detector is None:
+            detector = build_detector()
         detections = detector.detect(frame)
 
         # 카메라 롤 추정 — 파렛트 상판이 실제 수평이라는 점을 기준면으로 쓴다.
@@ -204,6 +281,18 @@ def main(argv: list[str] | None = None) -> int:
             tilt_deg = estimate_roll_deg(frame, best.box, occluders=occluders)
 
         payload = build_payload(detections, distance, cfg, tilt_deg=tilt_deg)
+
+        # **어디서 추론했는지 결과에 남긴다.** 폴백으로 떨어졌는지 결과만 봐서는 알 수
+        # 없고, 시연에서 "보드가 했다"고 말하려면 근거가 있어야 한다.
+        # 백엔드 전송은 6·7필드만 골라 쓰므로 이 필드가 늘어도 계약에 영향이 없다.
+        payload["inference"] = {
+            "path": getattr(detector, "last_path", "local"),
+            "ms": getattr(detector, "last_inference_ms", None),
+            "endpoint": args.infer_url or None,
+        }
+        if payload["inference"]["path"] == "local" and args.infer_url:
+            print("[measure] ⚠️ 보드 추론에 실패해 **로컬로 측정했습니다** — "
+                  "시연 설명에 주의", file=sys.stderr)
 
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         print(text)
