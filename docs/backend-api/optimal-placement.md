@@ -141,8 +141,12 @@ measurementId
 운반 작업을 생성할 때는 선택한 측정의 세션이 참조하는 `cargo_id`와 작업의 `cargo_id`가 같은지도 검증한다.
 `transport_task`가 화물과 측정을 각각 FK로 참조하므로, 이 교차 일치 조건은 작업 생성 트랜잭션에서 보장해야 한다.
 
-> **현재 구현 차이:** 목표 스키마 초안에는 세션 연결과 `tipping_level`, `overhang_ratio`가 정의되어 있지만
-> 현재 실행 스키마와 애플리케이션 매핑에는 아직 반영되지 않았다.
+> **해소됨:** 실행 스키마·Mapper·Domain 모두 세션 연결과 `tipping_level`/`overhang_ratio`를 반영했고,
+> REST 저장 경로가 그 값을 실제로 채운다(옛 Adapter가 두 값을 null 로 하드코딩하던 문제 제거).
+>
+> ⚠️ 다만 4.4-1의 "`sessionId`가 현재 `active_session_id`와 일치한다" 검증은 **불가능하다** —
+> REST 요청이 `sessionId`를 전달하지 않고 백엔드가 활성 세션을 조회해 붙이는 방식으로 확정됐다.
+> 늦게 도착한 이전 화물의 측정 결과가 현재 세션에 붙는 것을 막을 근거가 없다.
 
 ## 5. 적재 위치 데이터 의미
 
@@ -192,28 +196,35 @@ MVP 적재 계산을 위한 별도 `rack`, `rack_level` 테이블은 만들지 �
 
 ### 6.1 스테이션 입력
 
-스테이션에서 input adapter로 들어오는 치수 입력은 화물만의 높이이며 단위는 `cm`다.
+**구현 완료(REST 전환).** 측정 데스크탑이 `POST /api/stations/measurements`로 보내며, 요청 계약의
+`cargoHeight`는 이미 **`m` 단위의 화물만의 높이**다. cm → m 변환 책임은 **전송 측(데스크탑)** 에 있고
+백엔드는 단위를 추측해 변환하지 않는다.
 
 ```text
-stationCargoHeightCm
-overhang
-tipping.level
+cargoHeight     // m, 화물만 (팔레트 제외)
+overhangRatio   // 무차원 비율
+tippingLevel    // safe/warning/danger → SAFE/WARNING/DANGER 로 정규화 저장
 ```
 
-input adapter는 원시 `height_cm`를 `m`로 변환하여 placement 전용 canonical DTO를 만든다.
-이 DTO부터 DB 저장과 MQTT 명령까지 길이 단위는 `m`다. `total_height_cm`, `pallet_height_cm`,
-`width_cm`, `miniature_height_mm`, `miniature_total_height_mm`, `miniature_width_mm`는 목표 FR-202 계산 입력으로 사용하지 않는다.
+DB 저장(`station_measurement.cargo_height`)부터 MQTT 명령까지 길이 단위는 `m`다. `total_height_cm`,
+`pallet_height_cm`, `width_cm`, `miniature_height_mm`, `miniature_total_height_mm`, `miniature_width_mm`는
+FR-202 계산 입력으로 사용하지 않으며, **REST 계약에도 포함되지 않는다**.
 
 ### 6.2 현실 스케일 정규화
 
 ```text
-cargoHeightM = stationCargoHeightCm / 100
-palletHeightM = 0.12
+cargoHeightM     = station_measurement.cargo_height            // 이미 m, 화물만
+palletHeightM    = storage.placement.pallet-height-m           // 설정값, 기본 0.12
+clearanceM       = storage.placement.height-clearance          // 설정값, 현재 0.05
 totalLoadHeightM = cargoHeightM + palletHeightM
-requiredHeightM = totalLoadHeightM + 0.25
+requiredHeightM  = totalLoadHeightM + clearanceM
 ```
 
-팔레트 높이는 백엔드에서 정확히 한 번만 더한다.
+팔레트 높이는 백엔드에서 정확히 한 번만 더한다 — 그 지점은 `PlacementService` **하나뿐**이다.
+값은 코드에 박지 않고 `storage.placement.pallet-height-m`(환경변수 `STORAGE_PLACEMENT_PALLET_HEIGHT_M`)
+설정에서 온다.
+
+> **현재 구현 차이:** 목표 여유 높이는 `0.25m`지만 설정값은 아직 `0.05m`다(아래 12장 표 참고).
 
 ### 6.3 정상 운영 입력 완전성
 
@@ -229,8 +240,111 @@ MVP의 정상 흐름에서는 다음 값이 모두 제공된다고 가정한다.
 
 SQL에서 일부 값이 nullable이더라도 정상 알고리즘은 누락된 값을 임의로 보완하지 않는다.
 
-> **현재 구현 차이:** 현재 AI handoff 문서는 `total_height_cm` 사용을 권장하지만 목표 FR-202는 cargo-only `height_cm`을 정규화한 뒤 팔레트 상수를 더한다.
-> 현재 백엔드 DTO는 목표 안전·세션 필드를 모두 수신하지 못한다.
+> **해소됨:** AI handoff 문서를 cargo-only 계약으로 갱신했고, 백엔드 REST DTO
+> (`StationMeasurementCreateRequest`)가 `cargoHeight`(m, 화물만)·`tippingLevel`·`overhangRatio`를
+> 모두 수신해 저장한다. `sessionId`는 요청에서 받지 않고 백엔드가 활성 세션을 조회해 연결한다.
+
+## 6-bis. 측정 세션과 적재 추천 안전 게이트 (prompt96, 구현 완료)
+
+### 6-bis.1 단일 활성 세션
+
+측정 설비는 하나뿐이라 **동시에 활성 세션은 1개**다. 상태는 `station_state.active_session_id`
+한 행으로 표현한다.
+
+| 동작 | API | 조건 | 실패 |
+|---|---|---|---|
+| 세션 시작 | `POST /api/stations/sessions?cargoId=...` | `active_session_id IS NULL` | 409 `STATION_ALREADY_OCCUPIED` |
+| 측정 등록 | `POST /api/stations/measurements` | 활성 세션 존재 + 세션에 결과 없음 | 409 (아래 3종) |
+| 세션 종료 | `DELETE /api/stations/sessions/{sessionId}` | 활성 세션 일치 + **측정 결과 1건 이상 존재** | 409 |
+
+점유·해제·종료는 모두 **조건부 UPDATE 한 문장**이다. "조회 후 변경"으로 나누면 그 사이에 다른 요청이
+끼어들 수 있어 두 요청이 동시에 성공한다. 다중 인스턴스에서도 안전하도록 Java `synchronized` 가 아니라
+DB 조건부 UPDATE·UNIQUE 제약으로 막는다.
+
+### 6-bis.2 측정 저장 전 세션 종료 금지
+
+세션 종료는 다음 SQL 한 문장으로 판정·해제를 함께 한다.
+
+```sql
+UPDATE station_state SET active_session_id = NULL
+ WHERE singleton_id = 1
+   AND active_session_id = #{sessionId}
+   AND EXISTS (SELECT 1 FROM station_measurement WHERE session_id = #{sessionId})
+```
+
+영향 행이 0이면 그때 원인을 조회해 구분한다 — 전부 `NOT_FOUND` 로 뭉개지 않는다.
+
+- 활성 세션이 아님 → 409 `STATION_SESSION_NOT_ACTIVE`
+- 측정 결과가 아직 없음 → 409 `STATION_MEASUREMENT_NOT_COMPLETED`
+
+**종료에 실패하면 활성 세션은 그대로 유지된다.**
+
+> **세션 종료 조건과 적재 추천 조건은 별개다.** `DIMENSIONS_ONLY`/`NO_DETECTION`/`UNRELIABLE` 도
+> "측정 결과가 저장됨"에 해당하므로 세션을 종료할 수 있다. 다만 적재 추천 대상은 아니다.
+
+### 6-bis.3 세션당 최종 측정 결과 1건
+
+한 세션에는 최종 측정 결과를 하나만 저장한다. 사전 확인(`existsBySessionId`)은 빠른 실패용이고,
+동시 요청의 최종 방어는 `uk_station_measurement_session UNIQUE (session_id)` 제약이다.
+
+두 종류의 중복을 **구분**한다.
+
+| 상황 | ErrorCode | HTTP |
+|---|---|---|
+| 같은 `measurementId` 재전송 | `STATION_MEASUREMENT_ID_DUPLICATED` | 409 |
+| 다른 `measurementId` 지만 그 세션엔 이미 결과 존재 | `STATION_SESSION_MEASUREMENT_ALREADY_EXISTS` | 409 |
+
+기존 결과를 갱신하지 않고, 새 행도 만들지 않으며, WebSocket 재발행도 하지 않는다.
+
+### 6-bis.4 적재 추천 안전 게이트
+
+추천은 다음을 **모두(AND)** 만족할 때만 실행한다.
+
+```text
+status == OK
+AND cargoHeight != null AND finite AND > 0
+AND tippingLevel == SAFE
+AND overhangRatio != null AND finite AND >= 0
+AND overhangRatio < storage.placement.max-overhang-ratio-exclusive   (기본 0.05, 경계 미포함)
+```
+
+세 안전값 중 **하나만 정상인 경우는 전부 추천 불가**다 — 높이만 있어도, SAFE 만 있어도, 돌출률만
+정상이어도 추천하지 않는다. 값이 없을 때 임의로 `SAFE` 로 보정하거나 기본 슬롯을 돌려주지 않는다.
+
+판정은 `StationMeasurementPlacementEligibility` 한 곳에 있고, 자동 호출 경로와 추천 API 진입점이
+같은 객체를 쓴다(같은 로직을 두 벌 복사하지 않는다).
+
+**검증 순서가 곧 오류 우선순위**다 — 여러 조건이 동시에 실패해도 같은 입력은 항상 같은 오류를 낸다.
+
+| 순서 | 조건 | ErrorCode | HTTP |
+|---|---|---|---|
+| 1 | 측정 존재 | `STATION_MEASUREMENT_NOT_FOUND` | 404 |
+| 2 | `status == OK` | `STATION_MEASUREMENT_STATUS_NOT_ELIGIBLE` | 409 |
+| 3 | 화물 높이 유효 | `STATION_MEASUREMENT_HEIGHT_INVALID` | 409 |
+| 4 | `tippingLevel == SAFE` | `STATION_TIPPING_LEVEL_NOT_SAFE` | 409 |
+| 5 | `overhangRatio < limit` | `STATION_OVERHANG_LIMIT_EXCEEDED` | 409 |
+| 6 | 수용 가능한 슬롯 탐색 | `NO_AVAILABLE_STORAGE_SLOT` | 409 |
+
+5번과 6번은 다른 뜻이다 — **"애초에 추천 대상이 아님"과 "조건은 통과했지만 맞는 칸이 없음"** 을 구분한다.
+
+### 6-bis.5 상태별 정책 요약
+
+| status | DB 저장 | 세션 종료 | 적재 추천 |
+|---|---|---|---|
+| `OK` (SAFE + overhang < 0.05 + 높이 유효) | ✅ | ✅ | ✅ |
+| `OK` (WARNING/DANGER 또는 overhang ≥ 0.05) | ✅ | ✅ | ❌ |
+| `DIMENSIONS_ONLY` | ✅ (높이만, 위험값 null) | ✅ | ❌ |
+| `NO_DETECTION` | ✅ (전부 null) | ✅ | ❌ |
+| `UNRELIABLE` | ✅ (전부 null) | ✅ | ❌ |
+
+### 6-bis.6 late arrival 잔여 한계
+
+세션이 **측정 결과 저장 전에는 종료되지 않으므로** 기존보다 위험이 줄었다 — 결과가 도착하기 전에
+세션이 닫히고 다음 세션이 열리는 경로가 막혔다.
+
+그러나 **완전히 없앤 것은 아니다.** 요청이 `sessionId` 를 보내지 않으므로, 데스크탑 결과가 아주 늦게
+도착한 경우(이미 그 세션이 결과를 받고 정상 종료된 뒤, 다음 세션이 열린 시점에 도착) 백엔드는 그것을
+현재 활성 세션의 결과로 저장한다. 이를 구분할 식별자가 저장 구조에 없다.
 
 ## 7. 적재 가능성과 안전 판정
 
@@ -450,23 +564,23 @@ MVP 정상 흐름에서는 필요한 데이터가 모두 들어온다고 가정�
 | 항목 | 목표 규격 | 현재 구현 | 근거 | 후속 조치 |
 |---|---|---|---|---|
 | 여유 높이 | 현실 `0.25m` | `0.05m` | `src/main/resources/application.yml:17-21` | 설정값 변경 |
-| 팔레트 높이 | cargo-only 높이에 `0.12m`를 한 번 추가 | `cargo.height + clearance` | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:82-85` | 수직 판정식 변경 |
+| 팔레트 높이 | cargo-only 높이에 `0.12m`를 한 번 추가 | **반영 완료** — `cargoHeight + palletHeightM + clearance`, 값은 `storage.placement.pallet-height-m` 설정 | `PlacementService`, `PlacementProperties`, `application.yml` | 완료 |
 | 수평 판정 | 모든 위치가 고정 팔레트 `1.1 × 1.1m`를 수용하도록 사전 구성 | cargo width/length 및 90도 회전 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:86-115` | 런타임 수평 판정 제거 |
 | 정렬 | 높이 → 거리 → 슬롯 코드 | 낭비 부피 → 잔여 치수 합 → 층 → 거리 → 코드 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:117-146` | comparator 변경 |
 | 이동 거리 | Nav2의 후보별 경로 거리 사용, 누락 시 후보 제외 | 좌표 간 직선거리 계산 및 `distance = null` 허용 | `src/main/java/com/fast/backend/storage/placement/PlacementService.java:139-146` | Nav2 거리 입력 연동 및 검증 추가 |
 | 후보 상태 | `EMPTY`만 조회·예약 | `EMPTY`만 조회하고 조건부 예약 | `src/main/resources/mapper/StorageSlotMapper.xml:56-106` | 유지 |
 | 예약 충돌 | 롤백, 자동 재시도 없음 | 동일 | `src/main/java/com/fast/backend/transport/service/TransportTaskService.java:112-119` | 유지 |
 | 돌출·전복 | 독립 gate, 돌출 `< 0.05` | 돌출 `> 0.02`이면 tipping level 상승 | `ai/src/station/tipping.py:31-32,63-68,80-88` | AI 판정 분리 |
-| 스테이션 DTO | 세션·화물·tipping·overhang 수신 | 관련 필드 없음 | `src/main/java/com/fast/backend/station/dto/StationMeasurementMessage.java:20-75` | DTO 및 adapter 확장 |
-| 스테이션 검증 | 원시 cargo-only cm를 adapter에서 m로 변환 | miniature scale/height/width 필수 검증 | `src/main/java/com/fast/backend/station/service/StationMeasurementService.java:112-146,212-240` | validator 변경 |
-| 측정 저장 | 세션 연결과 tipping·overhang 보존 | `measurement_id`는 있으나 세션 연결과 목표 안전 필드는 없음 | `src/main/resources/db/schema.sql:146-180`, `src/main/resources/mapper/StationMeasurementMapper.xml:5-83` | 목표 스키마·domain·mapper 반영 |
+| 스테이션 DTO | 세션·화물·tipping·overhang 수신 | **반영 완료** — `StationMeasurementCreateRequest`(REST, camelCase)가 tipping/overhang 수신. 세션은 백엔드가 활성 세션 조회로 연결 | `station/dto/StationMeasurementCreateRequest.java` | 완료(단 sessionId 미수신은 late arrival 한계) |
+| 스테이션 검증 | 원시 cargo-only cm를 adapter에서 m로 변환 | **변경 완료** — REST 계약이 m를 직접 받고(변환 책임은 데스크탑), miniature 검증은 제거. status별 null 강제 검증으로 대체 | `station/service/StationMeasurementService.java` | 완료 |
+| 측정 저장 | 세션 연결과 tipping·overhang 보존 | **반영 완료** — 활성 세션 연결 + tipping_level/overhang_ratio 실제 저장 | `schema.sql:60-83`, `mapper/StationMeasurementMapper.xml` | 완료 |
 | 작업의 측정 근거 | `transport_task.measurement_id`로 사용한 측정 결과를 FK 참조 | 운반 작업에 측정 결과 참조가 없음 | `src/main/resources/db/schema.sql:347-380`, `src/main/resources/mapper/TransportTaskMapper.xml` | domain·mapper·서비스에 측정 참조 추가 |
 | 적재 위치 구조 | `storage_slot` 단일 테이블과 `slot_code` PK | 랙·층·슬롯 계층 및 숫자 슬롯 ID | `src/main/resources/db/schema.sql:311-360` | 목표 스키마와 매핑으로 평탄화 |
 | 차량 식별자 | 차량 관련 FK를 `vehicle_id`로 통일 | 일부 임베디드 테이블은 `forklift_id` 사용 | `src/main/resources/db/schema.sql:211-264`, `src/main/resources/mapper/VehicleCommandMapper.xml` | 도메인·매퍼·연동 필드 통일 |
 | 차량 footprint | 모든 차량의 현실 스케일 고정 규격을 애플리케이션 설정으로 관리 | 차량 상태·이력과 Isaac 상태 메시지에 길이·너비 저장 | `src/main/resources/db/schema.sql:34-50,75-79`, `src/main/java/com/fast/backend/isaac/service/IsaacForkliftStatusService.java:94-151` | 상태 컬럼·메시지 검증 제거 후 설정값 사용 |
 | 임베디드 이력 무결성 | 명령·오류가 `vehicle`을 FK로 참조하고 상태값을 제한 | 차량 FK와 일부 상태 제약이 없음 | `src/main/resources/db/schema.sql:215-264` | 목표 제약과 매핑 반영 |
 | 스테이션 좌표 | 애플리케이션의 단일 고정 pose를 pickup origin으로 사용 | `station_measurement`의 `station_id` 외 고정 pose 설정 없음 | 현재 설정 및 스키마 검색 | 고정 pose 설정 추가 |
-| 높이 handoff | cargo-only `height_cm` 사용 | 문서는 `total_height_cm` 사용 권장 | `docs/ai/station-measurement-handoff.md:21-30,65-79` | 연동 문서 수정 |
+| 높이 handoff | cargo-only `height_cm` 사용 | **문서 수정 완료** — handoff 가 REST 계약(`cargoHeight` = height_cm ÷ 100)을 명시 | `docs/ai/station-measurement-handoff.md` | 완료 |
 
 ## 13. MVP 제외 범위
 

@@ -1,0 +1,199 @@
+"""포크 정렬 제어 루프 테스트 (S15P11A304-152).
+
+게인 값은 미조정이라 테스트하지 않는다 — **부호·전이·안전성**만 본다. 실물에서 바뀔
+숫자를 테스트에 박으면 조정할 때마다 테스트가 깨진다.
+"""
+
+from __future__ import annotations
+
+from control.fork_servo import (
+    ALIGN_ENTER_PX,
+    INSERT_ENTER_PX,
+    MAX_ANGULAR,
+    DriveCommand,
+    ForkServo,
+    Phase,
+    steering_for,
+)
+from perception.fork_align import AlignError
+
+DT = 0.045      # 22fps
+
+
+def err(lateral=0.0, yaw=0.0, approach=200.0) -> AlignError:
+    return AlignError(lateral_ratio=lateral, yaw_signal=yaw, approach_px=approach)
+
+
+ALIGNED_FAR = err(approach=ALIGN_ENTER_PX - 50)
+ALIGNED_INSERT = err(approach=INSERT_ENTER_PX + 10)
+
+
+# --- 조향 부호 ---
+
+def test_파렛트가_오른쪽이면_우회전한다() -> None:
+    """ROS 관례상 우회전은 음의 각속도."""
+    assert steering_for(err(lateral=0.5)) < 0
+
+
+def test_파렛트가_왼쪽이면_좌회전한다() -> None:
+    assert steering_for(err(lateral=-0.5)) > 0
+
+
+def test_오른쪽_끝이_멀면_우회전한다() -> None:
+    """yaw_signal>0 = 면 법선이 우리 오른쪽 → 그 법선 위로 돌아 들어가야 한다."""
+    assert steering_for(err(yaw=0.4)) < 0
+
+
+def test_정렬되면_조향이_0() -> None:
+    assert steering_for(err()) == 0.0
+
+
+def test_조향은_상한을_넘지_않는다() -> None:
+    assert abs(steering_for(err(lateral=99, yaw=99))) <= MAX_ANGULAR
+    assert abs(steering_for(err(lateral=-99, yaw=-99))) <= MAX_ANGULAR
+
+
+# --- 상태 전이 ---
+
+def test_타깃이_없으면_정지한다() -> None:
+    servo = ForkServo()
+    cmd = servo.step(None, DT)
+    assert cmd.phase is Phase.SEARCH
+    assert cmd.linear_x == 0.0 and cmd.angular_z == 0.0
+
+
+def test_멀면_접근한다() -> None:
+    servo = ForkServo()
+    cmd = servo.step(ALIGNED_FAR, DT)
+    assert cmd.phase is Phase.APPROACH
+    assert cmd.linear_x > 0
+
+
+def test_가까워지면_정렬단계로() -> None:
+    servo = ForkServo()
+    cmd = servo.step(err(approach=ALIGN_ENTER_PX + 10), DT)
+    assert cmd.phase is Phase.ALIGN
+
+
+def test_정렬단계가_접근보다_느리다() -> None:
+    """가까울수록 천천히 — 조향 여지가 줄어든다."""
+    servo = ForkServo()
+    approach = servo.step(ALIGNED_FAR, DT)
+    align = servo.step(err(approach=ALIGN_ENTER_PX + 10), DT)
+    assert align.linear_x < approach.linear_x
+
+
+def test_정렬단계는_요를_더_세게_잡는다() -> None:
+    servo = ForkServo()
+    servo.step(err(yaw=0.2, approach=ALIGN_ENTER_PX - 50), DT)
+    approach_turn = servo._last.angular_z
+    servo.step(err(yaw=0.2, approach=ALIGN_ENTER_PX + 10), DT)
+    assert abs(servo._last.angular_z) > abs(approach_turn)
+
+
+def test_정렬된_채_진입거리면_진입한다() -> None:
+    servo = ForkServo()
+    cmd = servo.step(ALIGNED_INSERT, DT)
+    assert cmd.phase is Phase.INSERT
+    assert cmd.angular_z == 0.0, "진입은 직선이다 — 조향하면 포크가 긁는다"
+    assert cmd.linear_x > 0
+
+
+def test_미정렬로_진입거리에_닿으면_중단한다() -> None:
+    """뒷바퀴 조향은 제자리 회전이 안 돼 코앞에서 못 고친다 — 물러나야 한다."""
+    servo = ForkServo()
+    cmd = servo.step(err(lateral=0.5, approach=INSERT_ENTER_PX + 10), DT)
+    assert cmd.phase is Phase.ABORT
+    assert cmd.linear_x == 0.0
+    assert servo.episode.outcome == "misaligned_at_insert"
+
+
+def test_요만_틀어져도_중단한다() -> None:
+    servo = ForkServo()
+    cmd = servo.step(err(yaw=0.5, approach=INSERT_ENTER_PX + 10), DT)
+    assert cmd.phase is Phase.ABORT
+
+
+# --- 진입은 개루프 ---
+
+def test_진입_중_타깃을_잃어도_계속_간다() -> None:
+    """코앞에서 구멍이 화면 밖으로 나가는 건 정상이다(153 블라인드 진입)."""
+    servo = ForkServo()
+    servo.step(ALIGNED_INSERT, DT)
+    for _ in range(10):
+        cmd = servo.step(None, DT)
+        assert cmd.phase is Phase.INSERT
+        assert cmd.linear_x > 0
+
+
+def test_진입_시간이_지나면_완료된다() -> None:
+    servo = ForkServo(insert_duration_s=0.2)
+    servo.step(ALIGNED_INSERT, DT)
+    for _ in range(10):
+        cmd = servo.step(None, DT)
+    assert cmd.phase is Phase.DONE
+    assert cmd.linear_x == 0.0
+    assert servo.episode.outcome == "inserted"
+
+
+def test_진입_중에는_되돌아가지_않는다() -> None:
+    """오차가 커 보여도 무시한다 — 되돌릴 수 없는 구간이다."""
+    servo = ForkServo()
+    servo.step(ALIGNED_INSERT, DT)
+    cmd = servo.step(err(lateral=9.0, approach=INSERT_ENTER_PX + 200), DT)
+    assert cmd.phase is Phase.INSERT
+
+
+# --- 소실 유예 ---
+
+def test_잠깐_놓치면_직전_명령을_유지한다() -> None:
+    """매 프레임 급제동하면 검출이 깜빡일 때마다 덜컹거린다."""
+    servo = ForkServo(lost_grace_s=0.2)
+    moving = servo.step(err(lateral=0.3, approach=200), DT)
+    kept = servo.step(None, DT)
+    assert kept.phase is Phase.APPROACH
+    assert kept.linear_x == moving.linear_x
+    assert kept.angular_z == moving.angular_z
+
+
+def test_유예를_넘기면_정지한다() -> None:
+    servo = ForkServo(lost_grace_s=0.1)
+    servo.step(err(lateral=0.3, approach=200), DT)
+    for _ in range(5):
+        cmd = servo.step(None, DT)
+    assert cmd.phase is Phase.SEARCH
+    assert cmd.linear_x == 0.0
+
+
+def test_종료_후에는_계속_정지한다() -> None:
+    servo = ForkServo()
+    servo.step(err(lateral=0.5, approach=INSERT_ENTER_PX + 10), DT)
+    assert servo.is_finished()
+    assert servo.step(ALIGNED_FAR, DT).linear_x == 0.0
+
+
+def test_reset하면_다시_시도할_수_있다() -> None:
+    servo = ForkServo()
+    servo.step(err(lateral=0.5, approach=INSERT_ENTER_PX + 10), DT)
+    servo.reset()
+    assert servo.phase is Phase.SEARCH
+    assert servo.step(ALIGNED_FAR, DT).phase is Phase.APPROACH
+
+
+# --- 에피소드 로깅 ---
+
+def test_모든_프레임이_기록된다() -> None:
+    """154 판정 근거이자, 나중에 모방학습을 붙일 여지."""
+    servo = ForkServo()
+    servo.step(ALIGNED_FAR, DT)
+    servo.step(None, DT)
+    assert len(servo.episode.samples) == 2
+    t, e, cmd = servo.episode.samples[0]
+    assert t > 0 and e is ALIGNED_FAR and isinstance(cmd, DriveCommand)
+
+
+def test_reset하면_기록이_새로_시작된다() -> None:
+    servo = ForkServo()
+    servo.step(ALIGNED_FAR, DT)
+    servo.reset()
+    assert servo.episode.samples == []

@@ -2,16 +2,15 @@ package com.fast.backend.mqtt.inbound;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fast.backend.ai.service.AiCargoAnalysisService;
 import com.fast.backend.config.mqtt.MqttProperties;
 import com.fast.backend.config.mqtt.MqttTopics;
 import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedErrorService;
-import com.fast.backend.loadsafety.service.LoadSafetyService;
-import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
 import com.fast.backend.forklift.service.ForkliftLocationService;
+import com.fast.backend.loadsafety.service.LoadSafetyService;
+import com.fast.backend.ai.service.AiCargoAnalysisService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
@@ -41,7 +40,6 @@ class MqttMessageRouterTest {
     private VehicleCommandResultService vehicleCommandResultService;
     private EmbeddedForkStatusService embeddedForkStatusService;
     private EmbeddedErrorService embeddedErrorService;
-    private StationMeasurementService stationMeasurementService;
     private TransportCommandResultService transportCommandResultService;
     private LoadSafetyService loadSafetyService;
 
@@ -51,7 +49,7 @@ class MqttMessageRouterTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "cargo/detected", "forklift/%s/command",
                 "forklift/+/load-safety");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
@@ -68,14 +66,14 @@ class MqttMessageRouterTest {
         vehicleCommandResultService = mock(VehicleCommandResultService.class);
         embeddedForkStatusService = mock(EmbeddedForkStatusService.class);
         embeddedErrorService = mock(EmbeddedErrorService.class);
-        stationMeasurementService = mock(StationMeasurementService.class);
         transportCommandResultService = mock(TransportCommandResultService.class);
         loadSafetyService = mock(LoadSafetyService.class);
         router = new MqttMessageRouter(
-                objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService, aiCargoAnalysisService,
+                objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService,
+                aiCargoAnalysisService,
                 isaacForkliftLocationService, isaacForkliftStatusService, isaacForkliftPathService,
                 vehicleCommandResultService, embeddedForkStatusService, embeddedErrorService,
-                stationMeasurementService, transportCommandResultService, loadSafetyService);
+                transportCommandResultService, loadSafetyService);
     }
 
     @Test
@@ -242,81 +240,6 @@ class MqttMessageRouterTest {
     }
 
     @Test
-    void route_cargoDetectedTopic_doesNotThrow() {
-        // "any"는 AiCargoAnalysisMessage에 없는 필드라 Jackson이 알 수 없는 속성으로 역직렬화 자체를
-        // 실패시킨다(JsonProcessingException) — 다른 라우팅 메서드와 동일하게 여기서 잡아 폐기하므로
-        // Service까지는 위임되지 않는다.
-        router.route("cargo/detected", "{\"any\":\"payload\"}");
-
-        verifyNoInteractions(forkliftStatusService);
-        verifyNoInteractions(forkliftLocationService);
-        verifyNoInteractions(aiCargoAnalysisService);
-    }
-
-    @Test
-    void route_cargoDetectedTopic_convertsToAiCargoAnalysisMessage() {
-        String payload = "{\"schemaVersion\":\"1.0\",\"analysisId\":\"ANALYSIS-001\","
-                + "\"vehicleId\":\"FORKLIFT-01\",\"cargoId\":\"CARGO-001\",\"status\":\"ok\","
-                + "\"detection\":{\"boxes\":[{\"className\":\"box\",\"confidence\":0.96,"
-                + "\"bboxPx\":[120,80,340,260]}]},"
-                + "\"distance\":{\"valueCm\":185.4,\"stdCm\":2.8},"
-                + "\"message\":\"화물 분석이 완료되었습니다.\","
-                + "\"capturedAt\":\"2026-07-22T13:30:00\",\"processedAt\":\"2026-07-22T13:30:01\"}";
-
-        router.route("cargo/detected", payload);
-
-        verify(aiCargoAnalysisService, times(1)).process(any());
-        verifyNoInteractions(forkliftStatusService, forkliftLocationService);
-    }
-
-    @Test
-    void route_cargoDetectedTopic_invalidJson_skipsServiceWithoutThrowing() {
-        router.route("cargo/detected", "not-a-json");
-
-        verifyNoInteractions(aiCargoAnalysisService);
-    }
-
-    @Test
-    void route_cargoDetectedTopic_invalidProcessedAtFormat_skipsServiceWithoutThrowing() {
-        // prompt27.md 10장·11장: 잘못된 시간 문자열이면 역직렬화 자체가 실패해 Service가 호출되지 않고,
-        // 예외도 여기서 흡수돼 다음 메시지 처리에 영향을 주지 않아야 한다.
-        String payload = "{\"schemaVersion\":\"1.0\",\"analysisId\":\"ANALYSIS-BAD-TIME\",\"status\":\"ok\","
-                + "\"processedAt\":\"not-a-valid-timestamp\"}";
-
-        router.route("cargo/detected", payload);
-
-        verifyNoInteractions(aiCargoAnalysisService);
-    }
-
-    @Test
-    void route_cargoDetectedInvalidThenValid_secondMessageStillProcessed() {
-        // prompt27.md 11장 "잘못된 메시지 하나 때문에 MQTT 소비가 중단되지 않아야 한다"를 재확인.
-        String invalidPayload = "{\"schemaVersion\":\"1.0\",\"analysisId\":\"ANALYSIS-BAD\",\"status\":\"ok\","
-                + "\"processedAt\":\"not-a-valid-timestamp\"}";
-        String validPayload = "{\"schemaVersion\":\"1.0\",\"analysisId\":\"ANALYSIS-GOOD\",\"status\":\"ok\","
-                + "\"processedAt\":\"2026-07-22T13:30:01\"}";
-
-        router.route("cargo/detected", invalidPayload);
-        router.route("cargo/detected", validPayload);
-
-        verify(aiCargoAnalysisService, times(1)).process(any());
-    }
-
-    @Test
-    void route_cargoDetectedTopic_serviceThrowsRuntimeException_doesNotPropagate() {
-        // AiCargoAnalysisService#process는 DB insert 실패 등 예상치 못한 RuntimeException을 일부러
-        // 밖으로 던진다(트랜잭션 롤백을 위해, AiCargoAnalysisService Javadoc 참고) — 그 예외가 여기까지
-        // 올라와도 라우터가 최종적으로 흡수해 MQTT 소비 스레드를 보호해야 한다(prompt26.md 10장).
-        doThrow(new RuntimeException("DB down")).when(aiCargoAnalysisService).process(any());
-        String payload = "{\"schemaVersion\":\"1.0\",\"analysisId\":\"ANALYSIS-002\",\"status\":\"ok\","
-                + "\"processedAt\":\"2026-07-22T13:30:01\"}";
-
-        router.route("cargo/detected", payload);
-
-        verify(aiCargoAnalysisService, times(1)).process(any());
-    }
-
-    @Test
     void route_statusTopic_vehicleIdMismatchWithPayload_skipsService() {
         // 토픽은 F01이지만 payload의 forkliftId는 F02 — prompt20.md 11장 "vehicleId 불일치" 시 처리 금지.
         String payload = "{\"forkliftId\":\"F02\",\"status\":\"MOVING\",\"battery\":82,"
@@ -339,19 +262,6 @@ class MqttMessageRouterTest {
     }
 
     // ---------- Isaac Sim 경로 (prompt28.md) ----------
-
-    @Test
-    void route_pathTopic_convertsToIsaacForkliftPathMessage() {
-        String payload = "{\"forkliftId\":\"SIM01\","
-                + "\"waypoints\":[{\"x\":1.20,\"y\":0.87},{\"x\":2.40,\"y\":0.87}],"
-                + "\"goal\":{\"x\":2.40,\"y\":3.10,\"direction\":0.0},"
-                + "\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
-
-        router.route("forklift/SIM01/path", payload);
-
-        verify(isaacForkliftPathService, times(1)).handlePath(any());
-        verifyNoInteractions(forkliftLocationService, forkliftStatusService, aiCargoAnalysisService);
-    }
 
     @Test
     void route_pathTopic_vehicleIdMismatch_skipsService() {
@@ -470,35 +380,17 @@ class MqttMessageRouterTest {
 
     // ---------- 적재 화물 안전 (prompt63.md 4장) ----------
 
-    @Test
-    void route_loadSafetyTopic_dispatchesToLoadSafetyService() {
-        String payload = "{\"vehicleId\":\"REAL-F01\",\"cargoId\":\"CARGO-001\",\"forkHeight\":0.86,"
-                + "\"cargoHeight\":1.42,\"roll\":7.4,\"pitch\":3.1,\"loadOffsetX\":-0.18,\"loadOffsetY\":0.04,"
-                + "\"riskLevel\":\"WARNING\",\"riskCode\":\"LOAD_TILT_EXCEEDED\","
-                + "\"message\":\"화물이 좌측으로 과도하게 기울었습니다.\",\"source\":\"VISION\","
-                + "\"detectedAt\":\"2026-07-29T10:30:00+09:00\"}";
-
-        router.route("forklift/REAL-F01/load-safety", payload);
-
-        verify(loadSafetyService, times(1)).handleLoadSafety(any());
-        verifyNoInteractions(forkliftStatusService, embeddedForkStatusService, vehicleCommandResultService);
-    }
 
     @Test
-    void route_loadSafetyTopic_vehicleIdMismatch_skipsService() {
-        // 다른 차량의 적재 안전 상태를 덮어쓰면 안 되므로 토픽/payload 불일치는 폐기한다.
-        String payload = "{\"vehicleId\":\"REAL-F02\",\"riskLevel\":\"DANGER\","
-                + "\"detectedAt\":\"2026-07-29T10:30:00+09:00\"}";
+    void route_pathTopic_convertsToIsaacForkliftPathMessage() {
+        String payload = "{\"forkliftId\":\"SIM01\","
+                + "\"waypoints\":[{\"x\":1.20,\"y\":0.87},{\"x\":2.40,\"y\":0.87}],"
+                + "\"goal\":{\"x\":2.40,\"y\":3.10,\"direction\":0.0},"
+                + "\"timestamp\":\"2026-07-22T10:30:00.123+09:00\"}";
 
-        router.route("forklift/REAL-F01/load-safety", payload);
+        router.route("forklift/SIM01/path", payload);
 
-        verifyNoInteractions(loadSafetyService);
-    }
-
-    @Test
-    void route_loadSafetyTopic_invalidJson_doesNotThrow() {
-        router.route("forklift/REAL-F01/load-safety", "not-a-json");
-
-        verifyNoInteractions(loadSafetyService);
+        verify(isaacForkliftPathService, times(1)).handlePath(any());
+        verifyNoInteractions(forkliftLocationService, forkliftStatusService, aiCargoAnalysisService);
     }
 }

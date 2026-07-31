@@ -35,7 +35,7 @@ class MqttConfigTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "cargo/detected", "forklift/%s/command",
                 "forklift/+/load-safety");
         mqttProperties = new MqttProperties(
                 "tcp://localhost:1883", null, null, "test-inbound", "test-outbound",
@@ -51,7 +51,7 @@ class MqttConfigTest {
         assertThat(adapter.getTopic()).containsExactlyInAnyOrder(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "fast/station/+/measurement", "forklift/+/load-safety");
+                "cargo/detected", "forklift/+/load-safety");
     }
 
     @Test
@@ -64,7 +64,7 @@ class MqttConfigTest {
         assertThat(topicToQos).containsOnlyKeys(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "fast/station/+/measurement", "forklift/+/load-safety");
+                "cargo/detected", "forklift/+/load-safety");
         assertThat(topicToQos.values()).allMatch(qos -> qos == 1, "MQTT QoS 1이어야 한다");
     }
 

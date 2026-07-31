@@ -48,6 +48,22 @@ public enum ErrorCode {
     STATION_MEASUREMENT_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 저장된 measurement_id입니다."),
     STATION_MEASUREMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 측정 결과입니다."),
 
+    // ── 측정 세션(prompt96) ──────────────────────────────────────────────────
+    STATION_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 측정 세션입니다."),
+    STATION_SESSION_NOT_ACTIVE(HttpStatus.CONFLICT, "활성화된 측정 세션이 아닙니다."),
+    STATION_ALREADY_OCCUPIED(HttpStatus.CONFLICT, "측정 설비가 이미 다른 세션에 점유되어 있습니다."),
+    /** 측정 결과가 저장되기 전에는 세션을 종료할 수 없다(3장). */
+    STATION_MEASUREMENT_NOT_COMPLETED(HttpStatus.CONFLICT, "측정 결과가 저장되지 않아 세션을 종료할 수 없습니다."),
+    /** 같은 세션에 이미 결과가 있다 — measurementId 중복(재전송)과 구분한다(5장). */
+    STATION_SESSION_MEASUREMENT_ALREADY_EXISTS(HttpStatus.CONFLICT, "이 세션에는 이미 측정 결과가 저장되어 있습니다."),
+
+    // ── 적재 추천 안전 게이트(prompt96 11장) ─────────────────────────────────
+    // 추천 불가를 빈 목록이나 null 로 뭉개지 않고 원인을 구분해 알린다.
+    STATION_MEASUREMENT_STATUS_NOT_ELIGIBLE(HttpStatus.CONFLICT, "측정 상태가 적재 추천 대상이 아닙니다."),
+    STATION_MEASUREMENT_HEIGHT_INVALID(HttpStatus.CONFLICT, "화물 높이가 없거나 유효하지 않아 적재 추천을 할 수 없습니다."),
+    STATION_TIPPING_LEVEL_NOT_SAFE(HttpStatus.CONFLICT, "전복 위험 등급이 SAFE가 아니어서 적재 추천을 할 수 없습니다."),
+    STATION_OVERHANG_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "화물 돌출률이 허용 한계 이상이어서 적재 추천을 할 수 없습니다."),
+
     // 화물 크기 기반 적재 위치 추천 및 운반 작업 디스패치(prompt46.md). 기존 공통 예외 구조(BusinessException +
     // ErrorCode)를 그대로 쓰고, 도메인별 예외 클래스를 새로 만들지 않는다(이 프로젝트의 기존 관례).
     CARGO_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 화물입니다."),

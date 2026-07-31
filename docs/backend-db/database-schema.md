@@ -4,6 +4,17 @@
 
 현재 저장소의 `schema.sql`, MyBatis Mapper XML, Java Domain/DTO, Service, Controller, MQTT Router, WebSocket Broadcaster와 기존 테스트를 기준으로 실제 구현된 DB 구조와 데이터 흐름을 기록한다. 이 문서는 초안이며 코드에 없는 테이블·컬럼은 포함하지 않는다.
 
+## DB 적용 정책
+
+- 최종 스키마 기준: `src/main/resources/db/schema.sql`
+- 기존 migration 폴더: **삭제**(`src/main/resources/db/migration` 없음)
+- 기존 DB 업그레이드: **지원하지 않음**
+- 적용 방식: DB 초기화 후 `schema.sql` 로 전체 재생성
+- `message_at`: `schema.sql` 에 포함(`vehicle_current_status`, 위치 stale 판정 기준)
+- `updated_at`: 복원하지 않음(`vehicle_current_status` 기준. `vehicle` 등 다른 테이블의 `updated_at` 은 원래부터 최종 스키마의 일부다)
+- 실제 DB 초기화: 이번 작업에서는 실행하지 않음
+- `data-local.sql`: 로컬 초기 데이터 전용
+
 ## 2. 분석 기준
 
 - 기준일: **2026-07-24** (prompt32.md 확정 통신 규격 반영 후 갱신)
@@ -12,7 +23,7 @@
 - 테스트 DB: H2 in-memory, MySQL 호환 모드, `application-test.yml`
 - DDL: `src/main/resources/db/schema.sql`
 - SQL: `src/main/resources/mapper/*.xml` 10개
-- 운영 DB 마이그레이션: `src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql`
+- 운영 DB 마이그레이션: **없음**(migration 폴더 삭제, 아래 'DB 적용 정책' 참고)
 - 코드: `src/main/java`, 테스트 근거: `src/test/java`, `src/test/resources`
 - 이 문서는 코드 변경 후 그 결과를 반영해 갱신했다(코드가 기준).
 

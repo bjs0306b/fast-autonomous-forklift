@@ -4,14 +4,53 @@
 (FR-202, S15P11A304-34)이 이 값을 입력으로 쓴다.
 
 - 생산자: `ai/src/station/serve.py` (모델·거리계 배선) → `station/pipeline.build_payload`
-- 소비자: 적재 공간 인식·최적 위치 산출 (전지웅)
-- 규격 버전: `schema_version: "1.0"`
+- 소비자: 적재 공간 인식·최적 위치 산출 (전지웅) / 백엔드 저장·관제 (김재원)
+- 규격 버전: `schema_version: "1.1"`
+
+## 변경 이력
+
+| 버전 | 날짜 | 변경 |
+|---|---|---|
+| 1.0 | 2026-07-24 | 최초 규격 (dimensions · box_measurements · load_balance) |
+| **1.1** | **2026-07-29** | **`tipping` 블록 추가** (전복 위험, FR-103) |
+
+> ⚠️ **필드를 추가하면 버전을 반드시 올린다.**
+> `tipping`은 실제로는 2026-07-28(MR !75)에 payload에 들어갔는데 `schema_version`을 1.0에
+> 둔 채였다. 호환을 깨는 변경이 아니라 추가라서 넘어갔지만, **소비자에게는 규격이 바뀐 것을
+> 알 수단이 없었다.** 그 결과 백엔드는 `tipping`을 모른 채로 두었고, Spring Boot가 모르는
+> JSON 필드를 기본으로 무시하는 탓에(`FAIL_ON_UNKNOWN_PROPERTIES=false`) **에러도 로그도 없이
+> 조용히 버려졌다.** 발견까지 하루가 걸렸다.
+
+> ## ⚠️ 백엔드 전달은 REST다 — 이 JSON을 그대로 보내지 않는다
+>
+> 아래 JSON은 **비전 파이프라인의 출력 원본**이다. 백엔드 저장은 MQTT가 아니라 REST이며
+> (`fast/station/+/measurement` 토픽은 **제거됐다**), 계약이 원본보다 훨씬 좁다.
+>
+> | 백엔드 REST 필드 | 이 문서의 원본 필드 | 변환 |
+> |---|---|---|
+> | `measurementId` | `measurement_id` | 없음 |
+> | `status` | `status` | 없음(`dimensions_only` 포함 4값 지원) |
+> | **`cargoHeight`** | **`dimensions.height_cm`** | **cm ÷ 100 = m** — 데스크탑이 변환 |
+> | `tippingLevel` | `tipping.level` | 소문자 그대로 보내면 백엔드가 대문자로 저장 |
+> | `overhangRatio` | `tipping.overhang` | 없음 |
+> | `measuredAt` | `measured_at` | 없음(단, **백엔드에 저장 컬럼이 없어 버려진다**) |
+>
+> ```
+> POST /api/stations/measurements   Content-Type: application/json
+> { "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
+>   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
+> ```
+>
+> **`sessionId`/`stationId`는 보내지 않는다** — 백엔드가 활성 세션을 조회해 붙인다.
+> 나머지 필드(detection/distance/load_balance/box_measurements/miniature/total_height)는
+> **백엔드에 저장되지 않는다.** 전체 규격은 `docs/backend-message/communication-protocol.md`
+> §Measurement Station v2.0 (REST) 참고.
 
 ## 한눈에
 
 ```jsonc
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "measurement_id": "station-1-20260729-093509-0001",
   "station_id": "station-1",
   "measured_at": "2026-07-29T09:35:09+09:00",
@@ -62,13 +101,20 @@
 
 | 목적 | 필드 | 단위 |
 |---|---|---|
-| **적재 높이** | `dimensions.total_height_cm` | cm (실물) |
+| **적재 높이(백엔드 REST)** | `dimensions.height_cm` ÷ 100 → `cargoHeight` | **m (화물만)** |
 | 미니어처 환산 | `dimensions.miniature_total_height_mm` | mm |
 | **적재 폭** | `dimensions.width_cm` | cm |
 | 안전 판정 | `tipping.level`, `load_balance.eccentric` | — |
 
-> ⚠️ **높이는 `total_height_cm`을 쓸 것.** `height_cm`은 화물만이라 파렛트 12cm이 빠져 있다.
-> 화물은 항상 파렛트에 실려 운반되므로 랙 간섭 판단에는 총높이가 맞다.
+> ⚠️ **백엔드 REST로는 `height_cm`(화물만)을 m로 바꿔 보낼 것.** 팔레트 높이를 미리 더하지 않는다.
+>
+> 랙 간섭 판단에 총높이가 필요한 것은 맞지만, **팔레트 높이를 더하는 주체가 백엔드로 정해졌다** —
+> 백엔드가 설정값 `storage.placement.pallet-height-m`(0.12)를 `PlacementService`에서 **정확히 한 번**
+> 더한다(`requiredHeight = cargoHeight + 0.12 + clearance`). `total_height_cm`을 `cargoHeight`로 보내면
+> **팔레트 높이가 두 번 더해진다.**
+>
+> `total_height_cm` / `miniature_total_height_mm` 자체는 이 문서의 원본 출력으로 남지만,
+> **백엔드 FR-202 계산 입력으로는 쓰지 않는다.**
 
 > ⚠️ **깊이(`depth_cm`)는 항상 null.** 정면 단일 카메라라 앞뒤를 못 잰다(명세 §2.2).
 > 적재 단위가 파렛트(T-11 고정 규격 1100×1100mm)이므로 깊이는 규격값을 쓰면 된다.
@@ -146,7 +192,89 @@ python src/station/serve.py --once --out sample.json          # 라이브
 python src/station/serve.py --once --image <사진> --distance 200   # 사진으로
 ```
 
-## 미정 — 전달 방식
+## 전달 방식 — 확정(REST)
 
-지금은 stdout/파일 출력까지가 범위다. MQTT/HTTP 전송은 통신 규격 확정 후 붙인다
-(S15P11A304-91). 백엔드가 GPU서버로 통합됐으므로(2026-07-28) 그 경로에 맞춘다.
+**확정됐다.** 측정 데스크탑이 `POST /api/stations/measurements`로 직접 호출한다.
+MQTT(`fast/station/+/measurement`)는 **폐기**됐고 백엔드에서 구독·라우팅·DTO가 모두 제거됐다.
+측정 데스크탑은 **DB에 직접 접속하지 않는다** — 이 REST API가 유일한 저장 경로다.
+
+데스크탑 쪽 구현 완료 (2026-07-31, `station/rest_client.py`):
+
+```bash
+STATION_API_BASE=http://<백엔드> python src/station/serve.py --once --publish
+```
+
+1. ✅ 원본 JSON → REST 요청 6필드로 축약 (`to_request`)
+2. ✅ **`height_cm` ÷ 100** 으로 cm → m 변환
+3. ✅ **세션 개설·종료 자동화**(2026-07-31) — `--cargo-id`를 주면 데스크탑이 직접 연다. 아래 참조
+4. ✅ 409 `STATION_MEASUREMENT_ID_DUPLICATED`는 **성공으로 취급**(이미 저장됨, 재전송 불필요)
+
+> ⚠️ **`cargoHeight`에 `total_height_cm`을 넣지 말 것.** 백엔드가 적재 판단에서 파렛트
+> 0.12m를 따로 더하므로(`requiredHeight = cargoHeight + 0.12 + clearance`) 총높이를 보내면
+> 파렛트를 두 번 더한다. 단위 변환과 이 구분은 `tests/test_rest_client.py`가 회귀 검증한다.
+
+**서버 확인 완료 (2026-07-31)**: 백엔드가 `http://70.12.246.250:8080`에 떠 있다. 실제
+페이로드를 보내 **6필드가 전부 검증을 통과**했다(400이 아니라 409 `SESSION_NOT_ACTIVE` —
+세션만 없었고 규격은 맞았다). 200까지의 왕복은 세션을 열어야 하므로 미확인.
+
+## 세션 — 단일 설비 뮤텍스
+
+백엔드는 `station_state`의 `active_session_id` **한 행**으로 설비 점유를 지킨다. 열려
+있는 동안 다른 화물은 세션을 못 연다(409 `STATION_ALREADY_OCCUPIED`).
+
+```bash
+STATION_API_BASE=http://70.12.246.250:8080 \
+  python src/station/serve.py --once --publish --cargo-id cargo-1
+```
+
+### ⚠️ `--cargo-id` 없이 보내면 남의 화물에 붙는다
+
+측정 요청에는 **cargoId가 없다.** 백엔드는 `findActiveSession()`으로 **현재 활성 세션**을
+찾아 붙일 뿐 화물을 대조하지 않는다. 누가 다른 화물로 세션을 열어둔 상태에서 보내면
+**그 화물에 조용히 기록되고, 사후에 알아낼 방법이 없다.**
+
+→ **측정 데스크탑이 자기 세션을 열고 자기가 닫는다.** ("누가 여는지"의 답이다.)
+
+### 세션은 측정 **앞에** 연다
+
+백엔드 문서상 정상 흐름("세션 시작 → 측정 → 결과 등록")을 그대로 따른다. 세션이
+**"지금 이 화물을 측정 중"** 이라는 뜻을 갖고, 둘을 얻는다:
+
+- 관제가 `GET /api/stations/sessions/active`로 **설비 점유를 실시간 표시**할 수 있다
+- 설비가 이미 점유 중이면 **측정을 시작하기 전에** 409로 튕겨 헛수고를 막는다
+
+전송 직전에 여는 배치도 검토했다(잠김 구간이 요청 한 번으로 줄어든다). 하지만 그러면
+세션이 몇 밀리초만 존재해 위 둘을 다 잃는다. 실패 시 `unreliable` 측정을 남겨 자동
+해제하는 절충안도 있었으나, **측정 실패 행을 DB에 쌓지 않기로** 했다(2026-07-31 결정).
+
+### ⚠️ 세션은 스스로 안 풀린다
+
+백엔드에 **TTL·자동 만료가 없다.** 게다가 종료는 **측정이 저장된 뒤에만** 된다
+(409 `STATION_MEASUREMENT_NOT_COMPLETED`). 전송이 실패한 채 끝나면 설비가 잠긴 채 남고
+**아무도 새 측정을 시작할 수 없다.**
+
+`measurement_session` 컨텍스트 매니저가 보장하는 범위는 이만큼이다:
+
+| 종료 경로 | 닫히나 |
+|---|---|
+| 정상 종료 · 예외 · Ctrl-C | ✅ |
+| `SIGTERM`(kill, 서비스 정지) | ✅ 핸들러로 예외 전환 |
+| `SIGKILL`(kill -9) · 전원 차단 | ❌ 불가능 |
+| **측정 도중 예외**(카메라 미개방·해상도 불일치·모델 없음) | ❌ 백엔드가 종료를 거부 |
+| 측정 전송 실패 후 종료 | ❌ 위와 같음 |
+
+세션을 측정 앞에 열기로 한 대가가 가운데 줄이다 — 그 구간이 수 초로 늘어난다.
+`serve.py`는 이때 종료 코드 **2**로 끝나(성공 0·측정실패 1과 구분) 잠김을 알린다.
+
+마지막 셋은 사람이 푼다:
+
+```bash
+python src/station/serve.py --release-session            # 조회 후 종료 시도
+python src/station/serve.py --release-session --abandon  # 측정 없는 세션 강제 해제
+```
+
+`--abandon`은 `unreliable` 측정을 하나 남겨 잠금을 푼다. **없는 측정을 지어내는 것이
+아니라 "이 세션은 측정에 실패했다"를 기록하는 것**이다.
+
+> **백엔드에 요청할 것**: 세션 TTL(예: 10분 무활동 시 자동 해제) 또는 강제 해제
+> 엔드포인트. 지금은 클라이언트가 아무리 조심해도 `kill -9` 한 번이면 설비가 잠긴다.

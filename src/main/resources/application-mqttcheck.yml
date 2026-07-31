@@ -78,7 +78,6 @@ mqtt:
     forklift-error: forklift/+/error
     cargo-detected: cargo/detected
     forklift-command: forklift/%s/command
-    station-measurement: fast/station/+/measurement
     forklift-load-safety: forklift/+/load-safety
 
 vehicle:

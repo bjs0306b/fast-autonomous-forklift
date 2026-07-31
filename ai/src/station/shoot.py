@@ -7,6 +7,12 @@
     python src/station/shoot.py --out data/raw/rig/20260724 --prefix pallet
     python src/station/shoot.py --auto 1.5          # 1.5초마다 자동 저장으로 시작
     python src/station/shoot.py --burst 5           # B키 한 번에 5장
+    python src/station/shoot.py --rotate180         # 카메라를 뒤집어 장착한 경우
+
+``--rotate180``은 카메라를 물리적으로 뒤집어 단 경우에 쓴다. 뒤집힌 채로 그냥 찍으면
+라벨링이 어려워지고(사람이 뒤집힌 화면을 봐야 한다), 정립으로 라벨된 공개 데이터셋과
+방향이 어긋나며, "화물은 파렛트 위에 얹힌다" 같은 하류 기하 가정이 반대가 된다.
+⚠️ **추론 경로에도 같은 회전을 넣어야 한다** — 한쪽만 돌리면 학습·추론 도메인이 어긋난다.
 
 키:
     SPACE  1장 저장          B  버스트 저장(--burst 장)
@@ -89,6 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     # 치수 평가셋(스테이션)은 프레임마다 TF-Nova 실측 거리가 있어야 오프라인 치수
     # 검증이 된다. 이 플래그를 켜면 저장할 때마다 거리를 읽어 session.csv에 남긴다.
     # (온보드 -s 촬영은 detection이라 거리 불필요 → 끄고 쓴다.)
+    parser.add_argument("--rotate180", action="store_true",
+                        help="카메라를 뒤집어 장착했을 때 — 프레임을 180° 돌려 "
+                             "정립으로 저장한다 (⚠️ 추론 경로에도 같은 회전을 넣을 것)")
     parser.add_argument("--tfnova", action="store_true",
                         help="저장 시 TF-Nova 거리를 읽어 session.csv에 기록 (치수 평가셋용)")
     args = parser.parse_args(argv)
@@ -161,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
                 if not ok:
                     print("프레임 캡처 실패", file=sys.stderr)
                     break
+
+                if args.rotate180:
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
 
                 h, w = frame.shape[:2]
                 warn = ("" if (w, h) == (width, height)

@@ -16,6 +16,8 @@
         <result property="footprintLength" column="footprint_length"/>
         <result property="footprintWidth" column="footprint_width"/>
         <result property="messageAt" column="message_at"/>
+        <!-- received_at: 일반 상태·위치·포크 메시지가 공유한다. "마지막으로 DB 에 반영된
+             유효한 차량 메시지의 백엔드 수신 시각"이며 특정 토픽으로 한정하지 않는다. -->
         <result property="receivedAt" column="received_at"/>
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
@@ -61,9 +63,6 @@
         ON DUPLICATE KEY UPDATE
             status = VALUES(status),
             battery = VALUES(battery),
-            position_x = VALUES(position_x),
-            position_y = VALUES(position_y),
-            heading = VALUES(heading),
             speed = VALUES(speed),
             fork_height = VALUES(fork_height),
             has_cargo = VALUES(has_cargo),

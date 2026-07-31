@@ -13,7 +13,10 @@
 -- 기본값이 이미 InnoDB·utf8mb4이고, 이 절을 빼면 H2에서도 그대로 실행할 수 있어 테스트로 실제 검증이
 -- 가능하기 때문이다. 팀 MySQL 서버의 기본 엔진/문자셋이 다르면 CREATE TABLE 뒤에 팀이 별도로
 -- ALTER TABLE ... ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 등을 추가하면 된다.
-USE fast_backend;
+-- USE fast_backend;
+--   H2(MySQL 호환 모드)는 USE 를 지원하지 않아 스키마 초기화가 통째로 실패한다. 이 파일은 위 주석대로
+--   테스트에서 H2 에도 적용되므로 주석 처리했다. 실 MySQL 에 수동으로 붙여 넣을 때는 접속 시
+--   데이터베이스를 선택하거나(예: mysql -D fast_backend) 이 줄의 주석을 풀고 실행하면 된다.
 
 
 CREATE TABLE IF NOT EXISTS vehicle (
@@ -136,22 +139,75 @@ CREATE TABLE IF NOT EXISTS ai_cargo_detection_box (
         FOREIGN KEY (analysis_id) REFERENCES ai_cargo_analysis (id)
 );
 
--- 측정 스테이션 측정 결과 v1.0 (prompt16.md, MR !36, FR-101-5). 스테이션 PC가 추론·판정을 마친 결과를
--- fast/station/{station_id}/measurement 토픽으로 발행하고 EC2 백엔드는 결과만 저장한다. 기존
+-- 측정 스테이션 측정 결과 v1.1 (prompt16.md, MR !36, FR-101-5). 스테이션 PC가 추론·판정을 마친 결과를
+-- fast/station/{station_id}/measurement 토픽으로 발행하고 백엔드는 결과만 저장한다. 기존
 -- ai_cargo_analysis(cargo/detected)와 규격(snake_case 키, OffsetDateTime, pallet 별도 의미, miniature/
 -- eccentric/magnitude/threshold 등)이 달라 무리하게 확장하지 않고 별도 도메인 테이블로 분리했다.
 --
 -- measured_at 오프셋 보존: MySQL/H2 공용 DATETIME은 타임존을 담지 못하므로, UTC 변환 시각
 -- (measured_at_utc)과 오프셋 분(measured_at_offset_minutes, 예: +09:00 → 540)을 분리 저장해 응답 시
 -- 원래 OffsetDateTime을 손실 없이 복원한다. depth_cm은 정책상 항상 null이지만(정면 단일 카메라) 컬럼은
+CREATE TABLE IF NOT EXISTS cargo (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    cargo_id   VARCHAR(50)  NOT NULL,
+    width      DOUBLE       NOT NULL,
+    length     DOUBLE       NOT NULL,
+    height     DOUBLE       NOT NULL,
+    volume     DOUBLE       NOT NULL,
+    created_at DATETIME     NOT NULL,
+    updated_at DATETIME     NOT NULL,
+    CONSTRAINT uk_cargo_cargo_id UNIQUE (cargo_id)
+);
+
+-- =============================================================================
+-- 측정 세션 (prompt96) — 단일 설비 점유와 측정 결과 귀속
+-- =============================================================================
+--
+-- 스테이션 설비는 하나뿐이라 동시에 한 세션만 활성화할 수 있다. "지금 어느 화물을 재는 중인가"를
+-- station_state 한 행으로 표현하고, 측정 결과(station_measurement)는 그 세션에 귀속된다.
+-- 측정 결과를 REST 로 받을 때 요청은 session_id 를 보내지 않고 백엔드가 활성 세션을 찾아 붙인다.
+
+CREATE TABLE IF NOT EXISTS station_session (
+    session_id VARCHAR(100) NOT NULL PRIMARY KEY COMMENT '측정 세션 고유 식별자',
+    cargo_id   VARCHAR(50)  NOT NULL COMMENT '측정 대상 화물 식별자',
+    created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '세션 시작 시각',
+    CONSTRAINT fk_station_session_cargo
+        FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+-- session_id 는 백엔드가 UUIDv4 로 생성하며 종료된 세션도 보존한다(측정 결과가 FK 로 참조한다).
+
+CREATE TABLE IF NOT EXISTS station_state (
+    singleton_id      INT          NOT NULL PRIMARY KEY COMMENT '단일 스테이션 행 고정값',
+    active_session_id VARCHAR(100) NULL COMMENT '현재 점유 중인 측정 세션. NULL 이면 유휴',
+
+    CONSTRAINT chk_station_state_singleton
+        CHECK (singleton_id = 1),
+    CONSTRAINT fk_station_state_active_session
+        FOREIGN KEY (active_session_id) REFERENCES station_session (session_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+-- 재실행 시 PK 중복으로 기동이 실패하지 않도록 INSERT IGNORE 를 쓴다.
+INSERT IGNORE INTO station_state (singleton_id, active_session_id) VALUES (1, NULL);
+
 -- 유지한다. pallet은 detection box와 의미가 달라(적재 파렛트) 부모의 단일 컬럼 세트로 보존한다.
 CREATE TABLE IF NOT EXISTS station_measurement (
     id                         BIGINT AUTO_INCREMENT PRIMARY KEY,
     measurement_id             VARCHAR(100) NOT NULL,
-    station_id                 VARCHAR(50)  NOT NULL,
-    schema_version             VARCHAR(20)  NOT NULL,
-    measured_at_utc            DATETIME     NOT NULL,
-    measured_at_offset_minutes INT          NOT NULL,
+    -- 측정 세션 귀속과 REST 계약 컬럼(prompt96). 위쪽 MQTT 규격 컬럼(height_cm/tipping_*)은 레거시로
+    -- 남기고, REST 로 들어오는 값은 아래 세 컬럼에 저장한다 — 단위가 다르기 때문이다(height_cm 은 cm,
+    -- cargo_height 는 m). 기존 행과 섞이지 않도록 전부 nullable 이다.
+    session_id                 VARCHAR(100) NULL COMMENT '측정 결과가 속한 세션',
+    cargo_height               DOUBLE       NULL COMMENT '팔레트를 제외한 화물 높이(meter)',
+    overhang_ratio             DOUBLE       NULL COMMENT '팔레트 기준 화물 돌출 비율(무차원)',
+    -- prompt96: REST 로 들어오는 행은 station_id/schema_version 이 없고(설비 1대, 버전은 URL 로 표현)
+    -- measured_at 도 선택이라 네 컬럼 모두 nullable 로 완화했다. MQTT 시절 행은 값이 그대로 남는다.
+    station_id                 VARCHAR(50)  NULL,
+    schema_version             VARCHAR(20)  NULL,
+    measured_at_utc            DATETIME     NULL,
+    measured_at_offset_minutes INT          NULL,
     status                     VARCHAR(20)  NOT NULL,
     box_count                  INT          NULL,
     pallet_bbox_x              INT          NULL,
@@ -175,10 +231,33 @@ CREATE TABLE IF NOT EXISTS station_measurement (
     magnitude                  DOUBLE       NULL,
     threshold                  DOUBLE       NULL,
     load_message               VARCHAR(500) NULL,
-    received_at                DATETIME     NOT NULL,
+    -- 전복 위험(tipping, FR-103) — 규격 v1.1에서 추가. 편하중(load_balance)과 다른 질문에
+    -- 답한다: 편하중은 "무게중심이 치우쳤나", 전복은 "무게중심이 지지면(파렛트)을 벗어났나".
+    -- 컬럼에 tipping_ 접두사를 붙이는 이유는 direction/message가 위 load_* 와 이름이 겹치기
+    -- 때문이다. 전 컬럼 nullable — status가 dimensions_only면 판정 자체를 못 한다.
+    tipping_assessable         BOOLEAN      NULL,
+    tipping_level              VARCHAR(20)  NULL,  -- SAFE | WARNING | DANGER (REST 입력은 대문자 정규화)
+    tipping_static_stable      BOOLEAN      NULL,  -- 정지 상태에서 넘어지는가(등급과 구분)
+    tipping_support_offset     DOUBLE       NULL,  -- 1.0 = 무게중심이 파렛트 끝(물리적 한계)
+    tipping_margin             DOUBLE       NULL,
+    tipping_direction          VARCHAR(20)  NULL,  -- left | right | null
+    tipping_aspect_ratio       DOUBLE       NULL,
+    tipping_overhang           DOUBLE       NULL,  -- 화물이 파렛트 밖으로 나간 비율
+    tipping_message            VARCHAR(500) NULL,
+    received_at                DATETIME     NULL,
     created_at                 DATETIME     NOT NULL,
     CONSTRAINT uk_station_measurement_measurement_id UNIQUE (measurement_id),
-    INDEX idx_station_measurement_station_measured (station_id, measured_at_utc DESC)
+    CONSTRAINT fk_station_measurement_session
+        FOREIGN KEY (session_id) REFERENCES station_session (session_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_station_measurement_cargo_height
+        CHECK (cargo_height IS NULL OR cargo_height > 0),
+    CONSTRAINT chk_station_measurement_overhang_ratio
+        CHECK (overhang_ratio IS NULL OR overhang_ratio >= 0),
+    INDEX idx_station_measurement_station_measured (station_id, measured_at_utc DESC),
+    -- 세션당 최종 측정 결과는 1건이다(prompt96 5장). UNIQUE 로 강제하면 동시 요청에서도
+    -- 두 번째 INSERT 가 DB 레벨에서 막힌다 — Service 의 사전 확인만으로는 경합을 막을 수 없다.
+    CONSTRAINT uk_station_measurement_session UNIQUE (session_id)
 );
 
 -- 다중 detection box(1:N). box_order로 payload 배열 순서를 보존한다. bbox 좌표는 nullable(관제 오버레이
@@ -300,17 +379,8 @@ CREATE TABLE IF NOT EXISTS embedded_error_history (
 -- 인덱스는 CREATE TABLE 인라인으로 둔다(mode=always 재실행 시 "이미 존재" 오류 방지).
 -- =====================================================================================
 
-CREATE TABLE IF NOT EXISTS cargo (
-    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    cargo_id   VARCHAR(50)  NOT NULL,
-    width      DOUBLE       NOT NULL,
-    length     DOUBLE       NOT NULL,
-    height     DOUBLE       NOT NULL,
-    volume     DOUBLE       NOT NULL,
-    created_at DATETIME     NOT NULL,
-    updated_at DATETIME     NOT NULL,
-    CONSTRAINT uk_cargo_cargo_id UNIQUE (cargo_id)
-);
+
+
 
 CREATE TABLE IF NOT EXISTS pallet (
     id             BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -435,38 +505,52 @@ CREATE TABLE IF NOT EXISTS transport_command (
     INDEX idx_transport_command_created (created_at DESC)
 );
 
-USE fast_backend;
-SHOW TABLES;
-
-SHOW TABLES LIKE '%vehicle%';
-
-SELECT user, host
-FROM mysql.user
-WHERE user = 'fastbackend';
-
-SELECT user, host
-FROM mysql.user
-WHERE user = 'fastbackend';
-
-ALTER USER ''@'localhost'
-    IDENTIFIED BY '1234';
-
-GRANT ALL PRIVILEGES
-    ON fast_backend.*
-    TO 'fastbackend'@'localhost';
-
-FLUSH PRIVILEGES;
-
-SELECT USER(), CURRENT_USER();
-
-CREATE USER IF NOT EXISTS 'fastbackend'@'localhost'
-    IDENTIFIED BY '1234';
-
-ALTER USER 'fastbackend'@'localhost'
-    IDENTIFIED BY '1234';
-
-GRANT ALL PRIVILEGES
-    ON fast_backend.*
-    TO 'fastbackend'@'localhost';
-
-FLUSH PRIVILEGES;
+-- USE fast_backend;
+--   H2(MySQL 호환 모드)는 USE 를 지원하지 않아 스키마 초기화가 통째로 실패한다. 이 파일은 위 주석대로
+--   테스트에서 H2 에도 적용되므로 주석 처리했다. 실 MySQL 에 수동으로 붙여 넣을 때는 접속 시
+--   데이터베이스를 선택하거나(예: mysql -D fast_backend) 이 줄의 주석을 풀고 실행하면 된다.
+-- =============================================================================
+-- 아래는 DDL 이 아니라 **MySQL 운영자용 확인·계정 스크립트**다 — 전부 주석 처리했다.
+--
+-- 이유: 이 파일은 application-test.yml 의 spring.sql.init.schema-locations 로 지정돼 매 테스트마다
+-- H2(MySQL 호환 모드)에 통째로 실행된다. SHOW TABLES / mysql.user 조회 / CREATE USER / GRANT /
+-- FLUSH PRIVILEGES 는 H2 에 존재하지 않아 스키마 초기화가 여기서 실패하고, 그러면 테이블이 다 만들어진
+-- 뒤라도 **모든 통합 테스트가 컨텍스트 로딩 단계에서 죽는다**.
+--
+-- 실 MySQL 에서 계정을 만들거나 상태를 확인할 때는 이 블록의 주석을 풀어 수동 실행하면 된다.
+-- (비밀번호가 평문으로 들어 있으므로 실제 운영 계정 생성에 그대로 쓰지 말 것.)
+-- =============================================================================
+-- SHOW TABLES;
+--
+-- SHOW TABLES LIKE '%vehicle%';
+--
+-- SELECT user, host
+-- FROM mysql.user
+-- WHERE user = 'fastbackend';
+--
+-- SELECT user, host
+-- FROM mysql.user
+-- WHERE user = 'fastbackend';
+--
+-- ALTER USER ''@'localhost'
+--     IDENTIFIED BY '1234';
+--
+-- GRANT ALL PRIVILEGES
+--     ON fast_backend.*
+--     TO 'fastbackend'@'localhost';
+--
+-- FLUSH PRIVILEGES;
+--
+-- SELECT USER(), CURRENT_USER();
+--
+-- CREATE USER IF NOT EXISTS 'fastbackend'@'localhost'
+--     IDENTIFIED BY '1234';
+--
+-- ALTER USER 'fastbackend'@'localhost'
+--     IDENTIFIED BY '1234';
+--
+-- GRANT ALL PRIVILEGES
+--     ON fast_backend.*
+--     TO 'fastbackend'@'localhost';
+--
+-- FLUSH PRIVILEGES;

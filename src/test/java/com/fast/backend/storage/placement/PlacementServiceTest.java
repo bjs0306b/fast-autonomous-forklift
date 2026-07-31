@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -17,8 +18,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class PlacementServiceTest {
 
-    private final PlacementService service = new PlacementService(new PlacementProperties(0.0));
-    private final PlacementService serviceWithClearance = new PlacementService(new PlacementProperties(0.1));
+    // (heightClearance, palletHeightM, maxOverhangRatioExclusive)
+    private final PlacementService service =
+            new PlacementService(new PlacementProperties(0.0, 0.12, 0.05));
+    private final PlacementService serviceWithClearance =
+            new PlacementService(new PlacementProperties(0.1, 0.12, 0.05));
 
     private static Cargo cargo(double w, double l, double h) {
         return Cargo.create("CARGO-001", w, l, h);
@@ -53,8 +57,25 @@ class PlacementServiceTest {
     }
 
     @Test
+    void recommend_addsPalletHeightExactlyOnce() {
+        // 화물 0.6 + 팔레트 0.12 = 0.72. 슬롯 0.75 면 들어가고, 0.70 이면 안 들어간다.
+        // 팔레트를 안 더하면 0.70 슬롯도 통과해 버리고, 두 번 더하면 0.75 슬롯이 떨어진다.
+        PlacementRecommendation fits = service.recommend(
+                cargo(0.8, 1.0, 0.6), List.of(emptySlot(1, "A-01-01", 1, 1.0, 1.2, 0.75, null, null)), null, null);
+        assertThat(fits.slotCode()).isEqualTo("A-01-01");
+        // 잔여 높이도 팔레트를 포함한 기준이어야 한다: 0.75 - (0.6 + 0.12) = 0.03
+        assertThat(fits.heightRemaining()).isEqualTo(0.75 - 0.72, within(1e-9));
+
+        assertThatThrownBy(() -> service.recommend(
+                cargo(0.8, 1.0, 0.6), List.of(emptySlot(1, "A-01-01", 1, 1.0, 1.2, 0.70, null, null)), null, null))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.NO_AVAILABLE_STORAGE_SLOT);
+    }
+
+    @Test
     void recommend_heightExceeded_throws() {
-        // cargo height 0.75 + clearance 0.1 = 0.85 > slot height 0.8
+        // cargo height 0.75 + 팔레트 0.12 + clearance 0.1 = 0.97 > slot height 0.8
         assertThatThrownBy(() -> serviceWithClearance.recommend(
                 cargo(0.8, 1.0, 0.75), List.of(emptySlot(1, "A-01-01", 1, 1.0, 1.2, 0.8, null, null)), null, null))
                 .isInstanceOf(BusinessException.class)

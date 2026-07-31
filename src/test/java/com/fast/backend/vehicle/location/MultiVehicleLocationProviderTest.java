@@ -40,18 +40,15 @@ class MultiVehicleLocationProviderTest {
                     assertThat(s.x()).isEqualTo(1.0);
                     assertThat(s.y()).isEqualTo(2.0);
                     assertThat(s.heading()).isEqualTo(90.0);
-                    assertThat(s.source()).isEqualTo("REAL");
                 });
         assertThat(provider.findLatest("REAL-F02")).get()
                 .satisfies(s -> {
                     assertThat(s.x()).isEqualTo(3.0);
-                    assertThat(s.source()).isEqualTo("REAL");
                 });
         assertThat(provider.findLatest("SIM-F01")).get()
                 .satisfies(s -> {
                     assertThat(s.x()).isEqualTo(10.0);
                     assertThat(s.heading()).isEqualTo(270.0);
-                    assertThat(s.source()).isEqualTo("SIM");
                 });
     }
 

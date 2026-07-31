@@ -14,11 +14,44 @@ spring:
 server:
   port: 8080
 
-# 적재 위치 추천 설정(prompt46.md 6장). height-clearance는 화물 높이 위에 확보할 여유 높이(m).
-# 값을 지정하지 않으면 0(여유 없음)이며, 실제 운영 여유값은 팀 협의 대상이다(prompt46.md 20장).
+# 적재 위치 추천 설정(prompt46.md 6장, prompt95.md 2장).
+#
+# height-clearance
+#   단위: meter. 화물+팔레트 위에 추가로 확보할 안전 여유 높이.
+#   값을 지정하지 않으면 0(여유 없음)이며, 실제 운영 여유값은 팀 협의 대상이다(prompt46.md 20장).
+#   환경변수: STORAGE_PLACEMENT_HEIGHT_CLEARANCE
+#
+# pallet-height-m
+#   단위: meter.
+#   의미: T-11 팔레트 실물 높이(1100×1100mm 규격, 높이 0.12m).
+#   DB 반영: station_measurement.cargo_height 에는 **포함되지 않는다**(화물만의 높이).
+#   사용처: 적재 높이 판정에서 PlacementService 가 **정확히 한 번만** 더한다.
+#           requiredHeight = cargoHeight + pallet-height-m + height-clearance
+#   환경변수: STORAGE_PLACEMENT_PALLET_HEIGHT_M
+#   제약: null 불가(미지정 시 0.12), finite, 0 초과.
+# 적재 위치 추천 설정(prompt46.md 6장, prompt95.md 2장, prompt96.md 24장).
+#
+# height-clearance
+#   단위: meter. 화물+팔레트 위에 추가로 확보할 안전 여유 높이.
+#   환경변수: STORAGE_PLACEMENT_HEIGHT_CLEARANCE
+#
+# pallet-height-m
+#   단위: meter. T-11 팔레트 실물 높이.
+#   station_measurement.cargo_height 에는 **포함되지 않는다**(화물만의 높이).
+#   적재 높이 판정에서 **정확히 한 번만** 더한다:
+#     requiredHeight = cargoHeight + pallet-height-m + height-clearance
+#   환경변수: STORAGE_PLACEMENT_PALLET_HEIGHT_M / 제약: finite, 0 초과
+#
+# max-overhang-ratio-exclusive
+#   단위: 없음(무차원 비율). 적재를 허용하는 화물 돌출률 상한.
+#   **경계값 미포함** — overhangRatio < 이 값 일 때만 추천한다.
+#   따라서 값이 0.05 이면 0.05 는 차단이고 0.049999 는 허용이다.
+#   환경변수: STORAGE_PLACEMENT_MAX_OVERHANG_RATIO_EXCLUSIVE / 제약: finite, 0 초과 1.0 이하
 storage:
   placement:
     height-clearance: 0.05
+    pallet-height-m: 0.12
+    max-overhang-ratio-exclusive: 0.05
 
 logging:
   level:

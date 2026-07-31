@@ -145,9 +145,10 @@ EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 
 - **WebSocket 공통 envelope**: 차량·AI·스테이션 이벤트가 모두
   `{eventType, vehicleId, occurredAt, data}` 형태를 공유한다(`vehicleId`는 nullable).
 
-운영 DB에 적용할 마이그레이션 SQL은
-`src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql`에 있다
-(schema.sql과 마찬가지로 **수동 실행 전제**).
+**DB 적용 정책**: 증분 migration SQL을 운영하지 않는다(`db/migration` 폴더는 삭제됐다).
+구조가 바뀌면 개발 DB를 초기화한 뒤 `src/main/resources/db/schema.sql` 하나로 전체 테이블을
+다시 만든다(수동 실행 전제). 기존 DB를 점진적으로 업그레이드하는 경로는 지원하지 않으며,
+보존할 중요한 데이터가 없는 개발·연동 테스트 단계라 이 정책을 택했다.
 
 ### 알려진 제한사항
 
