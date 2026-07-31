@@ -124,6 +124,14 @@ def test_cargoId가_없으면_버리고_이유를_남긴다(capsys) -> None:
     assert "cargoId" in err and "forkliftId" in err
 
 
+def test_enter는_멱등하다() -> None:
+    """serve.py가 연결 실패를 먼저 확인하려고 `__enter__()`를 부른 뒤 `with`로 감싼다.
+    두 번 연결하면 구독이 중복돼 같은 요청이 두 번 온다."""
+    t = _trigger()
+    t._client = object()                 # 이미 연결된 상태를 흉내
+    assert t.__enter__() is t            # 재연결 시도 없이 그대로 반환
+
+
 def test_필드명을_바꿀_수_있다() -> None:
     """시뮬 쪽 규격이 확정 전이라 코드를 안 고치고 맞출 수 있어야 한다."""
     t = MeasureTrigger("broker.invalid", cargo_field="cargo_id")
@@ -136,3 +144,32 @@ def test_깨진_페이로드는_무시한다(capsys) -> None:
     t._on_message(None, None, Msg("이건 JSON이 아니다"))
     assert t._q.empty()
     assert "파싱 실패" in capsys.readouterr().err
+
+
+# --- 모드 분기 ---
+
+def test_listen은_cargo_id_없는_1회경로로_새지_않는다(monkeypatch, capsys) -> None:
+    """2026-07-31 실측 회귀.
+
+    `--listen`은 cargoId를 MQTT로 받으므로 시작 시점엔 `--cargo-id`가 없다. 분기 조건에
+    `not args.listen`이 빠져 있어 그것을 "cargo-id 없이 보내는 1회 측정"으로 오인했고,
+    **카메라를 열어 한 번 재고 세션 없이 전송해 400**을 받았다. 상시 모드는 시작도 못 했다.
+
+    여기서는 카메라 대신 이미지로 1회 경로를 유도한다 — 그 경로로 샜다면 "이미지를 읽을
+    수 없습니다"가 찍힌다. 상시 모드로 갔다면 브로커 연결에서 실패한다.
+    """
+    from station import serve
+
+    rc = serve.main(["--listen", "--publish", "--image", "없는파일.jpg",
+                     "--broker", "broker.invalid", "--broker-port", "1"])
+    out = capsys.readouterr()
+    assert "이미지를 읽을 수 없습니다" not in out.err, "1회 측정 경로로 샜다"
+    assert rc != 0
+
+
+def test_listen은_publish_없이_거부된다() -> None:
+    """측정만 하고 버리는 실수를 막는다."""
+    from station import serve
+
+    with pytest.raises(SystemExit):
+        serve.main(["--listen"])

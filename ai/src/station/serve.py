@@ -126,7 +126,9 @@ def release_session(abandon: bool = False) -> int:
         "tipping": None,
     }
     try:
-        post_measurement(abandoned)
+        # ⚠️ `session_id`를 반드시 실어야 한다. 2026-07-31 백엔드가 sessionId를 필수로
+        # 바꿨을 때 이 복구 경로를 빠뜨려, **정작 잠긴 세션을 풀려는 순간 400으로 실패**했다.
+        post_measurement(abandoned, session_id=session_id)
         close_session(session_id)
     except StationApiError as e:
         print(f"강제 해제 실패: {e}", file=sys.stderr)
@@ -179,6 +181,28 @@ def check_wiring(args) -> int:
         print(f"  {'✅' if match else '❌'} index {cfg.camera_index}: {w}x{h}"
               + ("" if match else f" — 캘리브레이션 기준 {cfg.frame_width}x{cfg.frame_height}와 다르다"))
         ok = ok and match
+
+        # **정지 판정 임계가 센서 노이즈 바닥보다 위인지 확인한다.** 아래면 판정이
+        # 아예 동작하지 않는다 — 가만히 있어도 늘 "안 멎었다"가 된다(2026-07-31 실측 사고).
+        # 조명·카메라가 바뀌면 노이즈가 달라지므로 시연 전에 매번 본다.
+        from station.trigger import STILL_DIFF, frame_motion
+        for _ in range(cfg.warmup_frames):
+            cap.read()
+        vals, prev = [], None
+        for _ in range(20):
+            got, f = cap.read()
+            if not got:
+                break
+            if prev is not None:
+                vals.append(frame_motion(prev, f))
+            prev = f
+        if vals:
+            floor = max(vals)
+            margin_ok = STILL_DIFF > floor * 1.2
+            print(f"  {'✅' if margin_ok else '❌'} 정지 판정: 노이즈 바닥 "
+                  f"{min(vals):.2f}~{floor:.2f} vs 임계 {STILL_DIFF}"
+                  + ("" if margin_ok else "  ← **임계가 낮아 판정이 안 된다**"))
+            ok = ok and margin_ok
     else:
         print(f"  ❌ index {cfg.camera_index} 안 열림 (--probe로 확인)")
         ok = False
@@ -222,6 +246,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="측정 요청 토픽. 시뮬 쪽 규격에 맞춘다")
     parser.add_argument("--cargo-field", default="cargoId",
                         help="요청 페이로드에서 화물 ID를 담은 키 이름")
+    parser.add_argument("--max-measurements", type=int, default=0,
+                        help="--listen 전용. N건 측정 후 종료(0=무한). "
+                             "리허설·검증용 — 한 번만 돌려보고 로그를 확인할 때 쓴다")
     args = parser.parse_args(argv)
 
     if args.probe:
@@ -329,7 +356,11 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return ok
 
-    if not (args.publish and args.cargo_id):
+    # ⚠️ `not args.listen`이 빠지면 상시 모드가 여기 걸린다. `--listen`은 cargoId를
+    # MQTT로 받으므로 **시작 시점엔 `--cargo-id`가 없는 것이 정상**인데, 그것을
+    # "cargo-id 없이 보내는 1회 측정"으로 오인해 상시 모드에 도달하지 못했다
+    # (2026-07-31 실측 — 카메라를 열어 한 번 재고 세션 없이 전송해 400을 받았다).
+    if not args.listen and not (args.publish and args.cargo_id):
         payload = measure_and_emit()
         if payload is None:
             return 1
@@ -385,10 +416,22 @@ def main(argv: list[str] | None = None) -> int:
     # 0.8초라 측정 예산(≤1초)을 넘긴다.
     from station.trigger import MeasureTrigger, wait_until_still
 
+    # **브로커를 카메라보다 먼저 연결한다.** 주소·포트가 틀렸으면 하드웨어를 잡기 전에
+    # 실패하는 편이 낫다 — 카메라를 열어놓고 죽으면 다른 프로세스가 못 쓴다.
+    trigger = MeasureTrigger(args.broker, args.broker_port, args.topic,
+                             args.cargo_field)
+    try:
+        trigger.__enter__()
+    except Exception as e:
+        print(f"[listen] ❌ 브로커 연결 실패 {args.broker}:{args.broker_port} — "
+              f"{type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+
     detector = build_detector()
     cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
     if not cap.isOpened():
         print(f"카메라 index {cfg.camera_index} 안 열림 (--probe로 확인)", file=sys.stderr)
+        trigger.__exit__(None, None, None)
         return 1
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
@@ -401,10 +444,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"상시 모드 — {args.topic} 대기 중. Ctrl-C로 종료", flush=True)
     measured: set[str] = set()
-    rc = 0
+    rc = done = 0
     try:
-        with MeasureTrigger(args.broker, args.broker_port, args.topic,
-                            args.cargo_field) as trig:
+        with trigger as trig:
             for req in trig.requests():
                 if req.cargo_id in measured:
                     # 같은 화물을 두 번 재면 백엔드가 409로 거부한다. 신호가 중복으로
@@ -427,6 +469,10 @@ def main(argv: list[str] | None = None) -> int:
                 rc = measure_for_cargo(req.cargo_id, detector, frame)
                 if rc == 0:
                     measured.add(req.cargo_id)
+                done += 1
+                if args.max_measurements and done >= args.max_measurements:
+                    print(f"[listen] {done}건 측정 완료 — 종료", flush=True)
+                    break
                 print(f"[listen] 측정 종료 rc={rc} — 다음 요청 대기", flush=True)
     except KeyboardInterrupt:
         print("\n종료", flush=True)
