@@ -18,6 +18,14 @@
 
 ⚠️ 원격 추론은 왕복이 있어 프레임률이 낮다(실측 284ms ≈ 3.5fps). `--fps`로 조절한다.
    빠르게 돌릴수록 WiFi·보드를 더 먹고, 보드는 주행 중 Nav2·SLAM도 함께 돌린다.
+
+## 거리계를 기본으로 안 읽는 이유 — COM 포트가 배타적이다
+
+화면 치수는 거리에 비례하므로 TF-Nova를 읽는 게 정확하다. 그런데 **윈도우 COM 포트는
+한 프로세스만 잡는다.** 라이브 뷰가 COM3를 물고 있으면 트리거가 떨어진 순간
+`serve.py --listen`이 포트를 못 열어 **측정 자체가 실패한다.** 화면 숫자 하나를 맞추자고
+저장되는 측정을 날리는 셈이라, 기본은 `--distance` 고정값으로 두고 `--nova`를 준
+경우에만 읽는다(라이브 뷰 단독 실행 — 발표 영상 녹화 등).
 """
 from __future__ import annotations
 
@@ -30,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import cv2  # noqa: E402
 
-from perception.tfnova import Measurement  # noqa: E402
+from perception.tfnova import Measurement, MeasurementUnreliable, TfNova  # noqa: E402
 from station.annotate import annotate  # noqa: E402
 from station.config import StationConfig  # noqa: E402
 from station.detector import OnnxDetector  # noqa: E402
@@ -99,8 +107,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="스테이션 라이브 뷰 (표시 전용)")
     ap.add_argument("--infer-url", help="온보드 추론 서버. 없으면 노트북에서 추론")
     ap.add_argument("--distance", type=float, default=150.0,
-                    help="표시용 고정 거리(cm). 라이브 뷰는 TF-Nova를 읽지 않는다 — "
-                         "거리계는 측정 시점에만 쓰고, 화면은 bbox를 보이는 게 목적이다")
+                    help="표시용 고정 거리(cm). 기본은 TF-Nova를 읽지 않는다 — 이유는 "
+                         "--nova 설명 참조")
+    ap.add_argument("--nova", action="store_true",
+                    help="TF-Nova를 실제로 읽어 치수를 맞춘다. ⚠️ **`serve.py --listen`과 "
+                         "같이 쓰지 말 것** — 윈도우 COM 포트는 배타적이라 이쪽이 물고 "
+                         "있으면 트리거 순간 측정이 포트를 못 열어 실패한다. 라이브 뷰만 "
+                         "단독으로 돌릴 때(발표 영상 녹화 등) 쓴다")
     ap.add_argument("--fps", type=float, default=3.0, help="추론 주기 상한")
     ap.add_argument("--window", default="FAST station", help="창 제목")
     ap.add_argument("--save-dir", type=Path, help="헤드리스일 때 프레임 저장")
@@ -136,8 +149,18 @@ def main(argv=None) -> int:
     for _ in range(cfg.warmup_frames):        # 자동 노출 안정화
         cap.read()
 
-    distance = Measurement(distance_cm=a.distance, std_cm=0.0,
-                           frames_used=0, frames_seen=0)
+    fixed = Measurement(distance_cm=a.distance, std_cm=0.0,
+                        frames_used=0, frames_seen=0)
+    distance = fixed
+    sensor = None
+    if a.nova:
+        try:
+            sensor = TfNova(cfg.tfnova_port).__enter__()
+            print(f"거리계: {cfg.tfnova_port} 열림 — 실측값으로 치수를 낸다")
+        except Exception as e:
+            # 포트를 못 잡는 흔한 이유가 `--listen`이 이미 물고 있는 경우다. 조용히
+            # 고정 거리로 넘어가면 화면 치수가 틀린 채 그럴듯해 보이므로 크게 알린다.
+            print(f"⚠️ 거리계 {cfg.tfnova_port} 못 엶({e}) — 고정 {a.distance}cm로 표시한다")
     period = 1.0 / a.fps if a.fps > 0 else 0.0
     rec = _Recorder(a.record, a.fps) if a.record else None
     if rec:
@@ -150,6 +173,15 @@ def main(argv=None) -> int:
             if not ok:
                 print("프레임 캡처 실패")
                 break
+
+            if sensor is not None:
+                # 표시용이라 0.5초(측정용)까지 안 쓴다 — 루프가 그만큼 느려진다.
+                # 실패하면 직전 값을 유지한다(빔이 잠깐 빗나가는 건 흔하다).
+                try:
+                    distance = sensor.measure(0.15, scale=cfg.tfnova_scale,
+                                              offset_cm=cfg.tfnova_offset_cm)
+                except MeasurementUnreliable:
+                    pass
 
             dets = detector.detect(frame)
             pallets = [d for d in dets if d.label == "pallet"
@@ -191,6 +223,9 @@ def main(argv=None) -> int:
         print("\n중단")
     finally:
         cap.release()
+        if sensor is not None:
+            # 포트를 놓아야 `--listen`이 다시 잡을 수 있다.
+            sensor.__exit__(None, None, None)
         cv2.destroyAllWindows()
         if rec:
             rec.close()
