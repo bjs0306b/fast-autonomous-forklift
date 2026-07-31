@@ -1,6 +1,7 @@
 package com.fast.backend.vehicle.mapper;
 
 import com.fast.backend.vehicle.domain.Vehicle;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,7 +31,7 @@ class VehicleMapperTest {
 
     @Test
     void insert_generatesIdAndPersistsAllFields() {
-        Vehicle vehicle = newVehicle("TEST-M01", "테스트 차량 1호");
+        Vehicle vehicle = newVehicle("TEST-M01", "테스트 차량 1호", VehicleSource.SIMULATION);
 
         vehicleMapper.insert(vehicle);
 
@@ -39,6 +40,7 @@ class VehicleMapperTest {
         Optional<Vehicle> found = vehicleMapper.findByVehicleId("TEST-M01");
         assertThat(found).isPresent();
         assertThat(found.get().getName()).isEqualTo("테스트 차량 1호");
+        assertThat(found.get().getSource()).isEqualTo(VehicleSource.SIMULATION);
         assertThat(found.get().isActive()).isTrue();
     }
 
@@ -51,23 +53,23 @@ class VehicleMapperTest {
     void existsByVehicleId_reflectsInsertedState() {
         assertThat(vehicleMapper.existsByVehicleId("TEST-M02")).isFalse();
 
-        vehicleMapper.insert(newVehicle("TEST-M02", "테스트 차량 2호"));
+        vehicleMapper.insert(newVehicle("TEST-M02", "테스트 차량 2호", VehicleSource.REAL));
 
         assertThat(vehicleMapper.existsByVehicleId("TEST-M02")).isTrue();
     }
 
     @Test
     void insert_duplicateVehicleId_violatesUniqueConstraint() {
-        vehicleMapper.insert(newVehicle("TEST-DUP", "1호"));
+        vehicleMapper.insert(newVehicle("TEST-DUP", "1호", VehicleSource.REAL));
 
         assertThrows(DataIntegrityViolationException.class,
-                () -> vehicleMapper.insert(newVehicle("TEST-DUP", "2호")));
+                () -> vehicleMapper.insert(newVehicle("TEST-DUP", "2호", VehicleSource.SIMULATION)));
     }
 
     @Test
     void findAllActive_excludesInactiveVehicles() {
-        Vehicle active = newVehicle("TEST-ACTIVE", "활성 차량");
-        Vehicle inactive = newVehicle("TEST-INACTIVE", "비활성 차량");
+        Vehicle active = newVehicle("TEST-ACTIVE", "활성 차량", VehicleSource.SIMULATION);
+        Vehicle inactive = newVehicle("TEST-INACTIVE", "비활성 차량", VehicleSource.SIMULATION);
         inactive.setActive(false);
         vehicleMapper.insert(active);
         vehicleMapper.insert(inactive);
@@ -80,7 +82,7 @@ class VehicleMapperTest {
 
     @Test
     void updateActive_changesValueAndUpdatedAt() {
-        Vehicle vehicle = newVehicle("TEST-UPDATE-ACTIVE", "활성 변경 차량");
+        Vehicle vehicle = newVehicle("TEST-UPDATE-ACTIVE", "활성 변경 차량", VehicleSource.REAL);
         vehicleMapper.insert(vehicle);
         LocalDateTime changedAt = vehicle.getUpdatedAt().plusSeconds(1).withNano(0);
 
@@ -92,13 +94,15 @@ class VehicleMapperTest {
         assertThat(found.getUpdatedAt()).isEqualTo(changedAt);
     }
 
-    private Vehicle newVehicle(String vehicleId, String name) {
+    private Vehicle newVehicle(String vehicleId, String name, VehicleSource source) {
         LocalDateTime now = LocalDateTime.now();
         Vehicle vehicle = new Vehicle();
         vehicle.setVehicleId(vehicleId);
         vehicle.setName(name);
+        vehicle.setSource(source);
         vehicle.setActive(true);
         vehicle.setCreatedAt(now);
+        vehicle.setUpdatedAt(now);
         return vehicle;
     }
 }

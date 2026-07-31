@@ -52,9 +52,13 @@ class StationMeasurementServiceTest {
         sessionMapper = mock(StationSessionMapper.class);
         broadcaster = mock(StationMeasurementBroadcaster.class);
         service = new StationMeasurementService(measurementMapper, sessionMapper,
-                new StationMeasurementResponseMapper(), broadcaster);
+                new StationMeasurementResponseMapper(),
+                new StationMeasurementPlacementEligibility(
+                        new com.fast.backend.storage.placement.PlacementProperties(0.05, 0.12, 0.05)),
+                broadcaster);
 
         when(measurementMapper.existsByMeasurementId(any())).thenReturn(false);
+        when(measurementMapper.existsBySessionId(any())).thenReturn(false);
         when(sessionMapper.findActiveSession())
                 .thenReturn(Optional.of(new StationSession(ACTIVE_SESSION_ID, CARGO_ID)));
     }

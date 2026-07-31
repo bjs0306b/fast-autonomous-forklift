@@ -244,6 +244,108 @@ SQL에서 일부 값이 nullable이더라도 정상 알고리즘은 누락된 �
 > (`StationMeasurementCreateRequest`)가 `cargoHeight`(m, 화물만)·`tippingLevel`·`overhangRatio`를
 > 모두 수신해 저장한다. `sessionId`는 요청에서 받지 않고 백엔드가 활성 세션을 조회해 연결한다.
 
+## 6-bis. 측정 세션과 적재 추천 안전 게이트 (prompt96, 구현 완료)
+
+### 6-bis.1 단일 활성 세션
+
+측정 설비는 하나뿐이라 **동시에 활성 세션은 1개**다. 상태는 `station_state.active_session_id`
+한 행으로 표현한다.
+
+| 동작 | API | 조건 | 실패 |
+|---|---|---|---|
+| 세션 시작 | `POST /api/stations/sessions?cargoId=...` | `active_session_id IS NULL` | 409 `STATION_ALREADY_OCCUPIED` |
+| 측정 등록 | `POST /api/stations/measurements` | 활성 세션 존재 + 세션에 결과 없음 | 409 (아래 3종) |
+| 세션 종료 | `DELETE /api/stations/sessions/{sessionId}` | 활성 세션 일치 + **측정 결과 1건 이상 존재** | 409 |
+
+점유·해제·종료는 모두 **조건부 UPDATE 한 문장**이다. "조회 후 변경"으로 나누면 그 사이에 다른 요청이
+끼어들 수 있어 두 요청이 동시에 성공한다. 다중 인스턴스에서도 안전하도록 Java `synchronized` 가 아니라
+DB 조건부 UPDATE·UNIQUE 제약으로 막는다.
+
+### 6-bis.2 측정 저장 전 세션 종료 금지
+
+세션 종료는 다음 SQL 한 문장으로 판정·해제를 함께 한다.
+
+```sql
+UPDATE station_state SET active_session_id = NULL
+ WHERE singleton_id = 1
+   AND active_session_id = #{sessionId}
+   AND EXISTS (SELECT 1 FROM station_measurement WHERE session_id = #{sessionId})
+```
+
+영향 행이 0이면 그때 원인을 조회해 구분한다 — 전부 `NOT_FOUND` 로 뭉개지 않는다.
+
+- 활성 세션이 아님 → 409 `STATION_SESSION_NOT_ACTIVE`
+- 측정 결과가 아직 없음 → 409 `STATION_MEASUREMENT_NOT_COMPLETED`
+
+**종료에 실패하면 활성 세션은 그대로 유지된다.**
+
+> **세션 종료 조건과 적재 추천 조건은 별개다.** `DIMENSIONS_ONLY`/`NO_DETECTION`/`UNRELIABLE` 도
+> "측정 결과가 저장됨"에 해당하므로 세션을 종료할 수 있다. 다만 적재 추천 대상은 아니다.
+
+### 6-bis.3 세션당 최종 측정 결과 1건
+
+한 세션에는 최종 측정 결과를 하나만 저장한다. 사전 확인(`existsBySessionId`)은 빠른 실패용이고,
+동시 요청의 최종 방어는 `uk_station_measurement_session UNIQUE (session_id)` 제약이다.
+
+두 종류의 중복을 **구분**한다.
+
+| 상황 | ErrorCode | HTTP |
+|---|---|---|
+| 같은 `measurementId` 재전송 | `STATION_MEASUREMENT_ID_DUPLICATED` | 409 |
+| 다른 `measurementId` 지만 그 세션엔 이미 결과 존재 | `STATION_SESSION_MEASUREMENT_ALREADY_EXISTS` | 409 |
+
+기존 결과를 갱신하지 않고, 새 행도 만들지 않으며, WebSocket 재발행도 하지 않는다.
+
+### 6-bis.4 적재 추천 안전 게이트
+
+추천은 다음을 **모두(AND)** 만족할 때만 실행한다.
+
+```text
+status == OK
+AND cargoHeight != null AND finite AND > 0
+AND tippingLevel == SAFE
+AND overhangRatio != null AND finite AND >= 0
+AND overhangRatio < storage.placement.max-overhang-ratio-exclusive   (기본 0.05, 경계 미포함)
+```
+
+세 안전값 중 **하나만 정상인 경우는 전부 추천 불가**다 — 높이만 있어도, SAFE 만 있어도, 돌출률만
+정상이어도 추천하지 않는다. 값이 없을 때 임의로 `SAFE` 로 보정하거나 기본 슬롯을 돌려주지 않는다.
+
+판정은 `StationMeasurementPlacementEligibility` 한 곳에 있고, 자동 호출 경로와 추천 API 진입점이
+같은 객체를 쓴다(같은 로직을 두 벌 복사하지 않는다).
+
+**검증 순서가 곧 오류 우선순위**다 — 여러 조건이 동시에 실패해도 같은 입력은 항상 같은 오류를 낸다.
+
+| 순서 | 조건 | ErrorCode | HTTP |
+|---|---|---|---|
+| 1 | 측정 존재 | `STATION_MEASUREMENT_NOT_FOUND` | 404 |
+| 2 | `status == OK` | `STATION_MEASUREMENT_STATUS_NOT_ELIGIBLE` | 409 |
+| 3 | 화물 높이 유효 | `STATION_MEASUREMENT_HEIGHT_INVALID` | 409 |
+| 4 | `tippingLevel == SAFE` | `STATION_TIPPING_LEVEL_NOT_SAFE` | 409 |
+| 5 | `overhangRatio < limit` | `STATION_OVERHANG_LIMIT_EXCEEDED` | 409 |
+| 6 | 수용 가능한 슬롯 탐색 | `NO_AVAILABLE_STORAGE_SLOT` | 409 |
+
+5번과 6번은 다른 뜻이다 — **"애초에 추천 대상이 아님"과 "조건은 통과했지만 맞는 칸이 없음"** 을 구분한다.
+
+### 6-bis.5 상태별 정책 요약
+
+| status | DB 저장 | 세션 종료 | 적재 추천 |
+|---|---|---|---|
+| `OK` (SAFE + overhang < 0.05 + 높이 유효) | ✅ | ✅ | ✅ |
+| `OK` (WARNING/DANGER 또는 overhang ≥ 0.05) | ✅ | ✅ | ❌ |
+| `DIMENSIONS_ONLY` | ✅ (높이만, 위험값 null) | ✅ | ❌ |
+| `NO_DETECTION` | ✅ (전부 null) | ✅ | ❌ |
+| `UNRELIABLE` | ✅ (전부 null) | ✅ | ❌ |
+
+### 6-bis.6 late arrival 잔여 한계
+
+세션이 **측정 결과 저장 전에는 종료되지 않으므로** 기존보다 위험이 줄었다 — 결과가 도착하기 전에
+세션이 닫히고 다음 세션이 열리는 경로가 막혔다.
+
+그러나 **완전히 없앤 것은 아니다.** 요청이 `sessionId` 를 보내지 않으므로, 데스크탑 결과가 아주 늦게
+도착한 경우(이미 그 세션이 결과를 받고 정상 종료된 뒤, 다음 세션이 열린 시점에 도착) 백엔드는 그것을
+현재 활성 세션의 결과로 저장한다. 이를 구분할 식별자가 저장 구조에 없다.
+
 ## 7. 적재 가능성과 안전 판정
 
 ### 7.1 돌출률

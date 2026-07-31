@@ -7,6 +7,7 @@ import com.fast.backend.command.domain.VehicleCommandStatus;
 import com.fast.backend.command.domain.VehicleCommandTargetSystem;
 import com.fast.backend.command.mapper.VehicleCommandMapper;
 import com.fast.backend.vehicle.domain.Vehicle;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -209,8 +210,10 @@ class VehicleCommandIntegrationTest {
         Vehicle vehicle = new Vehicle();
         vehicle.setVehicleId(vehicleId);
         vehicle.setName(vehicleId);
+        vehicle.setSource(VehicleSource.REAL);
         vehicle.setActive(true);
         vehicle.setCreatedAt(now);
+        vehicle.setUpdatedAt(now);
         vehicleMapper.insert(vehicle);
     }
 }

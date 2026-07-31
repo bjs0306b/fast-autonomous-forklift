@@ -55,6 +55,19 @@ public class StationMeasurement {
     private LocalDateTime receivedAt;
     private LocalDateTime createdAt;
 
+    // ── 측정 세션·REST 계약 필드(prompt96) ─────────────────────────────────────
+    // 위 MQTT 규격 필드(heightCm 등)와 나란히 두지만 단위가 다르다: heightCm 은 cm, cargoHeight 는 m.
+    // REST 로 들어온 측정 결과만 이 값들을 채운다.
+
+    /** 측정 결과가 속한 세션. REST 저장 시 백엔드가 활성 세션을 찾아 넣는다. */
+    private String sessionId;
+    /** 팔레트를 제외한 화물 높이(meter). 적재 높이 계산의 입력이다. */
+    private Double cargoHeight;
+    /** 전복 위험 등급(SAFE/WARNING/DANGER). 판정 불가 상태면 null. */
+    private String tippingLevel;
+    /** 팔레트 기준 화물 돌출 비율(무차원). 판정 불가 상태면 null. */
+    private Double overhangRatio;
+
     public StationMeasurement() {
     }
 
@@ -304,5 +317,37 @@ public class StationMeasurement {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public Double getCargoHeight() {
+        return cargoHeight;
+    }
+
+    public void setCargoHeight(Double cargoHeight) {
+        this.cargoHeight = cargoHeight;
+    }
+
+    public String getTippingLevel() {
+        return tippingLevel;
+    }
+
+    public void setTippingLevel(String tippingLevel) {
+        this.tippingLevel = tippingLevel;
+    }
+
+    public Double getOverhangRatio() {
+        return overhangRatio;
+    }
+
+    public void setOverhangRatio(Double overhangRatio) {
+        this.overhangRatio = overhangRatio;
     }
 }

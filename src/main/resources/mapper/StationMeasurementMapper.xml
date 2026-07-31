@@ -34,6 +34,10 @@
         <result property="loadMessage" column="load_message"/>
         <result property="receivedAt" column="received_at"/>
         <result property="createdAt" column="created_at"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="cargoHeight" column="cargo_height"/>
+        <result property="tippingLevel" column="tipping_level"/>
+        <result property="overhangRatio" column="overhang_ratio"/>
     </resultMap>
 
     <insert id="insert" parameterType="com.fast.backend.station.domain.StationMeasurement"
@@ -47,7 +51,8 @@
             height_cm, width_cm, depth_cm,
             miniature_scale, miniature_height_mm, miniature_width_mm,
             eccentric, load_direction, ratio_x, ratio_y, magnitude, threshold, load_message,
-            received_at, created_at
+            received_at, created_at,
+            session_id, cargo_height, tipping_level, overhang_ratio
         )
         VALUES (
             #{measurementId}, #{stationId}, #{schemaVersion},
@@ -58,7 +63,8 @@
             #{heightCm}, #{widthCm}, #{depthCm},
             #{miniatureScale}, #{miniatureHeightMm}, #{miniatureWidthMm},
             #{eccentric}, #{loadDirection}, #{ratioX}, #{ratioY}, #{magnitude}, #{threshold}, #{loadMessage},
-            #{receivedAt}, #{createdAt}
+            #{receivedAt}, #{createdAt},
+            #{sessionId}, #{cargoHeight}, #{tippingLevel}, #{overhangRatio}
         )
     </insert>
 
@@ -72,6 +78,24 @@
         SELECT *
         FROM station_measurement
         WHERE measurement_id = #{measurementId}
+    </select>
+
+    <!--
+        세션에 이미 측정 결과가 있는지 — 세션당 최종 결과 1건 정책(prompt96 5장)과
+        "측정 저장 전 세션 종료 금지"(3장) 두 곳에서 쓴다.
+    -->
+    <select id="existsBySessionId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM station_measurement
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <select id="findLatestBySessionId" resultMap="stationMeasurementResultMap">
+        SELECT *
+        FROM station_measurement
+        WHERE session_id = #{sessionId}
+        ORDER BY id DESC
+        LIMIT 1
     </select>
 
     <select id="findLatestByStationId" resultMap="stationMeasurementResultMap">

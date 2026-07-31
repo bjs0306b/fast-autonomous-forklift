@@ -9,6 +9,8 @@ import com.fast.backend.embedded.service.EmbeddedErrorService;
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import com.fast.backend.embedded.service.EmbeddedForkStatusService;
 import com.fast.backend.forklift.service.ForkliftLocationService;
+import com.fast.backend.loadsafety.service.LoadSafetyService;
+import com.fast.backend.ai.service.AiCargoAnalysisService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
@@ -31,6 +33,7 @@ class MqttMessageRouterTest {
     private MqttMessageRouter router;
     private ForkliftStatusService forkliftStatusService;
     private ForkliftLocationService forkliftLocationService;
+    private AiCargoAnalysisService aiCargoAnalysisService;
     private IsaacForkliftLocationService isaacForkliftLocationService;
     private IsaacForkliftStatusService isaacForkliftStatusService;
     private IsaacForkliftPathService isaacForkliftPathService;
@@ -38,6 +41,7 @@ class MqttMessageRouterTest {
     private EmbeddedForkStatusService embeddedForkStatusService;
     private EmbeddedErrorService embeddedErrorService;
     private TransportCommandResultService transportCommandResultService;
+    private LoadSafetyService loadSafetyService;
 
     @BeforeEach
     void setUp() {
@@ -66,9 +70,10 @@ class MqttMessageRouterTest {
         loadSafetyService = mock(LoadSafetyService.class);
         router = new MqttMessageRouter(
                 objectMapper, mqttTopics, forkliftStatusService, forkliftLocationService,
+                aiCargoAnalysisService,
                 isaacForkliftLocationService, isaacForkliftStatusService, isaacForkliftPathService,
                 vehicleCommandResultService, embeddedForkStatusService, embeddedErrorService,
-                transportCommandResultService);
+                transportCommandResultService, loadSafetyService);
     }
 
     @Test

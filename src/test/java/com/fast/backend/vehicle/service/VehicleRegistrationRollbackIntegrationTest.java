@@ -1,6 +1,7 @@
 package com.fast.backend.vehicle.service;
 
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
 import com.fast.backend.vehicle.mapper.VehicleStatusCountRow;
@@ -45,7 +46,7 @@ class VehicleRegistrationRollbackIntegrationTest {
 
     @Test
     void register_initialStatusSaveFails_rollsBackVehicleInsert() {
-        VehicleCreateRequest request = new VehicleCreateRequest(VEHICLE_ID, "롤백 검증 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest(VEHICLE_ID, "롤백 검증 차량", VehicleSource.REAL);
 
         assertThatThrownBy(() -> vehicleService.register(request))
                 .isInstanceOf(DataAccessException.class);

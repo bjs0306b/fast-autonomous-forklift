@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+    측정 세션과 단일 설비 점유(FR-202, prompt85).
+
+    점유/해제를 조건부 UPDATE 한 문장으로 처리하는 이유: SELECT 로 비어 있는지 확인한 뒤 UPDATE 하면
+    두 요청이 같은 빈 상태를 보고 둘 다 점유에 성공할 수 있다. WHERE 절에 조건을 넣어 DB 가
+    한 번에 판정하게 하고, 영향받은 행 수로 승패를 가른다.
+-->
+<mapper namespace="com.fast.backend.station.mapper.StationSessionMapper">
+
+    <resultMap id="stationSessionResultMap" type="com.fast.backend.station.domain.StationSession">
+        <id property="sessionId" column="session_id"/>
+        <result property="cargoId" column="cargo_id"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fast.backend.station.domain.StationSession">
+        INSERT INTO station_session (session_id, cargo_id)
+        VALUES (#{sessionId}, #{cargoId})
+    </insert>
+
+    <select id="findBySessionId" resultMap="stationSessionResultMap">
+        SELECT session_id, cargo_id
+        FROM station_session
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <select id="findActiveSession" resultMap="stationSessionResultMap">
+        SELECT s.session_id, s.cargo_id
+        FROM station_state st
+        JOIN station_session s ON s.session_id = st.active_session_id
+        WHERE st.singleton_id = 1
+    </select>
+
+    <update id="acquireStation">
+        UPDATE station_state
+        SET active_session_id = #{sessionId}
+        WHERE singleton_id = 1
+          AND active_session_id IS NULL
+    </update>
+
+    <update id="releaseStation">
+        UPDATE station_state
+        SET active_session_id = NULL
+        WHERE singleton_id = 1
+          AND active_session_id = #{sessionId}
+    </update>
+
+    <!--
+        측정 결과가 저장된 뒤에만 세션을 종료한다(prompt96 3·20장).
+
+        "measurement 존재 확인 → 해제" 를 두 문장으로 나누면 그 사이에 상태가 바뀔 수 있다.
+        EXISTS 를 WHERE 절에 넣어 **한 문장**으로 판정·해제하면 그 틈이 없다. 영향 행 수가
+        0 이면 호출자가 원인(활성 세션 불일치 / 측정 미완료)을 따로 조회해 구분한다 —
+        전부 SESSION_NOT_FOUND 로 뭉개지 않는다.
+
+        MySQL 은 UPDATE 대상 테이블을 서브쿼리에서 다시 읽는 것을 막지만, 여기서 EXISTS 가
+        읽는 테이블은 station_measurement 로 UPDATE 대상(station_state)과 다르므로 문제없다.
+        H2 MySQL 호환 모드에서도 동일하게 동작한다.
+    -->
+    <update id="releaseStationIfMeasurementExists">
+        UPDATE station_state
+        SET active_session_id = NULL
+        WHERE singleton_id = 1
+          AND active_session_id = #{sessionId}
+          AND EXISTS (
+              SELECT 1
+              FROM station_measurement
+              WHERE session_id = #{sessionId}
+          )
+    </update>
+
+</mapper>

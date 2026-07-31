@@ -2,6 +2,7 @@ package com.fast.backend.vehicle.service;
 
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.domain.VehicleStatusHistory;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
@@ -167,8 +168,10 @@ class VehicleStatusServiceIntegrationTest {
         Vehicle vehicle = new Vehicle();
         vehicle.setVehicleId(vehicleId);
         vehicle.setName(vehicleId + " 이름");
+        vehicle.setSource(VehicleSource.SIMULATION);
         vehicle.setActive(true);
         vehicle.setCreatedAt(now);
+        vehicle.setUpdatedAt(now);
         vehicleMapper.insert(vehicle);
     }
 }

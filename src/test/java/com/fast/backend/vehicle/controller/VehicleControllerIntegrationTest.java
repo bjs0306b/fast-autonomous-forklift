@@ -6,6 +6,7 @@ import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.dto.VehicleActiveUpdateRequest;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
 import com.fast.backend.vehicle.mapper.VehicleStatusHistoryMapper;
 import com.fast.backend.vehicle.service.VehicleStatusService;
@@ -57,7 +58,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void register_thenListAndDetail_reflectRegisteredVehicle() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F01", "통합테스트 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F01", "통합테스트 차량", VehicleSource.SIMULATION);
 
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -86,12 +87,13 @@ class VehicleControllerIntegrationTest {
 
         mockMvc.perform(get("/api/vehicles/IT-F01"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.vehicleId").value("IT-F01"));
+                .andExpect(jsonPath("$.data.vehicleId").value("IT-F01"))
+                .andExpect(jsonPath("$.data.source").value("SIMULATION"));
     }
 
     @Test
     void register_duplicateVehicleId_returns409() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F02", "중복 테스트");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F02", "중복 테스트", VehicleSource.REAL);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -110,7 +112,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void register_thenNewerStatus_upsertsInitialRowAndAppendsHistory() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F10", "초기 상태 갱신 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F10", "초기 상태 갱신 차량", VehicleSource.REAL);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -129,7 +131,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void updateActive_falseThenTrue_filtersAndPreservesStatusAndHistory() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F11", "활성 변경 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F11", "활성 변경 차량", VehicleSource.SIMULATION);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -177,7 +179,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void updateActive_missingOrNullValue_returns400() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F12", "active 검증 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F12", "active 검증 차량", VehicleSource.REAL);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -197,7 +199,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void updateActive_wrongJsonType_returns400() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F13", "active 타입 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F13", "active 타입 차량", VehicleSource.REAL);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -213,9 +215,9 @@ class VehicleControllerIntegrationTest {
     @Test
     void statusCounts_multipleVehicles_excludesInactiveAndKeepsEachActiveStatus() throws Exception {
         for (VehicleCreateRequest request : java.util.List.of(
-                new VehicleCreateRequest("IT-F14", "집계 ACTIVE 차량"),
-                new VehicleCreateRequest("IT-F15", "집계 IDLE 차량"),
-                new VehicleCreateRequest("IT-F16", "집계 UNKNOWN 차량"))) {
+                new VehicleCreateRequest("IT-F14", "집계 ACTIVE 차량", VehicleSource.REAL),
+                new VehicleCreateRequest("IT-F15", "집계 IDLE 차량", VehicleSource.SIMULATION),
+                new VehicleCreateRequest("IT-F16", "집계 UNKNOWN 차량", VehicleSource.REAL))) {
             mockMvc.perform(post("/api/vehicles")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
@@ -284,7 +286,7 @@ class VehicleControllerIntegrationTest {
      */
     @Test
     void statusHistory_afterTwoStatusUpdates_returnsTwoEntriesNewestFirst() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F05", "이력 테스트 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F05", "이력 테스트 차량", VehicleSource.SIMULATION);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -318,7 +320,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void statusHistory_noHistoryYet_returnsEmptyArray() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F06", "이력 없는 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F06", "이력 없는 차량", VehicleSource.SIMULATION);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -331,7 +333,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void statusHistory_limitZero_returns400() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F07", "limit 검증 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F07", "limit 검증 차량", VehicleSource.SIMULATION);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -344,7 +346,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void statusHistory_limitAboveMaximum_returns400() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F08", "limit 상한 검증 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F08", "limit 상한 검증 차량", VehicleSource.SIMULATION);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -357,7 +359,7 @@ class VehicleControllerIntegrationTest {
 
     @Test
     void statusHistory_nonNumericLimit_returns400() throws Exception {
-        VehicleCreateRequest request = new VehicleCreateRequest("IT-F09", "limit 형식 검증 차량");
+        VehicleCreateRequest request = new VehicleCreateRequest("IT-F09", "limit 형식 검증 차량", VehicleSource.SIMULATION);
         mockMvc.perform(post("/api/vehicles")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))

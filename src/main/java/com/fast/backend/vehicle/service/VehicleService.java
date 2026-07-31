@@ -55,6 +55,7 @@ public class VehicleService {
         Vehicle vehicle = new Vehicle();
         vehicle.setVehicleId(request.vehicleId());
         vehicle.setName(request.name());
+        vehicle.setSource(request.source());
         vehicle.setActive(true);
         vehicle.setCreatedAt(now);
         vehicle.setUpdatedAt(now);
@@ -68,7 +69,7 @@ public class VehicleService {
         initialStatus.setUpdatedAt(now);
         vehicleCurrentStatusMapper.upsert(initialStatus);
 
-        log.info("Vehicle registered: vehicleId={}", vehicle.getVehicleId());
+        log.info("Vehicle registered: vehicleId={}, source={}", vehicle.getVehicleId(), vehicle.getSource());
         return toDetailResponse(vehicle, toStatusResponse(initialStatus));
     }
 
@@ -146,6 +147,7 @@ public class VehicleService {
         return new VehicleResponse(
                 vehicle.getVehicleId(),
                 vehicle.getName(),
+                vehicle.getSource(),
                 vehicle.isActive(),
                 toStatusResponse(status));
     }
@@ -154,6 +156,7 @@ public class VehicleService {
         return new VehicleDetailResponse(
                 vehicle.getVehicleId(),
                 vehicle.getName(),
+                vehicle.getSource(),
                 vehicle.isActive(),
                 vehicle.getCreatedAt(),
                 vehicle.getUpdatedAt(),

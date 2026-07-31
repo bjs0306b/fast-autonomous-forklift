@@ -41,9 +41,20 @@ import omni.kit.app
 # ---------------------------------------------------------------------------
 BROKER_HOST = "localhost"   # replace with the EC2 broker address
 BROKER_PORT = 1883
+# NOTE: "localhost" only works when this script runs on the same host as the
+# broker. Mosquitto here listens on 127.0.0.1 / [::1] only, so Isaac Sim running
+# in WSL, Docker, or on another PC cannot reach it with this value - point it at
+# the broker machine's LAN IP and add a matching `listener 1883 0.0.0.0` on the
+# broker side. See docs/backend-message/communication-protocol.md.
 
-SIM_ID = "SIM_F01"
-REAL_ID = "REAL_F01"
+# These are MQTT identifiers and must match `vehicle.vehicle_id` in the database
+# exactly. The DB rows are REAL-F01 / SIM-F01 with a HYPHEN; the backend drops
+# messages whose vehicleId is not registered, so an underscore here means every
+# published message is silently discarded.
+# (The prim paths below keep underscores on purpose - those are USD scene paths,
+#  not vehicle identifiers, and are unrelated to MQTT.)
+SIM_ID = "SIM-F01"
+REAL_ID = "REAL-F01"
 
 SIM_PRIM_PATH = "/World/Forklift_SIM_F01"    # self-driving simulated vehicle
 REAL_PRIM_PATH = "/World/Forklift_REAL_F01"  # stand-in that mirrors the real one
