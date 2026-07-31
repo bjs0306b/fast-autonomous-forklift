@@ -44,6 +44,9 @@ def main(argv=None) -> int:
     ap.add_argument("--fork-center-x", type=float, default=None,
                     help="포크 중심선의 화면 x. 기본은 이미지 중앙 — 카메라를 차체 "
                          "중심에서 벗어나게 달았다면 반드시 실측값을 넣는다")
+    ap.add_argument("--focal-px", type=float, default=None,
+                    help="가로 초점거리(px). 주면 요각을 도(deg)로, 거리를 mm로 낸다. "
+                         "scripts/calibrate_camera.py 로 구한다. 없으면 상대값만 쓴다")
     ap.add_argument("--cmd-topic", default="/cmd_vel")
     ap.add_argument("--dry-run", action="store_true",
                     help="계산만 하고 /cmd_vel을 내보내지 않는다 (첫 실행은 반드시 이걸로)")
@@ -110,7 +113,8 @@ def main(argv=None) -> int:
             error = None
             if target is not None:
                 error = target.error(image_width=got_w,
-                                     fork_center_x=a.fork_center_x)
+                                     fork_center_x=a.fork_center_x,
+                                     focal_px=a.focal_px)
             cmd = servo.step(error, dt)
             publish(cmd.linear_x, cmd.angular_z)
 
@@ -119,6 +123,8 @@ def main(argv=None) -> int:
             else:
                 detail = (f"lat {error.lateral_ratio:+.2f} yaw {error.yaw_signal:+.2f} "
                           f"폭 {error.approach_px:5.0f}px")
+                if error.yaw_deg is not None:
+                    detail += f" ({error.yaw_deg:+.1f}° {error.distance_mm:.0f}mm)"
             print(f"[{frames:4d}] {1/dt if dt else 0:4.1f}fps  {cmd.phase.value:8s} "
                   f"v {cmd.linear_x:+.2f} w {cmd.angular_z:+.2f}  {detail}  {cmd.reason}",
                   flush=True)
