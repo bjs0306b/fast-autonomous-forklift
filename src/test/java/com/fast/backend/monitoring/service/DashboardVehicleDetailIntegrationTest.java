@@ -14,7 +14,6 @@ import com.fast.backend.transport.mapper.TransportCommandMapper;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
-import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider;
 import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
@@ -64,19 +63,17 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void vehicleView_carriesNameAndSourceFromVehicleTable() {
-        seedVehicle("DVD1-R1", "Forklift-01", VehicleSource.REAL, true, VehicleStatus.MOVING);
-        seedVehicle("DVD1-S1", "Sim-Forklift-01", VehicleSource.SIMULATION, true, VehicleStatus.IDLE);
+        seedVehicle("DVD1-R1", "Forklift-01", true, VehicleStatus.MOVING);
+        seedVehicle("DVD1-S1", "Sim-Forklift-01", true, VehicleStatus.IDLE);
 
         DashboardResponse dashboard = monitoringService.getDashboard();
 
         DashboardResponse.VehicleView real = vehicle(dashboard, "DVD1-R1");
         assertThat(real.name()).isEqualTo("Forklift-01");
-        assertThat(real.source()).isEqualTo(VehicleSource.REAL);
 
         // 차량 등록 source는 SIMULATION 원본 값 그대로 — 위치 태그 "SIM"으로 바꾸지 않는다.
         DashboardResponse.VehicleView sim = vehicle(dashboard, "DVD1-S1");
         assertThat(sim.name()).isEqualTo("Sim-Forklift-01");
-        assertThat(sim.source()).isEqualTo(VehicleSource.SIMULATION);
     }
 
     /**
@@ -85,8 +82,8 @@ class DashboardVehicleDetailIntegrationTest {
      */
     @Test
     void vehicleView_carriesActiveFlagAndItIsAlwaysTrueForListedVehicles() {
-        seedVehicle("DVD1B-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
-        seedVehicle("DVD1B-R2", "R2", VehicleSource.REAL, false, VehicleStatus.IDLE); // 비활성 → 목록에서 제외
+        seedVehicle("DVD1B-R1", "R1", true, VehicleStatus.MOVING);
+        seedVehicle("DVD1B-R2", "R2", false, VehicleStatus.IDLE); // 비활성 → 목록에서 제외
 
         DashboardResponse dashboard = monitoringService.getDashboard();
 
@@ -98,22 +95,20 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void vehicleView_matchesNameAndSourceToTheCorrectVehicle() {
-        seedVehicle("DVD2-A", "이름-A", VehicleSource.REAL, true, VehicleStatus.MOVING);
-        seedVehicle("DVD2-B", "이름-B", VehicleSource.SIMULATION, true, VehicleStatus.IDLE);
+        seedVehicle("DVD2-A", "이름-A", true, VehicleStatus.MOVING);
+        seedVehicle("DVD2-B", "이름-B", true, VehicleStatus.IDLE);
 
         DashboardResponse dashboard = monitoringService.getDashboard();
 
         assertThat(vehicle(dashboard, "DVD2-A").name()).isEqualTo("이름-A");
         assertThat(vehicle(dashboard, "DVD2-B").name()).isEqualTo("이름-B");
-        assertThat(vehicle(dashboard, "DVD2-A").source()).isEqualTo(VehicleSource.REAL);
-        assertThat(vehicle(dashboard, "DVD2-B").source()).isEqualTo(VehicleSource.SIMULATION);
     }
 
     // --- 8장: 위치 메타데이터 ---
 
     @Test
     void locationView_carriesSnapshotMessageAtReceivedAtAndSource() {
-        seedVehicle("DVD3-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD3-R1", "R1", true, VehicleStatus.MOVING);
         locationProvider.update(new VehicleLocationSnapshot(
                 "DVD3-R1", "REAL", 12.34, 5.67, 90.0, 0.8, "map", MSG_AT, RECV_AT));
 
@@ -128,25 +123,22 @@ class DashboardVehicleDetailIntegrationTest {
         // 추가 필드 — 스냅샷 원본 값 그대로(임의 시각 생성 없음)
         assertThat(location.messageAt()).isEqualTo(MSG_AT);
         assertThat(location.receivedAt()).isEqualTo(RECV_AT);
-        assertThat(location.source()).isEqualTo("REAL");
     }
 
     @Test
     void locationView_simSnapshotKeepsSimSourceTag() {
-        seedVehicle("DVD4-S1", "S1", VehicleSource.SIMULATION, true, VehicleStatus.ACTIVE);
+        seedVehicle("DVD4-S1", "S1", true, VehicleStatus.ACTIVE);
         locationProvider.update(new VehicleLocationSnapshot(
                 "DVD4-S1", "SIM", 10.0, 20.0, 270.0, 0.1, "map", MSG_AT, RECV_AT));
 
         DashboardResponse.VehicleView view = vehicle(monitoringService.getDashboard(), "DVD4-S1");
 
         // 위치 태그는 "SIM", 차량 등록 source는 SIMULATION — 서로 다른 값 집합을 유지한다.
-        assertThat(view.location().source()).isEqualTo("SIM");
-        assertThat(view.source()).isEqualTo(VehicleSource.SIMULATION);
     }
 
     @Test
     void locationView_isNullWhenNoSnapshotReceived() {
-        seedVehicle("DVD5-N1", "N1", VehicleSource.REAL, true, VehicleStatus.IDLE);
+        seedVehicle("DVD5-N1", "N1", true, VehicleStatus.IDLE);
 
         DashboardResponse.VehicleView view = vehicle(monitoringService.getDashboard(), "DVD5-N1");
 
@@ -156,7 +148,7 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void locationView_doesNotFabricateTimestampsWhenSnapshotHasNone() {
-        seedVehicle("DVD6-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD6-R1", "R1", true, VehicleStatus.MOVING);
         // messageAt/receivedAt이 없는 스냅샷 — 백엔드가 현재 시각으로 채워 넣으면 안 된다.
         locationProvider.update(new VehicleLocationSnapshot(
                 "DVD6-R1", "REAL", 1.0, 2.0, 0.0, 0.0, "map", null, null));
@@ -172,7 +164,7 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void currentTask_selectsInProgressTaskWithLatestCommandStatus() {
-        seedVehicle("DVD7-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD7-R1", "R1", true, VehicleStatus.MOVING);
         seedCargoAndPallet("DVD7");
         TransportTask task = seedTask("DVD7-T1", "DVD7", "DVD7-R1", TaskStatus.TRANSPORTING, NOW);
         seedCommand("DVD7-C1", task, "DVD7-R1", TransportCommandStatus.PUBLISHED, NOW);
@@ -189,9 +181,9 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void currentTask_excludesCompletedFailedAndCancelledTasks() {
-        seedVehicle("DVD8-C", "C", VehicleSource.REAL, true, VehicleStatus.IDLE);
-        seedVehicle("DVD8-F", "F", VehicleSource.REAL, true, VehicleStatus.IDLE);
-        seedVehicle("DVD8-X", "X", VehicleSource.REAL, true, VehicleStatus.IDLE);
+        seedVehicle("DVD8-C", "C", true, VehicleStatus.IDLE);
+        seedVehicle("DVD8-F", "F", true, VehicleStatus.IDLE);
+        seedVehicle("DVD8-X", "X", true, VehicleStatus.IDLE);
         seedCargoAndPallet("DVD8");
         seedTask("DVD8-T-COMPLETED", "DVD8", "DVD8-C", TaskStatus.COMPLETED, NOW);
         seedTask("DVD8-T-FAILED", "DVD8", "DVD8-F", TaskStatus.FAILED, NOW);
@@ -206,7 +198,7 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void currentTask_picksMostRecentlyUpdatedWhenSeveralAreInProgress() {
-        seedVehicle("DVD9-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD9-R1", "R1", true, VehicleStatus.MOVING);
         seedCargoAndPallet("DVD9");
         seedTask("DVD9-OLD", "DVD9", "DVD9-R1", TaskStatus.ASSIGNED, NOW.minusMinutes(10));
         seedTask("DVD9-NEW", "DVD9", "DVD9-R1", TaskStatus.PICKING_UP, NOW);
@@ -220,15 +212,15 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void currentTask_isNullWhenVehicleHasNoTask() {
-        seedVehicle("DVD10-R1", "R1", VehicleSource.REAL, true, VehicleStatus.IDLE);
+        seedVehicle("DVD10-R1", "R1", true, VehicleStatus.IDLE);
 
         assertThat(vehicle(monitoringService.getDashboard(), "DVD10-R1").currentTask()).isNull();
     }
 
     @Test
     void currentTask_isNotMixedBetweenVehicles() {
-        seedVehicle("DVD11-A", "A", VehicleSource.REAL, true, VehicleStatus.MOVING);
-        seedVehicle("DVD11-B", "B", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD11-A", "A", true, VehicleStatus.MOVING);
+        seedVehicle("DVD11-B", "B", true, VehicleStatus.MOVING);
         seedCargoAndPallet("DVD11");
         TransportTask taskA = seedTask("DVD11-TA", "DVD11", "DVD11-A", TaskStatus.TRANSPORTING, NOW);
         TransportTask taskB = seedTask("DVD11-TB", "DVD11", "DVD11-B", TaskStatus.PLACING, NOW);
@@ -245,7 +237,7 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void currentTask_commandStatusIsNullWhenNoCommandPublishedYet() {
-        seedVehicle("DVD12-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD12-R1", "R1", true, VehicleStatus.MOVING);
         seedCargoAndPallet("DVD12");
         seedTask("DVD12-T1", "DVD12", "DVD12-R1", TaskStatus.ASSIGNED, NOW);
 
@@ -262,7 +254,7 @@ class DashboardVehicleDetailIntegrationTest {
      */
     @Test
     void currentTask_isFoundEvenWhenTaskIsOutsideTheRecentTaskWindow() {
-        seedVehicle("DVD13-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD13-R1", "R1", true, VehicleStatus.MOVING);
         seedCargoAndPallet("DVD13");
         // 오래된 진행 중 작업 1건 + 그보다 나중에 생성된 종료 작업 120건
         seedTask("DVD13-ACTIVE", "DVD13", "DVD13-R1", TaskStatus.TRANSPORTING, NOW.minusDays(2), NOW.minusDays(2));
@@ -282,10 +274,10 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void dashboard_keepsVehicleIdOrderAndActiveOnlyFilter() {
-        seedVehicle("DVD14-C", "C", VehicleSource.REAL, true, VehicleStatus.IDLE);
-        seedVehicle("DVD14-A", "A", VehicleSource.REAL, true, VehicleStatus.IDLE);
-        seedVehicle("DVD14-B", "B", VehicleSource.REAL, true, VehicleStatus.IDLE);
-        seedVehicle("DVD14-Z-INACTIVE", "Z", VehicleSource.REAL, false, VehicleStatus.IDLE);
+        seedVehicle("DVD14-C", "C", true, VehicleStatus.IDLE);
+        seedVehicle("DVD14-A", "A", true, VehicleStatus.IDLE);
+        seedVehicle("DVD14-B", "B", true, VehicleStatus.IDLE);
+        seedVehicle("DVD14-Z-INACTIVE", "Z", false, VehicleStatus.IDLE);
 
         DashboardResponse dashboard = monitoringService.getDashboard();
 
@@ -303,7 +295,7 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void dashboard_statusIsUnknownWhenNeverReported() {
-        seedVehicleWithoutStatus("DVD15-R1", "R1", VehicleSource.REAL, true);
+        seedVehicleWithoutStatus("DVD15-R1", "R1", true);
 
         DashboardResponse.VehicleView view = vehicle(monitoringService.getDashboard(), "DVD15-R1");
 
@@ -315,7 +307,7 @@ class DashboardVehicleDetailIntegrationTest {
 
     @Test
     void dashboard_keepsExistingTasksArrayContract() {
-        seedVehicle("DVD16-R1", "R1", VehicleSource.REAL, true, VehicleStatus.MOVING);
+        seedVehicle("DVD16-R1", "R1", true, VehicleStatus.MOVING);
         seedCargoAndPallet("DVD16");
         TransportTask task = seedTask("DVD16-T1", "DVD16", "DVD16-R1", TaskStatus.TRANSPORTING, NOW);
         seedCommand("DVD16-C1", task, "DVD16-R1", TransportCommandStatus.PUBLISHED, NOW);
@@ -336,25 +328,22 @@ class DashboardVehicleDetailIntegrationTest {
     }
 
     private void seedVehicle(
-            String vehicleId, String name, VehicleSource source, boolean active, VehicleStatus status) {
+            String vehicleId, String name, boolean active, VehicleStatus status) {
         seedVehicleWithoutStatus(vehicleId, name, source, active);
         VehicleCurrentStatus cur = new VehicleCurrentStatus();
         cur.setVehicleId(vehicleId);
         cur.setStatus(status);
         cur.setMessageAt(NOW);
         cur.setReceivedAt(NOW);
-        cur.setUpdatedAt(NOW);
         vehicleCurrentStatusMapper.upsert(cur);
     }
 
-    private void seedVehicleWithoutStatus(String vehicleId, String name, VehicleSource source, boolean active) {
+    private void seedVehicleWithoutStatus(String vehicleId, String name, boolean active) {
         Vehicle v = new Vehicle();
         v.setVehicleId(vehicleId);
         v.setName(name);
-        v.setSource(source);
         v.setActive(active);
         v.setCreatedAt(NOW);
-        v.setUpdatedAt(NOW);
         vehicleMapper.insert(v);
     }
 
@@ -362,14 +351,12 @@ class DashboardVehicleDetailIntegrationTest {
     private void seedCargoAndPallet(String suffix) {
         Cargo cargo = Cargo.create("C-" + suffix, 0.8, 1.0, 0.6);
         cargo.setCreatedAt(NOW);
-        cargo.setUpdatedAt(NOW);
         cargoMapper.insert(cargo);
         Pallet pallet = new Pallet();
         pallet.setPalletId("P-" + suffix);
         pallet.setCargoId("C-" + suffix);
         pallet.setStatus(PalletStatus.WAITING);
         pallet.setCreatedAt(NOW);
-        pallet.setUpdatedAt(NOW);
         palletMapper.insert(pallet);
     }
 
@@ -388,7 +375,6 @@ class DashboardVehicleDetailIntegrationTest {
         task.setVehicleId(vehicleId);
         task.setStatus(status);
         task.setCreatedAt(createdAt);
-        task.setUpdatedAt(updatedAt);
         transportTaskMapper.insert(task);
         return task;
     }
@@ -404,7 +390,6 @@ class DashboardVehicleDetailIntegrationTest {
         cmd.setCommandType("TRANSPORT");
         cmd.setStatus(status);
         cmd.setCreatedAt(createdAt);
-        cmd.setUpdatedAt(createdAt);
         transportCommandMapper.insert(cmd);
     }
 }

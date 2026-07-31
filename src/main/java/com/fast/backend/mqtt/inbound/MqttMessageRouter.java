@@ -22,10 +22,13 @@ import com.fast.backend.isaac.dto.IsaacForkliftStatusMessage;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
 import com.fast.backend.isaac.service.IsaacForkliftStatusService;
+<<<<<<< HEAD
 import com.fast.backend.loadsafety.dto.LoadSafetyMessage;
 import com.fast.backend.loadsafety.service.LoadSafetyService;
 import com.fast.backend.station.dto.StationMeasurementMessage;
 import com.fast.backend.station.service.StationMeasurementService;
+=======
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +61,6 @@ public class MqttMessageRouter {
     private final VehicleCommandResultService vehicleCommandResultService;
     private final EmbeddedForkStatusService embeddedForkStatusService;
     private final EmbeddedErrorService embeddedErrorService;
-    private final StationMeasurementService stationMeasurementService;
     private final TransportCommandResultService transportCommandResultService;
     private final LoadSafetyService loadSafetyService;
 
@@ -71,9 +73,13 @@ public class MqttMessageRouter {
             VehicleCommandResultService vehicleCommandResultService,
             EmbeddedForkStatusService embeddedForkStatusService,
             EmbeddedErrorService embeddedErrorService,
+<<<<<<< HEAD
             StationMeasurementService stationMeasurementService,
             TransportCommandResultService transportCommandResultService,
             LoadSafetyService loadSafetyService) {
+=======
+            TransportCommandResultService transportCommandResultService) {
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
         this.objectMapper = objectMapper;
         this.mqttTopics = mqttTopics;
         this.forkliftStatusService = forkliftStatusService;
@@ -85,7 +91,6 @@ public class MqttMessageRouter {
         this.vehicleCommandResultService = vehicleCommandResultService;
         this.embeddedForkStatusService = embeddedForkStatusService;
         this.embeddedErrorService = embeddedErrorService;
-        this.stationMeasurementService = stationMeasurementService;
         this.transportCommandResultService = transportCommandResultService;
         this.loadSafetyService = loadSafetyService;
     }
@@ -123,12 +128,15 @@ public class MqttMessageRouter {
                 routeForkStatus(topic, payload);
             } else if (mqttTopics.isForkliftErrorTopic(topic)) {
                 routeEmbeddedError(topic, payload);
+<<<<<<< HEAD
             } else if (mqttTopics.isCargoDetectedTopic(topic)) {
                 routeCargoDetected(payload);
             } else if (mqttTopics.isStationMeasurementTopic(topic)) {
                 routeStationMeasurement(topic, payload);
             } else if (mqttTopics.isForkliftLoadSafetyTopic(topic)) {
                 routeLoadSafety(topic, payload);
+=======
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
             }
         } catch (JsonProcessingException e) {
             log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
@@ -144,10 +152,14 @@ public class MqttMessageRouter {
                 || mqttTopics.isForkliftPathTopic(topic)
                 || mqttTopics.isForkliftCommandResultTopic(topic)
                 || mqttTopics.isForkliftForkStatusTopic(topic)
+<<<<<<< HEAD
                 || mqttTopics.isForkliftErrorTopic(topic)
                 || mqttTopics.isCargoDetectedTopic(topic)
                 || mqttTopics.isStationMeasurementTopic(topic)
                 || mqttTopics.isForkliftLoadSafetyTopic(topic);
+=======
+                || mqttTopics.isForkliftErrorTopic(topic);
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
     }
 
     /**
@@ -307,30 +319,6 @@ public class MqttMessageRouter {
                     mqttTopics.cargoDetectedTopic(), e.getMessage());
         } catch (RuntimeException e) {
             log.error("AI cargo analysis processing failed unexpectedly: error={}", e.getMessage());
-        }
-    }
-
-    /**
-     * fast/station/{station_id}/measurement 라우팅(prompt16.md 2·8단계, MR !36, FR-101-5). 토픽의
-     * {station_id}와 payload의 station_id가 일치하지 않으면 메시지를 폐기하고 경고 로그만 남긴다.
-     * 검증 실패(BusinessException)는 Service가 내부에서 흡수하고, DB insert 단계의 예상치 못한
-     * RuntimeException은 트랜잭션 롤백을 위해 밖으로 전파되므로 여기서 최종적으로 받아 로그만 남긴다.
-     */
-    private void routeStationMeasurement(String topic, String payload) {
-        try {
-            StationMeasurementMessage message = objectMapper.readValue(payload, StationMeasurementMessage.class);
-            String topicStationId = mqttTopics.extractStationId(topic);
-            if (!topicStationId.equals(message.stationId())) {
-                log.warn("Station ID mismatch between topic and payload: topic={}, topicStationId={}, "
-                                + "payloadStationId={}",
-                        topic, topicStationId, message.stationId());
-                return;
-            }
-            stationMeasurementService.process(message);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse station measurement message: topic={}, error={}", topic, e.getMessage());
-        } catch (RuntimeException e) {
-            log.error("Station measurement processing failed unexpectedly: topic={}, error={}", topic, e.getMessage());
         }
     }
 

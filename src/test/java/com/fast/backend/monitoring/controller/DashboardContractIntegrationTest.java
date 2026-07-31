@@ -13,7 +13,6 @@ import com.fast.backend.transport.mapper.TransportCommandMapper;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
-import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider;
 import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
@@ -71,7 +70,7 @@ class DashboardContractIntegrationTest {
 
     @Test
     void dashboard_returnsExtendedVehicleContract() throws Exception {
-        seedVehicle("DC1-R1", "Forklift-01", VehicleSource.REAL, VehicleStatus.MOVING);
+        seedVehicle("DC1-R1", "Forklift-01", VehicleStatus.MOVING);
         locationProvider.update(new VehicleLocationSnapshot(
                 "DC1-R1", "REAL", 12.34, 5.67, 90.0, 0.8, "map", MSG_AT, RECV_AT));
         seedCargoAndPallet("DC1");
@@ -113,7 +112,7 @@ class DashboardContractIntegrationTest {
 
     @Test
     void dashboard_nullsOutLocationAndCurrentTaskWhenAbsent() throws Exception {
-        seedVehicle("DC2-R1", "Forklift-02", VehicleSource.SIMULATION, VehicleStatus.IDLE);
+        seedVehicle("DC2-R1", "Forklift-02", VehicleStatus.IDLE);
 
         mockMvc.perform(get("/api/monitoring/dashboard"))
                 .andExpect(status().isOk())
@@ -128,7 +127,7 @@ class DashboardContractIntegrationTest {
 
     @Test
     void dashboard_keepsExistingTaskArrayFieldNames() throws Exception {
-        seedVehicle("DC3-R1", "Forklift-03", VehicleSource.REAL, VehicleStatus.MOVING);
+        seedVehicle("DC3-R1", "Forklift-03", VehicleStatus.MOVING);
         seedCargoAndPallet("DC3");
         TransportTask task = seedTask("DC3-T1", "DC3", "DC3-R1", TaskStatus.PLACING);
         seedCommand("DC3-C1", task, "DC3-R1", TransportCommandStatus.ACKNOWLEDGED);
@@ -145,35 +144,30 @@ class DashboardContractIntegrationTest {
 
     // --- helpers ---
 
-    private void seedVehicle(String vehicleId, String name, VehicleSource source, VehicleStatus status) {
+    private void seedVehicle(String vehicleId, String name, VehicleStatus status) {
         Vehicle v = new Vehicle();
         v.setVehicleId(vehicleId);
         v.setName(name);
-        v.setSource(source);
         v.setActive(true);
         v.setCreatedAt(NOW);
-        v.setUpdatedAt(NOW);
         vehicleMapper.insert(v);
         VehicleCurrentStatus cur = new VehicleCurrentStatus();
         cur.setVehicleId(vehicleId);
         cur.setStatus(status);
         cur.setMessageAt(NOW);
         cur.setReceivedAt(NOW);
-        cur.setUpdatedAt(NOW);
         vehicleCurrentStatusMapper.upsert(cur);
     }
 
     private void seedCargoAndPallet(String suffix) {
         Cargo cargo = Cargo.create("C-" + suffix, 0.8, 1.0, 0.6);
         cargo.setCreatedAt(NOW);
-        cargo.setUpdatedAt(NOW);
         cargoMapper.insert(cargo);
         Pallet pallet = new Pallet();
         pallet.setPalletId("P-" + suffix);
         pallet.setCargoId("C-" + suffix);
         pallet.setStatus(PalletStatus.WAITING);
         pallet.setCreatedAt(NOW);
-        pallet.setUpdatedAt(NOW);
         palletMapper.insert(pallet);
     }
 
@@ -185,7 +179,6 @@ class DashboardContractIntegrationTest {
         task.setVehicleId(vehicleId);
         task.setStatus(status);
         task.setCreatedAt(NOW);
-        task.setUpdatedAt(NOW);
         transportTaskMapper.insert(task);
         return task;
     }
@@ -200,7 +193,6 @@ class DashboardContractIntegrationTest {
         cmd.setCommandType("TRANSPORT");
         cmd.setStatus(status);
         cmd.setCreatedAt(NOW);
-        cmd.setUpdatedAt(NOW);
         transportCommandMapper.insert(cmd);
     }
 }

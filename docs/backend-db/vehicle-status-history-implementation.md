@@ -1,3 +1,10 @@
+> ⚠ **이 문서는 더 이상 현행이 아니다(2026-07-30).**
+> FR-202 스키마 전환으로 `vehicle_status_history` 테이블과 상태 이력 API가 **제거**됐다.
+> 또한 증분 migration 운영을 중단해 이 문서가 가리키던
+> `db/migration/2026-07-24-unified-command-and-isaac-status.sql` 은 **존재하지 않는다**.
+> 현재 DB 적용 방식은 `docs/backend-db/database-schema.md` 의 'DB 적용 정책'을 따른다
+> (개발 DB 초기화 후 `schema.sql` 로 재생성). 아래 내용은 당시 기록으로만 남긴다.
+
 # 차량 상태 이력 테이블·저장 로직
 
 > 조사 기준일: 2026-07-24  
@@ -300,26 +307,19 @@ BUILD SUCCESS
 
 Java 21과 H2 MySQL 호환 모드에서 검증했다. 실제 MQTT broker와 운영 MySQL은 사용하지 않았다.
 
-## 13. 운영 DB migration 방법
+## 13. 운영 DB 적용 방법 (2026-07-30 정책 변경)
 
-신규 DB는 `src/main/resources/db/schema.sql`의 최신 전체 정의를 수동 적용한다. 애플리케이션은
-공용 MySQL에 이 파일을 자동 실행하지 않는다.
+증분 migration SQL 운영을 중단했다. `src/main/resources/db/migration` 폴더는 삭제됐고,
+이 절이 안내하던 `2026-07-24-unified-command-and-isaac-status.sql` 도 더 이상 존재하지 않는다.
 
-기존 DB에서 current/history 테이블은 있으나 Isaac 확장 컬럼이 없다면
-`src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql`의 다음 부분을
-사전 점검 후 수동 적용한다.
+현재 방식은 하나뿐이다.
 
-1. `vehicle_current_status`에 Isaac 5컬럼 추가
-2. `vehicle_status_history`에 Isaac 5컬럼 추가
-3. 적용 확인 쿼리 실행
+1. 개발 DB를 초기화한다(보존할 중요 데이터가 없는 개발·연동 테스트 단계라는 전제).
+2. `src/main/resources/db/schema.sql` 을 수동 실행해 전체 테이블을 다시 만든다.
+3. 로컬 더미 데이터가 필요하면 `src/main/resources/db/data-local.sql` 을 쓴다.
 
-해당 migration은 같은 날짜의 통합 명령 컬럼 변경도 포함하므로 상태 테이블 부분만 적용할지 전체를
-적용할지는 팀 배포 절차에 따라 결정해야 한다. MySQL 8의 `ADD COLUMN IF NOT EXISTS` 제약 때문에
-재실행 안전성이 없으므로 `information_schema.COLUMNS` 확인이 선행되어야 한다.
-
-이번 작업에서는 운영 DB에 접속하거나 SQL을 실행하지 않았다. 따라서 migration 상태는
-**운영 DB 미적용/확인 필요**다. 최신 schema, 기존 migration, Mapper가 이미 일치해 새로운 migration
-파일은 만들지 않았다.
+기존 DB를 점진적으로 업그레이드하는 경로는 **지원하지 않는다**. 애플리케이션은 공용 MySQL에
+어떤 DDL도 자동 실행하지 않는다(수동 실행 전제).
 
 ## 14. 남은 확인 사항
 

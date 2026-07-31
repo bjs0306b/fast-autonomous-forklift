@@ -21,7 +21,6 @@ class MqttTopicsTest {
                 "forklift/+/error",
                 "cargo/detected",
                 "forklift/%s/command",
-                "fast/station/+/measurement",
                 "forklift/+/load-safety");
         MqttProperties properties = new MqttProperties(
                 "tcp://localhost:1883", null, null,
@@ -113,10 +112,10 @@ class MqttTopicsTest {
     }
 
     @Test
-    void stationMeasurementTopic_matchesWildcardAndExtractsStationId() {
-        assertThat(mqttTopics.stationMeasurementSubscribeTopic()).isEqualTo("fast/station/+/measurement");
-        assertThat(mqttTopics.isStationMeasurementTopic("fast/station/station-1/measurement")).isTrue();
-        assertThat(mqttTopics.isStationMeasurementTopic("fast/station/station-1/other")).isFalse();
-        assertThat(mqttTopics.extractStationId("fast/station/station-1/measurement")).isEqualTo("station-1");
+    void stationMeasurementTopic_isNoLongerKnown() {
+        // 측정 결과는 REST(POST /api/stations/measurements)로 들어온다 — 옛 station 토픽은 제거됐고,
+        // 브로커에 남아 있더라도 백엔드가 아는 토픽이 아니어야 한다(prompt95.md 11장·25장).
+        assertThat(mqttTopics.isForkliftStatusTopic("fast/station/station-1/measurement")).isFalse();
+        assertThat(mqttTopics.isForkliftLocationTopic("fast/station/station-1/measurement")).isFalse();
     }
 }

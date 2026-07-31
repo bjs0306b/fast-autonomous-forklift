@@ -28,6 +28,11 @@ public record MqttProperties(
      * {@code MqttTopics}에 정의만 존재) 안전하게 삭제할 수 있었다. 비상 정지는 이제 공통
      * {@code forkliftCommand} 토픽에 {@code targetSystem=ALL}·{@code commandCategory=SAFETY}·
      * {@code command=EMERGENCY_STOP} 조합으로 발행된다.
+     *
+     * <p>{@code stationMeasurement}({@code fast/station/+/measurement})도 <b>제거됐다</b>
+     * (prompt95.md 11장·20장). 측정 스테이션 결과는 이제 MQTT가 아니라
+     * {@code POST /api/stations/measurements}로 들어온다 — 구독·라우팅·DTO를 모두 걷어냈으므로
+     * 설정 키를 남겨 두면 "아직 쓰는 토픽"으로 오해된다.
      */
     public record Topics(
             String forkliftStatus,
@@ -38,7 +43,6 @@ public record MqttProperties(
             String forkliftError,
             String cargoDetected,
             String forkliftCommand,
-            String stationMeasurement,
             /** 적재 화물 안전 상태 수신 토픽(prompt63.md 4장). 구독 전용이며 백엔드는 발행하지 않는다. */
             String forkliftLoadSafety
     ) {

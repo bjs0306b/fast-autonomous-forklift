@@ -1,3 +1,10 @@
+> ⚠ **이 문서는 더 이상 현행이 아니다(2026-07-30).**
+> FR-202 스키마 전환으로 `vehicle_status_history` 테이블과 상태 이력 API가 **제거**됐다.
+> 또한 증분 migration 운영을 중단해 이 문서가 가리키던
+> `db/migration/2026-07-24-unified-command-and-isaac-status.sql` 은 **존재하지 않는다**.
+> 현재 DB 적용 방식은 `docs/backend-db/database-schema.md` 의 'DB 적용 정책'을 따른다
+> (개발 DB 초기화 후 `schema.sql` 로 재생성). 아래 내용은 당시 기록으로만 남긴다.
+
 # 차량별 상태 이력 조회 API
 
 > 조사·검증 기준일: 2026-07-24  
@@ -27,7 +34,7 @@
 | Response DTO | `VehicleStatusHistoryResponse` | 완료 | 기본 상태와 Isaac 확장 필드를 반환한다 | 페이지 메타데이터 없음 |
 | 오류 | `ErrorCode`, `GlobalExceptionHandler` | 완료 | 차량 없음과 limit 범위 오류를 공통 JSON으로 변환한다 | query 타입 변환 오류의 공통 ErrorCode 응답은 미검증 |
 | DB | `db/schema.sql` | 완료 | 이력 테이블, FK, 조회용 복합 인덱스 정의 | 운영 DB 실제 적용 여부 미검증 |
-| migration | `2026-07-24-unified-command-and-isaac-status.sql` | 일부 구현 | 기존 이력 테이블에 Isaac 확장 컬럼을 수동 추가한다 | 테이블 최초 생성은 최신 `schema.sql` 사용 전제 |
+| ~~migration~~ | **삭제됨**(증분 migration 미운영) | 기존 이력 테이블에 Isaac 확장 컬럼을 수동 추가한다 | 테이블 최초 생성은 최신 `schema.sql` 사용 전제 |
 | Controller 단위 테스트 | `VehicleControllerTest` | 완료 | 기본/명시 limit 위임과 응답 래핑 검증 | HTTP 계층은 통합 테스트가 담당 |
 | Service 단위 테스트 | `VehicleStatusHistoryServiceTest` | 완료 | 차량 없음, 빈 목록, 매핑, limit 경계 검증 | 미지원 필터 테스트 없음 |
 | Mapper 통합 테스트 | `VehicleStatusHistoryMapperTest` | 완료 | insert, 차량 분리, 최신순, limit, null, enum, 생성 ID, 동일 시각 정렬 검증 | 운영 MySQL 실행계획 미검증 |
@@ -268,7 +275,7 @@ LIMIT #{limit}
 | `src/main/java/com/fast/backend/common/exception/ErrorCode.java` | 전용 오류 코드 |
 | `src/main/java/com/fast/backend/common/exception/GlobalExceptionHandler.java` | 오류 HTTP 응답 변환 |
 | `src/main/resources/db/schema.sql` | 최신 전체 테이블·인덱스 DDL |
-| `src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql` | 기존 DB Isaac 컬럼 수동 이관 |
+| ~~`src/main/resources/db/migration/2026-07-24-unified-command-and-isaac-status.sql`~~ | **삭제됨**(증분 migration 미운영, 2026-07-30) |
 | `src/test/java/com/fast/backend/vehicle/mapper/VehicleStatusHistoryMapperTest.java` | 실제 H2 Mapper 검증 |
 | `src/test/java/com/fast/backend/vehicle/service/VehicleStatusHistoryServiceTest.java` | Service 단위 검증 |
 | `src/test/java/com/fast/backend/vehicle/controller/VehicleControllerTest.java` | Controller 단위 검증 |
@@ -392,7 +399,7 @@ get:
    동적 SQL, count query, 오류 코드를 함께 구현한다.
 2. 비숫자 query parameter도 공통 `ApiResponse` 오류 형식으로 보장할지 결정하고 테스트한다.
 3. 대량 데이터로 운영 MySQL `EXPLAIN`을 수행해 현재 복합 인덱스와 `id` 동률 정렬 비용을 검증한다.
-4. 운영 DB에 최신 DDL/migration이 적용됐는지 확인한다.
+4. 운영 DB에 최신 DDL(`schema.sql`)이 적용됐는지 확인한다(증분 migration은 운영하지 않는다).
 5. 프론트 연결, Swagger/OpenAPI 도입 여부 및 관련 Jira 이슈 키는 팀 확인이 필요하다.
 
 ## Jira 등록 내용

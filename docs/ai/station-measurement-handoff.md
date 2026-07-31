@@ -21,6 +21,31 @@
 > JSON 필드를 기본으로 무시하는 탓에(`FAIL_ON_UNKNOWN_PROPERTIES=false`) **에러도 로그도 없이
 > 조용히 버려졌다.** 발견까지 하루가 걸렸다.
 
+> ## ⚠️ 백엔드 전달은 REST다 — 이 JSON을 그대로 보내지 않는다
+>
+> 아래 JSON은 **비전 파이프라인의 출력 원본**이다. 백엔드 저장은 MQTT가 아니라 REST이며
+> (`fast/station/+/measurement` 토픽은 **제거됐다**), 계약이 원본보다 훨씬 좁다.
+>
+> | 백엔드 REST 필드 | 이 문서의 원본 필드 | 변환 |
+> |---|---|---|
+> | `measurementId` | `measurement_id` | 없음 |
+> | `status` | `status` | 없음(`dimensions_only` 포함 4값 지원) |
+> | **`cargoHeight`** | **`dimensions.height_cm`** | **cm ÷ 100 = m** — 데스크탑이 변환 |
+> | `tippingLevel` | `tipping.level` | 소문자 그대로 보내면 백엔드가 대문자로 저장 |
+> | `overhangRatio` | `tipping.overhang` | 없음 |
+> | `measuredAt` | `measured_at` | 없음(단, **백엔드에 저장 컬럼이 없어 버려진다**) |
+>
+> ```
+> POST /api/stations/measurements   Content-Type: application/json
+> { "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
+>   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
+> ```
+>
+> **`sessionId`/`stationId`는 보내지 않는다** — 백엔드가 활성 세션을 조회해 붙인다.
+> 나머지 필드(detection/distance/load_balance/box_measurements/miniature/total_height)는
+> **백엔드에 저장되지 않는다.** 전체 규격은 `docs/backend-message/communication-protocol.md`
+> §Measurement Station v2.0 (REST) 참고.
+
 ## 한눈에
 
 ```jsonc
@@ -76,13 +101,20 @@
 
 | 목적 | 필드 | 단위 |
 |---|---|---|
-| **적재 높이** | `dimensions.total_height_cm` | cm (실물) |
+| **적재 높이(백엔드 REST)** | `dimensions.height_cm` ÷ 100 → `cargoHeight` | **m (화물만)** |
 | 미니어처 환산 | `dimensions.miniature_total_height_mm` | mm |
 | **적재 폭** | `dimensions.width_cm` | cm |
 | 안전 판정 | `tipping.level`, `load_balance.eccentric` | — |
 
-> ⚠️ **높이는 `total_height_cm`을 쓸 것.** `height_cm`은 화물만이라 파렛트 12cm이 빠져 있다.
-> 화물은 항상 파렛트에 실려 운반되므로 랙 간섭 판단에는 총높이가 맞다.
+> ⚠️ **백엔드 REST로는 `height_cm`(화물만)을 m로 바꿔 보낼 것.** 팔레트 높이를 미리 더하지 않는다.
+>
+> 랙 간섭 판단에 총높이가 필요한 것은 맞지만, **팔레트 높이를 더하는 주체가 백엔드로 정해졌다** —
+> 백엔드가 설정값 `storage.placement.pallet-height-m`(0.12)를 `PlacementService`에서 **정확히 한 번**
+> 더한다(`requiredHeight = cargoHeight + 0.12 + clearance`). `total_height_cm`을 `cargoHeight`로 보내면
+> **팔레트 높이가 두 번 더해진다.**
+>
+> `total_height_cm` / `miniature_total_height_mm` 자체는 이 문서의 원본 출력으로 남지만,
+> **백엔드 FR-202 계산 입력으로는 쓰지 않는다.**
 
 > ⚠️ **깊이(`depth_cm`)는 항상 null.** 정면 단일 카메라라 앞뒤를 못 잰다(명세 §2.2).
 > 적재 단위가 파렛트(T-11 고정 규격 1100×1100mm)이므로 깊이는 규격값을 쓰면 된다.
@@ -160,6 +192,7 @@ python src/station/serve.py --once --out sample.json          # 라이브
 python src/station/serve.py --once --image <사진> --distance 200   # 사진으로
 ```
 
+<<<<<<< HEAD
 ## 전달 방식 — MQTT 발행 (2026-07-30 구현)
 
 측정 JSON을 백엔드 브로커로 발행한다. **백엔드는 받는 쪽이 이미 완성**돼 있다 —
@@ -188,3 +221,17 @@ MQTT_HOST=<브로커> MQTT_PORT=1883 [MQTT_USERNAME=… MQTT_PASSWORD=…] \
    전복·총높이를 DB/화면에 쓰려면 백엔드 DTO·스키마 확장이 필요(백엔드 담당).
 3. 실제 브로커 왕복 테스트는 접속값 확보 후. 지금은 토픽·페이로드 순수 로직만 단위
    테스트(`tests/test_publisher.py`).
+=======
+## 전달 방식 — 확정(REST)
+
+**확정됐다.** 측정 데스크탑이 `POST /api/stations/measurements`로 직접 호출한다.
+MQTT(`fast/station/+/measurement`)는 **폐기**됐고 백엔드에서 구독·라우팅·DTO가 모두 제거됐다.
+측정 데스크탑은 **DB에 직접 접속하지 않는다** — 이 REST API가 유일한 저장 경로다.
+
+데스크탑 쪽에 남은 작업:
+
+1. 위 표대로 원본 JSON → REST 요청 6필드로 축약
+2. **`height_cm` ÷ 100** 으로 cm → m 변환(백엔드는 단위를 추측해 변환하지 않는다)
+3. 측정 전에 `POST /api/stations/sessions?cargoId=...`로 세션이 열려 있어야 함(없으면 409)
+4. 409 `STATION_MEASUREMENT_ID_DUPLICATED` 는 이미 저장된 결과라는 뜻 — 재전송 불필요
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)

@@ -6,7 +6,6 @@ import com.fast.backend.command.dto.VehicleCommandMessage;
 import com.fast.backend.command.mapper.VehicleCommandMapper;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
-import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
@@ -177,17 +176,14 @@ class EmergencyStopAllRequestIntegrationTest {
         Vehicle v = new Vehicle();
         v.setVehicleId(vehicleId);
         v.setName(vehicleId);
-        v.setSource(VehicleSource.REAL);
         v.setActive(active);
         v.setCreatedAt(NOW);
-        v.setUpdatedAt(NOW);
         vehicleMapper.insert(v);
 
         VehicleCurrentStatus cur = new VehicleCurrentStatus();
         cur.setVehicleId(vehicleId);
         cur.setStatus(status);
         cur.setReceivedAt(NOW);
-        cur.setUpdatedAt(NOW);
         vehicleCurrentStatusMapper.upsert(cur);
     }
 }

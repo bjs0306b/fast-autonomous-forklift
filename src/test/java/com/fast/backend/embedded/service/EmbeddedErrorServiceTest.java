@@ -150,7 +150,6 @@ class EmbeddedErrorServiceTest {
     void findRecentByForkliftId_found_returnsMappedResponses() {
         when(vehicleMapper.findByVehicleId("REAL01")).thenReturn(Optional.of(mock(Vehicle.class)));
         EmbeddedErrorHistory history = new EmbeddedErrorHistory();
-        history.setId(1L);
         history.setForkliftId("REAL01");
         history.setErrorCode("E001");
         history.setErrorSource(com.fast.backend.embedded.domain.EmbeddedErrorSource.DRIVE);

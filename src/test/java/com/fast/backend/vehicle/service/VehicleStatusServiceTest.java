@@ -4,7 +4,6 @@ import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
-import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.domain.VehicleStatusHistory;
 import com.fast.backend.vehicle.dto.VehicleStatusResponse;
@@ -75,7 +74,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_validCommand_upsertsAndBroadcasts() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01",
@@ -96,7 +95,7 @@ class VehicleStatusServiceTest {
     @Test
     void updateCurrentStatus_activeTransaction_broadcastsOnlyAfterCommit() {
         when(vehicleMapper.findByVehicleId("SIM-F01"))
-                .thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+                .thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -115,7 +114,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_historyInsert_copiesFieldsFromCurrentStatus() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         service.updateCurrentStatus("SIM-F01",
@@ -135,7 +134,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_currentStatusUpsertFails_historyInsertNeverCalled() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
         doThrow(new RuntimeException("db error")).when(vehicleCurrentStatusMapper).upsert(any());
 
@@ -151,7 +150,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_historyInsertFails_exceptionPropagatesForTransactionRollback() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
         doThrow(new RuntimeException("history insert failed")).when(vehicleStatusHistoryMapper).insert(any());
 
@@ -167,7 +166,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_unrecognizedStatusString_normalizesToUnknownAndStillUpserts() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         // "LOADING"은 prompt32.md 1장 3번 확정으로 정식 enum 값이 됐다 — 더 이상 "인식 불가" 예시가
@@ -182,7 +181,7 @@ class VehicleStatusServiceTest {
     void updateCurrentStatus_movingStatusString_isPreservedAsMovingAndStillUpserts() {
         // prompt32.md 1장 3번 확정: MOVING은 더 이상 ACTIVE로 변환되지 않고 독립 상태로 보존된다.
         // fromRaw()는 호출자를 구분하지 않는 공용 메서드라 MQTT/REST 어느 경로든 동일하게 적용된다.
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01", command("MOVING", null, null));
@@ -193,7 +192,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_batteryOutOfRange_throwsAndNeverUpserts() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
 
         BusinessException exception = catchThrowableOfType(
                 () -> service.updateCurrentStatus("SIM-F01", command("ACTIVE", 150, null)),
@@ -205,7 +204,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_missingBatteryAndPosition_stillSucceeds() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01", command("IDLE", null, null));
@@ -218,7 +217,7 @@ class VehicleStatusServiceTest {
 
     @Test
     void updateCurrentStatus_nullMessageAt_usesServerReceivedTimeAndStillUpserts() {
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.empty());
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01", command("ACTIVE", null, null));
@@ -237,7 +236,7 @@ class VehicleStatusServiceTest {
         existing.setMessageAt(existingMessageAt);
         existing.setReceivedAt(existingMessageAt);
 
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(existing));
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01",
@@ -259,7 +258,7 @@ class VehicleStatusServiceTest {
         existing.setStatus(VehicleStatus.IDLE);
         existing.setMessageAt(existingMessageAt);
 
-        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01", VehicleSource.SIMULATION)));
+        when(vehicleMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(vehicle("SIM-F01")));
         when(vehicleCurrentStatusMapper.findByVehicleId("SIM-F01")).thenReturn(Optional.of(existing));
 
         VehicleStatusResponse response = service.updateCurrentStatus("SIM-F01",
@@ -271,11 +270,10 @@ class VehicleStatusServiceTest {
         verify(broadcaster).broadcastStatus(any(), any(), any());
     }
 
-    private Vehicle vehicle(String vehicleId, VehicleSource source) {
+    private Vehicle vehicle(String vehicleId) {
         Vehicle vehicle = new Vehicle();
         vehicle.setVehicleId(vehicleId);
         vehicle.setName(vehicleId + " 이름");
-        vehicle.setSource(source);
         vehicle.setActive(true);
         return vehicle;
     }

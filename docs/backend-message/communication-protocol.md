@@ -65,7 +65,7 @@ Frontend/REST → VehicleCommandController → VehicleCommandService → Vehicle
 | 임베디드 포크 상태 | `forklift/+/fork-status` (구독) | `EmbeddedForkStatusMessage` | `EmbeddedForkStatusService` | `vehicle_fork_current_status` upsert | `/topic/vehicles/fork-status`(+`/{id}`) | EmbeddedForkStatusServiceTest, MapperTest(H2) |
 | 임베디드 오류 | `forklift/+/error` (구독) | `EmbeddedErrorMessage` | `EmbeddedErrorService` | `embedded_error_history` insert | `/topic/vehicles/errors`(+`/{id}`) | EmbeddedErrorServiceTest, MapperTest(H2) |
 | AI 화물 분석 | `cargo/detected` (구독) | `AiCargoAnalysisMessage` | `AiCargoAnalysisService` | `ai_cargo_analysis` + `ai_cargo_detection_box` | `/topic/ai/cargo-analysis`(+`/{cargoId}`) | AiCargoAnalysisServiceTest, IntegrationTest(H2) |
-| 측정 스테이션 | `fast/station/+/measurement` (구독) | `StationMeasurementMessage` | `StationMeasurementService` | `station_measurement` + `station_measurement_box` | `/topic/stations/measurements`, `/topic/stations/{id}/measurements` | StationMeasurementIntegrationTest(H2), **StationMeasurementBroadcasterTest** |
+| 측정 스테이션 | **MQTT 아님 — `POST /api/stations/measurements`(REST)** | `StationMeasurementCreateRequest` | `StationMeasurementService.create` | `station_measurement` | `/topic/stations/measurements`, `/topic/stations/{sessionId}/measurements` | StationMeasurementControllerIntegrationTest(H2), StationMeasurementServiceTest, StationMeasurementMapperTest |
 | **적재 화물 안전** | `forklift/+/load-safety` (구독) | `LoadSafetyMessage` | `LoadSafetyService` | `vehicle_load_safety` upsert(차량당 1행) | `/topic/vehicles/load-safety`(+`/{id}`) | LoadSafetyServiceIntegrationTest(H2), LoadSafetyRiskLevelTest |
 
 ---
@@ -86,7 +86,6 @@ Frontend/REST → VehicleCommandController → VehicleCommandService → Vehicle
 | `forklift/+/fork-status` | Embedded → Backend | 임베디드(REAL) | `routeForkStatus` | `EmbeddedForkStatusMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 | `forklift/+/error` | Embedded → Backend | 임베디드(REAL) | `routeEmbeddedError` | `EmbeddedErrorMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 | `cargo/detected` | AI → Backend | AI | `routeCargoDetected` | `AiCargoAnalysisMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
-| `fast/station/+/measurement` | Station → Backend | 측정 스테이션 PC | `routeStationMeasurement` | `StationMeasurementMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 | `forklift/+/load-safety` | Vision/Sensor → Backend | 비전·센서 노드 | `routeLoadSafety` | `LoadSafetyMessage` | 확인 불가 | **1** | 구독 전용 | 동일 | 동일 |
 
 ### 백엔드가 실제로 보장하는 범위 vs 외부 연동 확인 필요
@@ -95,7 +94,7 @@ Frontend/REST → VehicleCommandController → VehicleCommandService → Vehicle
 |---|---|
 | **① 백엔드 발행 시 보장** | `forklift/{vehicleId}/command` 발행은 **MQTT QoS 1, retained false**를 코드 상수로 고정 보장한다(`VehicleCommandPublisherTest`로 회귀 검증). |
 | **② 백엔드 구독 시 사용** | **9개** 인바운드 토픽 전부 `mqtt.default-qos`(현재 1) 하나를 균등 적용한다(`MqttConfigTest`로 회귀 검증 — `forklift/+/load-safety` 추가로 8 → 9개). retained는 구독자가 정하는 값이 아니라 발행자가 정하므로 백엔드가 보장할 수 없다. |
-| **③ 외부 발행 측이 맞춰야 함(백엔드 코드만으로 보장 불가)** | ROS2/Isaac/임베디드가 상태·위치·경로·명령 결과를 실제로 MQTT QoS 1로 발행하는지, AI/스테이션이 `cargo/detected`/`fast/station/.../measurement`를 QoS 1·retained false로 발행하는지 — **외부 연동 확인 필요**. `forklift/+/load-safety`는 **발행 주체 자체가 아직 없다**(§8.3). |
+| **③ 외부 발행 측이 맞춰야 함(백엔드 코드만으로 보장 불가)** | ROS2/Isaac/임베디드가 상태·위치·경로·명령 결과를 실제로 MQTT QoS 1로 발행하는지, AI가 `cargo/detected`를 QoS 1·retained false로 발행하는지 — **외부 연동 확인 필요**. (측정 스테이션은 MQTT를 쓰지 않는다 — REST로 전환됐다, §Measurement Station v2.0) `forklift/+/load-safety`는 **발행 주체 자체가 아직 없다**(§8.3). |
 
 **QoS/retained의 실제 실행 시 적용값(코드 근거)**: `MqttConfig.mqttOutboundHandler()`는
 `handler.setDefaultQos(mqttProperties.defaultQos())` / `handler.setDefaultRetained(false)`로 **폴백 기본값**을
@@ -720,181 +719,336 @@ EC2 브로커·인증, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량
 
 ---
 
-## Measurement Station v1.0
+## Measurement Station v2.0 (REST)
 
 > 이 절은 실제 구현된 스테이션 도메인 코드(`com.fast.backend.station.*`)를 근거로 작성했다.
 
+> ⚠️ **v1.0(MQTT)은 폐기됐다.** 측정 결과는 더 이상 `fast/station/{station_id}/measurement` 토픽으로
+> 들어오지 않는다. 그 토픽의 구독·라우팅(`routeStationMeasurement`)·수신 DTO(`StationMeasurementMessage`)·
+> MQTT 전용 검증은 **모두 제거**됐고, 설정 키 `mqtt.topics.station-measurement`도 없어졌다.
+> 아래 REST 규격이 유일한 수신 경로다. (차량 위치 MQTT `forklift/+/location`은 그대로 유지된다.)
+
 ### 아키텍처 배경
 
-- **MR !36** 기준. 제안자: **방지섭**. 스테이션 서비스는 **FR-101-5**.
-- 측정 **추론·판정은 스테이션 PC**에서 수행한다(거리/치수/편하중 계산 완료).
-- **EC2 백엔드는 측정 결과만 수신**해 검증·저장·중계한다(추론하지 않음).
-- 기존 `cargo/detected`(AI 화물 분석) 흐름은 그대로 유지하고, 스테이션 전용 규격은 **별도 DTO
-  (`StationMeasurementMessage`) + Adapter(`StationMeasurementAdapter`) + Service/Mapper/테이블**로 완전히
-  분리했다 — 두 규격을 섞지 않는다.
+- 측정 **추론·판정은 측정 데스크탑**에서 수행한다(거리/치수/전복/돌출 계산 완료).
+- **백엔드는 측정 결과만 수신**해 검증·저장·중계한다(추론하지 않는다). 전복 등급을 재계산하지 않는다.
+- **측정 데스크탑은 DB에 직접 접속하지 않는다.** Spring Boot REST API가 유일한 저장 경로다.
+- 기존 `cargo/detected`(AI 화물 분석) 흐름은 그대로 유지한다 — 두 규격을 섞지 않는다.
 
-### MQTT 토픽
+### 수신 API
 
 | 항목 | 값 |
 |---|---|
-| 토픽 | `fast/station/{station_id}/measurement` (구독 패턴 `fast/station/+/measurement`) |
-| 방향 | 인바운드(백엔드가 구독) |
-| Publisher | 측정 스테이션 PC |
-| Subscriber | 백엔드 `MqttMessageRouter.routeStationMeasurement` → `StationMeasurementService.process` |
-| QoS | 1 (확정, `mqtt.default-qos`) |
-| retained | `false` (확정) |
-| station_id 검증 | 토픽 `{station_id}`와 payload `station_id` 불일치 시 메시지 폐기 + 경고 로그, 앱은 계속 동작 |
-
-### 전체 JSON 예시 (수신, snake_case)
+| Method / URL | `POST /api/stations/measurements` |
+| Content-Type | `application/json` |
+| 성공 응답 | **201 Created**, 본문은 공통 `ApiResponse<StationMeasurementResponse>` |
+| 인증 | **없음** — 이 저장소에 Spring Security 설정이 존재하지 않는다(전 API 공통) |
+| 요청 DTO | `StationMeasurementCreateRequest` (**camelCase**) |
 
 ```json
 {
-  "schema_version": "1.0",
-  "measurement_id": "st1-20260722-130501-0007",
-  "station_id": "station-1",
-  "measured_at": "2026-07-22T13:05:01+09:00",
+  "measurementId": "station-1-20260731-093748-0001",
   "status": "ok",
-  "detection": {
-    "box_count": 1,
-    "boxes": [ { "bbox_px": [412, 180, 350, 310], "score": 0.97 } ],
-    "pallet": { "bbox_px": [380, 460, 520, 140], "score": 0.99 }
-  },
-  "distance": { "front_cm": 152.3, "std_cm": 0.42, "frames_used": 48 },
-  "dimensions": {
-    "height_cm": 30.2, "width_cm": 34.1, "depth_cm": null,
-    "miniature_scale": 10, "miniature_height_mm": 30.2, "miniature_width_mm": 34.1
-  },
-  "load_balance": {
-    "eccentric": true, "direction": ["right"],
-    "ratio_x": 0.40, "ratio_y": 0.02, "magnitude": 0.40, "threshold": 0.3,
-    "message": "오른쪽 편하중 (치우침 0.40 > 0.3)"
-  }
+  "cargoHeight": 0.723,
+  "tippingLevel": "safe",
+  "overhangRatio": 0.057,
+  "measuredAt": "2026-07-31T09:37:48+09:00"
 }
 ```
 
-> **snake_case 수신**: `StationMeasurementMessage`의 각 필드에 `@JsonProperty("snake_case")`를 명시해
-> 정확히 수신한다(전역 naming 전략을 바꾸지 않아 다른 도메인 DTO에 영향 없음).
-
 ### 필드 정의
 
-| 필드(snake) | DTO 필드(camel) | 타입 | 필수 | 비고 |
+| 필드 | 타입 | 필수 | 단위 | 비고 |
 |---|---|---|---|---|
-| schema_version | schemaVersion | String | 필수 | `"1.0"`만 허용 |
-| measurement_id | measurementId | String | 필수 | UNIQUE, 공백 불가 |
-| station_id | stationId | String | 필수 | 토픽 {station_id}와 일치 |
-| measured_at | measuredAt | **OffsetDateTime** | 필수 | `+09:00` 오프셋 보존(아래 저장 방식) |
-| status | status | String→enum | 필수 | ok / no_detection / unreliable |
-| detection.box_count | boxCount | Integer | ok 필수 | boxes 개수와 일치해야 함 |
-| detection.boxes[].bbox_px | bboxPx | List\<Integer\> | 선택(nullable) | 존재 시 정확히 4개([x,y,w,h]), 각 ≥ 0 |
-| detection.boxes[].score | score | Double | 선택 | 0.0~1.0 |
-| detection.pallet.bbox_px | pallet.bboxPx | List\<Integer\> | 선택(nullable) | 존재 시 4개, 각 ≥ 0 |
-| detection.pallet.score | pallet.score | Double | 선택 | 0.0~1.0 |
-| distance.front_cm | frontCm | Double | ok 필수 | > 0 |
-| distance.std_cm | stdCm | Double | ok 필수 | ≥ 0 |
-| distance.frames_used | framesUsed | Integer | ok 필수 | > 0 |
-| dimensions.height_cm | heightCm | Double | ok 필수 | > 0 |
-| dimensions.width_cm | widthCm | Double | ok 필수 | > 0 |
-| dimensions.depth_cm | depthCm | Double | 항상 null | 값이 오면 거부 |
-| dimensions.miniature_scale | miniatureScale | Integer | ok 필수 | 반드시 10 |
-| dimensions.miniature_height_mm | miniatureHeightMm | Double | ok 필수 | height_cm과 수치 동일(±0.001) |
-| dimensions.miniature_width_mm | miniatureWidthMm | Double | ok 필수 | width_cm과 수치 동일(±0.001) |
-| load_balance.eccentric | eccentric | Boolean | ok 필수 | max(abs(ratio_x),abs(ratio_y)) > threshold와 일치 |
-| load_balance.direction | direction | List\<String\>→enum | ok 필수 | 0~2개, 중복 금지, left/right/front/back |
-| load_balance.ratio_x | ratioX | Double | ok 필수 | finite |
-| load_balance.ratio_y | ratioY | Double | ok 필수 | finite |
-| load_balance.magnitude | magnitude | Double | ok 필수 | max(abs(ratio_x),abs(ratio_y))와 일치(±0.001), ≥ 0 |
-| load_balance.threshold | threshold | Double | ok 필수 | ≥ 0 |
-| load_balance.message | message | String | 선택 | 표시용, 검증 안 함 |
+| measurementId | String | 필수 | — | UNIQUE, blank 불가, **100자 이하**. 중복 시 409 |
+| status | String→enum | 필수 | — | `ok` / `dimensions_only` / `no_detection` / `unreliable` (소문자 수신, 대문자 저장) |
+| cargoHeight | Double | status별 | **meter** | **화물만의 높이(팔레트 제외)**. `> 0`, finite |
+| tippingLevel | String→enum | status별 | — | `safe`/`warning`/`danger` 수신 → **`SAFE`/`WARNING`/`DANGER`로 정규화 저장** |
+| overhangRatio | Double | status별 | 무차원 비율 | `>= 0`, finite. **상한 강제 없음**(1.0 초과 가능) |
+| measuredAt | OffsetDateTime | 선택 | — | 장비 측정 시각. **저장 컬럼이 없어 현재는 버려진다**(아래 참고) |
 
-### 정책
+**받지 않는 필드**: `sessionId`(백엔드가 활성 세션 조회), `stationId`(FR-202에서 컬럼 삭제, 설비는 하나),
+`schemaVersion`(REST는 URL·DTO로 버전을 표현).
 
-- **status 정책**: `ok`이면 detection/distance/dimensions/load_balance가 모두 필요. `no_detection`/
-  `unreliable`이면 **dimensions·load_balance는 반드시 null**(강제). detection·distance는 **선택**으로
-  구현했다(제안 규격이 이 경우를 명시하지 않아 모호 → 선택 처리, 이 문서에 명시).
-- **depth_cm 항상 null**(2026-07-22 확정): 정면 단일 카메라로 깊이 측정 불가, 적재 단위가 파렛트(T-11)라
-  불필요. 값이 오면 거부한다.
-- **miniature 계산**: 실물 cm ÷ 10 = miniature cm, 이를 mm로 환산하면 원 실물 cm 수치와 같다
-  (예: 30.2cm ÷10 = 3.02cm = 30.2mm). 따라서 `miniature_height_mm == height_cm`,
-  `miniature_width_mm == width_cm`(허용 오차 0.001), `miniature_scale == 10`.
-- **direction enum**: left/right/front/back. 대각선이면 최대 2개. 중복 금지. (두 방향이 서로 수직이어야
-  한다는 제약은 두지 않았다 — `미확정`/`F 담당 합의 필요`.)
-- **ratio_x/y**: 파렛트 중심 대비 화물 중심 밀림. 화물 반폭 기준 정규화(0=중앙, ±1=반폭 이동). 부호 유지.
-- **eccentric/magnitude/threshold**: `magnitude = max(abs(ratio_x), abs(ratio_y))`,
-  `eccentric = (magnitude > threshold)`. 값이 이 규칙과 어긋나면 거부(스테이션이 계산해 보낸 값의 자기정합성 검증).
-- **bbox_px nullable**: 관제 오버레이 미사용 시 생략 가능. 존재하면 정수 4개, 각 ≥ 0.
-- **pallet 의미**: detection box와 별도 객체로 수신·저장한다(적재 파렛트). 일반 box로 합치지 않고 부모
-  테이블의 단일 컬럼 세트(`pallet_*`)로 보존한다.
+### status별 필드 조합
 
-### OffsetDateTime 저장 방식
+| status | cargoHeight | tippingLevel | overhangRatio | 의미 |
+|---|---|---|---|---|
+| `ok` | **필수**(> 0) | **필수** | **필수**(>= 0) | 정상 측정 |
+| `dimensions_only` | **필수**(> 0) | **null 강제** | **null 강제** | 파렛트 미검출 — 치수만 성공, 전복·돌출 판정 불가 |
+| `no_detection` | **null 강제** | **null 강제** | **null 강제** | 박스 없음 |
+| `unreliable` | **null 강제** | **null 강제** | **null 강제** | 거리 측정 실패 |
 
-MySQL/H2 공용 DATETIME은 타임존을 담지 못하므로, `measured_at`을 **UTC 변환 시각(`measured_at_utc`)과
-오프셋 분(`measured_at_offset_minutes`, 예: `+09:00` → 540)** 으로 분리 저장한다. 응답 시 두 값으로 원래
-`OffsetDateTime`을 손실 없이 복원한다(`+09:00`이 그대로 응답됨). 전역 Jackson 설정
-`spring.jackson.deserialization.adjust-dates-to-context-time-zone=false`로 수신 시 오프셋이 UTC로
-변환되지 않게 한다.
+값이 있으면 안 되는 자리에 값이 오면 **무시하지 않고 400으로 거부한다**(데스크탑의 잘못된 전송을 숨기지 않는다).
+
+### 단위 정책 — cm가 아니라 m다
+
+REST 계약의 `cargoHeight`는 **meter**이며 **화물만의 높이**다. 비전 원본은 cm(`height_cm`)이므로
+**cm → m 변환 책임은 측정 데스크탑(전송 측)에 있다**. 예: `72.3cm` → `"cargoHeight": 0.723`.
+
+백엔드는 단위를 추측해 자동 변환하지 **않는다** — `72.3`이 오면 72.3m로 저장한다. 자동으로 100을 나누면
+진짜 대형 화물과 단위 실수를 구분할 수 없다.
+
+**팔레트 높이는 `cargoHeight`에 포함하지 않는다.** 적재 높이 판정에서 백엔드가 설정값
+`storage.placement.pallet-height-m`(기본 `0.12`, 환경변수 `STORAGE_PLACEMENT_PALLET_HEIGHT_M`)을
+`PlacementService`에서 **정확히 한 번** 더한다.
+
+```
+requiredHeight = cargoHeight + storage.placement.pallet-height-m + storage.placement.height-clearance
+```
+
+비전의 `total_height_cm`(화물+파렛트)을 `cargoHeight`에 넣으면 팔레트 높이가 **두 번** 더해진다.
+
+### 세션 연결 — 요청은 sessionId를 보내지 않는다
+
+```
+POST /api/stations/measurements
+  → StationSessionMapper.findActiveSession()
+  → activeSession.sessionId 를 StationMeasurement.sessionId 에 설정
+  → INSERT
+```
+
+활성 세션이 없으면 **409 `STATION_SESSION_NOT_ACTIVE`** 이고 저장하지 않는다. 세션을 새로 만들어 붙이지
+않는다 — 어느 화물의 측정인지 알 수 없기 때문이다. 세션은 `POST /api/stations/sessions?cargoId=...`로 먼저 연다.
+
+> ⚠️ **late arrival을 완전히 막을 수 없다.** 요청이 `sessionId`를 전달하지 않으므로, 화물 A의 측정 결과가
+> 세션 A 종료·세션 B 시작 이후에 늦게 도착하면 백엔드는 그것을 **세션 B의 결과로 저장**한다. 현재 저장
+> 구조로는 이를 판별할 근거가 없다(`measurementId`에 세션 정보가 없고, `measured_at` 컬럼도 없어 세션
+> 시작 시각과 비교할 수 없다). 완전 차단이 필요하면 요청에 `sessionId`를 포함시켜 `active_session_id`와
+> 대조해야 한다.
+
+### 중복 measurement_id 정책
+
+DB UNIQUE + Service 사전 확인(`existsByMeasurementId`)으로 이중 방어. 동일 `measurementId` 재전송 시
+**409 `STATION_MEASUREMENT_ID_DUPLICATED`** 를 반환하고 **기존 행을 갱신하지 않으며, 새 행도 만들지 않고,
+WebSocket 재발행도 하지 않는다.**
+
+(MQTT 시절에는 응답할 상대가 없어 "경고 로그 후 무시"였다. REST는 호출자가 결과를 알아야 하므로 바뀌었다.)
+
+### 오류 처리
+
+REST 경로는 `BusinessException`을 **삼키지 않는다** — `GlobalExceptionHandler`가 HTTP 상태로 옮긴다.
+
+| ErrorCode | HTTP |
+|---|---|
+| `STATION_MEASUREMENT_INVALID`, `STATION_MEASUREMENT_STATUS_INVALID`, `STATION_MEASUREMENT_DIMENSIONS_INVALID` | 400 |
+| `STATION_MEASUREMENT_ID_DUPLICATED`, `STATION_SESSION_NOT_ACTIVE`, `STATION_ALREADY_OCCUPIED` | 409 |
+| `STATION_MEASUREMENT_NOT_FOUND`, `STATION_SESSION_NOT_FOUND` | 404 |
+
+### measured_at 미저장
+
+현재 `station_measurement`에는 **`measured_at` 컬럼이 없다**. `created_at`(수신 시각)만 남으므로:
+
+- 장비 측정 시각은 **저장되지 않는다**(DTO에서 받아 검증만 하고 버린다)
+- 최신 조회 정렬은 `sequence_no DESC`(**수신 순서**)를 쓴다
+- 중복 판정에도 쓰지 않는다(`measurement_id`만 본다)
+- 결과적으로 **실제 측정 시각 추적이 불가능**하다
+
+컬럼 추가는 이번 범위 밖이다.
 
 ### DB 저장 테이블
 
-- `station_measurement`(부모, 1건) + `station_measurement_box`(자식 detection box, 1:N). pallet은 부모의
-  `pallet_*` 컬럼에 보존. 상세는 `docs/backend-db/database-schema.md` 참고.
+`station_measurement` 단일 테이블(FR-202 8컬럼). 옛 `station_measurement_box`·`pallet_*`·
+`measured_at_utc`/`measured_at_offset_minutes`는 FR-202 재설계에서 이미 사라졌다.
+
+| REST 필드 | DB 컬럼 | 변환 |
+|---|---|---|
+| measurementId | `measurement_id` | 없음 |
+| (활성 세션) | `session_id` | 백엔드가 조회해 주입 |
+| status | `status` | 소문자 → enum → **대문자** |
+| cargoHeight | `cargo_height` | 없음(m 그대로) |
+| tippingLevel | `tipping_level` | 소문자 → **대문자**(DB CHECK가 대문자만 허용) |
+| overhangRatio | `overhang_ratio` | 없음 |
+| (서버 시각) | `created_at` | `LocalDateTime.now()` |
 
 ### WebSocket destination
 
 | destination | eventType | payload |
 |---|---|---|
-| `/topic/stations/measurements`(전체) | `STATION_MEASUREMENT_COMPLETED` | `StationMeasurementEvent`(envelope) |
-| `/topic/stations/{stationId}/measurements`(스테이션별) | 동일 | 동일 |
+| `/topic/stations/measurements`(전체) | `STATION_MEASUREMENT_COMPLETED` | `RealtimeEvent<StationMeasurementResponse>` |
+| `/topic/stations/{sessionId}/measurements`(세션별) | 동일 | 동일 |
 
-envelope: 공통 `RealtimeEvent` — `{ "eventType", "vehicleId": null, "occurredAt", "data": StationMeasurementResponse }`
-(§5.1 참고). 스테이션은 차량과 독립적으로 동작해 측정 결과에 차량이 배정되지 않으므로 `vehicleId`는 항상
-null이고, `stationId`/`measurementId`는 최상위로 올리지 않고 `data` 안에 유지된다. destination은 기존
-스테이션 전용 경로를 그대로 쓴다(공통화 대상은 payload 구조이지 경로가 아니다).
+저장이 성공한 경우에만 1회 발행한다. 검증 실패·중복(409)에는 발행하지 않는다. 전송 실패는 Broadcaster가
+잡아 로그만 남긴다(커밋된 저장이 전송 실패로 뒤집히지 않게).
 
 ### 조회 REST API
 
 | Method | URL | 설명 | 오류 |
 |---|---|---|---|
-| GET | `/api/stations/measurements/{measurementId}` | measurement 단건 | 없음 → 404 `STATION_MEASUREMENT_NOT_FOUND` |
-| GET | `/api/stations/{stationId}/measurements/latest` | 스테이션 최신(measured_at 기준) | 없음 → 404 |
-
-수신용 HTTP POST는 이번 범위에서 **미구현**(MQTT 기본). 목록 API도 이번 범위 밖(후속 항목).
-
-### 중복 measurement_id 정책
-
-DB UNIQUE + Service 사전 확인(`existsByMeasurementId`)으로 이중 방어. 동일 measurement_id 재수신 시
-**기존 저장값을 덮어쓰지 않고 무시**(경고 로그 후 정상 종료).
-
-### 오류 처리
-
-검증 실패는 `STATION_MEASUREMENT_*` ErrorCode(기존 예외 체계)로 표현하고, `process()` 내부에서 잡아
-경고 로그만 남긴 뒤 **해당 메시지만 폐기**한다(MQTT Receiver 전체는 계속 동작). 부모 insert 이후 자식
-insert 실패 등 예상치 못한 예외는 `@Transactional`로 함께 롤백된다.
+| GET | `/api/stations/measurements/{measurementId}` | measurement 단건 | 없음 → 404 |
+| GET | `/api/stations/sessions/{sessionId}/measurements/latest` | 세션 최신(`sequence_no` 기준) | 없음 → 404 |
+| POST | `/api/stations/sessions?cargoId=...` | 세션 열기 | 점유 중이면 409 |
+| DELETE | `/api/stations/sessions/{sessionId}` | 세션 닫기 | 활성 아니면 409 |
+| GET | `/api/stations/sessions/active` | 현재 활성 세션 | 없으면 409 |
 
 ### `cargo/detected`(AI 화물 분석) 규격과의 차이
 
-| 항목 | cargo/detected (AI) | fast/station (측정 스테이션) |
+| 항목 | cargo/detected (AI) | 측정 스테이션 |
 |---|---|---|
-| 토픽 | `cargo/detected` | `fast/station/{station_id}/measurement` |
-| JSON 키 | camelCase | **snake_case**(@JsonProperty) |
-| 시각 | `capturedAt`/`processedAt` LocalDateTime | `measured_at` **OffsetDateTime**(+09:00 보존) |
-| 식별자 | analysisId | measurementId + **station_id** |
-| 상태 값 | ok/no_detection/unreliable(동일) | ok/no_detection/unreliable |
-| pallet | 개념 없음(일반 박스) | **별도 객체·별도 저장** |
-| 치수 scale | `scale`(REAL/MINIATURE) | `miniature_scale`=10 + mm 필드 + 자기정합성 검증 |
-| 편하중 | direction+message, ratios(별도) | eccentric/direction/ratio_x·y/magnitude/threshold |
-| depth | 허용(값 가능) | **항상 null 강제** |
-| 저장 테이블 | ai_cargo_analysis / ai_cargo_detection_box | station_measurement / station_measurement_box |
+| 수신 경로 | **MQTT** `cargo/detected` | **REST** `POST /api/stations/measurements` |
+| JSON 키 | camelCase | camelCase |
+| 식별자 | analysisId | measurementId (+ 활성 sessionId) |
+| 상태 값 | ok/no_detection/unreliable | ok/**dimensions_only**/no_detection/unreliable |
+| 높이 단위 | cm | **m(화물만)** |
+| 저장 테이블 | ai_cargo_analysis / ai_cargo_detection_box | station_measurement |
 | WebSocket | `/topic/ai/cargo-analysis` | `/topic/stations/measurements` |
 
 ### 외부 연동 확인 필요 / 합의 필요
 
-- `외부 연동 확인 필요`: 실제 스테이션 PC의 MQTT 발행, Mosquitto Broker 송수신, 프론트 STOMP 구독·표시.
-- 합의 필요(특히 D=ROS2 아님, **F=프론트 / AI 담당**):
-  1. direction enum이 프론트 표시 로직과 일치하는지(수직 2개 제약 여부 포함)
-  2. bbox_px를 최종적으로 유지할지(관제 오버레이 사용 여부)
-  4. HTTP POST 대안 도입 여부 — 이번 구현은 MQTT만, HTTP POST는 **대안 검토 가능**으로만 남김
-
+- `외부 연동 확인 필요`: 측정 데스크탑의 실제 REST 호출, 프론트 STOMP 구독·표시.
+- 합의 필요:
+  1. 측정 데스크탑이 **cm → m 변환**을 실제로 수행하는지(백엔드는 변환하지 않는다)
+  2. `tippingLevel` 대소문자 — 백엔드가 둘 다 받아 대문자로 저장하므로 **차단 요인은 아님**
+  3. late arrival 차단이 필요하면 요청에 `sessionId`를 포함할지
+  4. `measured_at` 컬럼 추가 여부
 ---
 
 _기준: 이 문서는 2026-07-24 워킹트리의 운영 코드를 근거로 작성됐다. DTO/토픽/destination이 코드에서
 바뀌면 이 문서도 함께 갱신할 것._
+
+---
+
+# EC2·Isaac MQTT 연동 규격 (2026-07-30 추가)
+
+> prompt93 39~43항. **새 파일을 만들지 않고 이 문서에 덧붙였다**(기존 통신 규격 문서가 이미 있으므로).
+> 아래 내용은 **현재 실행 코드 기준**이며, 이 문서 앞부분(2026-07-24 기준)에는
+> FR-202 전환으로 **삭제된 토픽**(`cargo/detected`, `forklift/+/load-safety`)이 남아 있으니 주의할 것.
+
+## 1. Broker 연결
+
+| 항목 | 값 | 설정 키 |
+|---|---|---|
+| Host/Port | 환경변수로 주입(기본 `tcp://localhost:1883`) | `MQTT_BROKER_URL` |
+| TLS | **미사용**(기본 URL 이 `tcp://`). TLS 로 갈 경우 `ssl://…:8883` 으로 주입 | `MQTT_BROKER_URL` |
+| 인증 | username/password **선택**. 비어 있으면 `MqttConfig` 가 옵션에 아예 넣지 않는다 | `MQTT_USERNAME` / `MQTT_PASSWORD` |
+| clientId | 인바운드/아웃바운드 분리 (`fast-backend-inbound` / `fast-backend-outbound`) | `MQTT_INBOUND_CLIENT_ID` / `MQTT_OUTBOUND_CLIENT_ID` |
+| clean session | `true` | `mqtt.clean-session` |
+| automatic reconnect | `true` | `mqtt.automatic-reconnect` |
+| connection timeout | 10초 | `mqtt.connection-timeout` |
+| keep alive | 30초 | `mqtt.keep-alive-interval` |
+| 구독 QoS | **1** (모든 구독 토픽 동일) | `MQTT_DEFAULT_QOS` |
+| Retained | 발행은 **false** 고정. 수신 시 retained 플래그를 **로그로 남긴다** | `VehicleCommandPublisher.COMMAND_RETAINED` |
+
+**실제 호스트·계정·인증서 값은 이 문서에 기록하지 않는다.** 환경변수로만 주입한다.
+
+## 2. 차량 위치 토픽
+
+- **Topic**: `forklift/REAL-F01/location` (백엔드 구독 패턴은 `forklift/+/location` — 다중 차량 유지)
+- **QoS**: 1 · **Retained**: false
+- **Payload**
+```json
+{
+  "vehicleId": "REAL-F01",
+  "position": { "x": 1.0, "y": 2.0, "frameId": "map" },
+  "heading": 0.0,
+  "messageAt": "2026-07-27T10:30:45.304+09:00"
+}
+```
+- **필드 타입**: `vehicleId` String / `position.x`,`position.y` Double / `position.frameId` String /
+  `heading` Double / `messageAt` ISO-8601 offset 문자열
+- **단위**: x·y = **m**, heading = **degree**
+- **좌표계**: ROS `map` 프레임 (`frameId` 는 반드시 `"map"`)
+- **heading 기준**: **0° = +X, 90° = +Y**. 백엔드는 저장 전 `[0, 360)` 으로 정규화한다
+- **vehicleId 규칙**: `REAL-F01` (하이픈). `REAL_F01`(underscore)은 **거부**하며 자동 보정하지 않는다
+- **messageAt 형식**: `OffsetDateTime`. 절대시각(Instant)으로 비교한다
+
+## 3. Isaac 수정 사항
+
+| 기존(잘못된 형식) | 변경 후 |
+|---|---|
+| `REAL_F01` | **`REAL-F01`** |
+| 최상위 `x`, `y` | **`position.x`, `position.y`** |
+| `direction` (radian) | **`heading` (degree)** |
+| frameId 없음 | **`position.frameId = "map"` 필수** |
+| retained 미지정 | **`retained = false`** |
+
+- **radian → degree 변환은 발행 측(Isaac)이 한다.** 백엔드는 단위를 추측해 변환하지 않는다
+- `messageAt` 은 **단조 증가**해야 한다(뒤로 가면 stale 로 무시된다)
+
+## 4. 백엔드 검증
+
+| 검증 | 실패 시 |
+|---|---|
+| topic vehicleId == payload vehicleId | 경고 로그 후 폐기 (`Vehicle ID mismatch…`) |
+| vehicleId 형식(underscore 금지) | `rejected reason=vehicleId uses underscore…` |
+| `frameId == "map"` (null·blank·odom 포함 그 외 전부 거부) | `rejected reason=UNSUPPORTED_FRAME_ID … expectedFrameId=map` |
+| 좌표 유한값(NaN/Inf 금지) | 폐기 |
+| `messageAt` 필수 | 폐기 |
+| stale(과거 Instant) | `rejected reason=STALE_MESSAGE_AT …` |
+| duplicate(동일 Instant) | `rejected reason=DUPLICATE_MESSAGE_AT …` |
+| 미등록 차량 | `rejected reason=vehicle not registered …` |
+
+stale/duplicate 는 **서비스(절대시각 비교)와 SQL(조건부 upsert)** 양쪽에서 막는다.
+
+## 5. station measurement — **MQTT 아님(REST)**
+
+이 절의 옛 내용(`fast/station/{station_id}/measurement` 토픽, `StationMeasurementMessage` snake_case DTO,
+"tippingLevel/overhangRatio 는 수신 규격에 없어 항상 null 저장")은 **폐기됐다**. 전체 규격은
+§Measurement Station v2.0 (REST) 참고. 요약하면:
+
+- **수신**: `POST /api/stations/measurements` (MQTT 구독 없음)
+- **DTO**: `StationMeasurementCreateRequest` — **camelCase**
+- **tippingLevel**: 요청값을 받아 **대문자로 정규화해 실제 저장**한다(더 이상 null 하드코딩이 아니다)
+- **overhangRatio**: 요청값을 검증(`>= 0`, finite, 상한 없음)해 **실제 저장**한다
+- **단위**: `cargoHeight` = **meter, 화물만**. cm → m 변환은 측정 데스크탑 책임.
+  팔레트 높이는 `storage.placement.pallet-height-m`(0.12)를 `PlacementService`가 한 번만 더한다
+- **status**: `ok` / `dimensions_only` / `no_detection` / `unreliable` — status별 null 강제는 v2.0 절 표 참고
+- **남은 미확정 항목**
+  1. 측정 데스크탑이 cm → m 변환을 실제로 수행하는지(**외부 연동 확인 필요**)
+  2. late arrival 차단을 위해 요청에 `sessionId`를 넣을지
+  3. `measured_at` 컬럼 추가 여부(현재 미저장)
+
+## 6. 테스트 방법
+
+### 6.1 mosquitto_pub (개발, TLS 없음)
+
+```bash
+mosquitto_pub   -h <BROKER_HOST> -p <BROKER_PORT>   -t "forklift/REAL-F01/location"   -q 1   -m '{"vehicleId":"REAL-F01","position":{"x":1.0,"y":2.0,"frameId":"map"},"heading":0.0,"messageAt":"2026-07-27T10:30:45.304+09:00"}'
+```
+
+> `-r` 옵션은 **쓰지 않는다**. mosquitto_pub 은 기본이 retained=false 이고,
+> `-r false` 같은 문법은 존재하지 않는다(`-r` 은 값 없는 플래그다).
+
+### 6.2 TLS 환경
+
+```bash
+mosquitto_pub   -h <BROKER_HOST> -p 8883   --cafile <CA_CERT_PATH>   -t "forklift/REAL-F01/location"   -q 1   -m '{"vehicleId":"REAL-F01","position":{"x":1.0,"y":2.0,"frameId":"map"},"heading":0.0,"messageAt":"2026-07-27T10:30:45.304+09:00"}'
+```
+
+클라이언트 인증서를 쓰면 `--cert`, `--key` 를, 계정 인증이면 `-u`, `-P` 를 추가한다.
+**실제 비밀번호·개인키 경로는 커밋하지 않는다.**
+
+### 6.3 백엔드 수신 확인 절차
+
+1. 기동 로그에서 MQTT 연결 성공 확인
+2. 구독 로그에서 `forklift/+/location` 포함 확인
+3. Isaac 또는 mosquitto_pub 으로 발행
+4. `MQTT message received: topic=…, qos=…, retained=…` 로그 확인
+5. `[VehicleLocation] received …` → `[VehicleLocation] updated …` 로그 확인(거부 시 `rejected reason=…`)
+6. DB 확인
+
+```sql
+SELECT vehicle_id, position_x, position_y, heading, message_at, received_at
+  FROM vehicle_current_status
+ WHERE vehicle_id = 'REAL-F01';
+```
+
+7. REST/WebSocket 에서 최신 위치 확인
+
+### 6.4 실패 시나리오 (기대 동작)
+
+| 발행 내용 | 기대 결과 |
+|---|---|
+| `REAL_F01` | vehicleId 형식 오류로 폐기(자동 보정 없음) |
+| `frameId: "odom"` | `UNSUPPORTED_FRAME_ID` 로 폐기(저장·중계 모두 안 함) |
+| frameId 누락 | 동일하게 폐기(map 으로 보정하지 않음) |
+| topic `REAL-F01` / payload `REAL-F02` | topic-payload mismatch 로 폐기 |
+| 같은 `messageAt` 재발행 | `DUPLICATE_MESSAGE_AT` 무시 |
+| 더 오래된 `messageAt` | `STALE_MESSAGE_AT` 무시 |
+| radian heading (`1.57`) | **자동 변환하지 않는다.** 1.57° 로 저장되므로 Isaac 이 degree 로 변환해 발행해야 한다 |
+
+### 6.5 두 도메인의 독립성 (44항)
+
+- 차량 위치 `messageAt` = **위치 최신성 판정용**
+- station measurement 측정 시각 = **측정 이력 정렬·추적용**
+- 서로의 시각으로 stale/duplicate 를 판정하지 않는다. DTO 도 통합하지 않는다
