@@ -31,8 +31,7 @@ import cv2
 import numpy as np
 
 from perception.load_balance import BBox, Detection
-
-PAD_VALUE = 114
+from perception.preprocess import letterbox, to_tensor
 
 
 # slack 24px의 근거: eval 정답 라벨 221개에 필터를 걸어보니 8px에서는 **진짜 구멍 3개가
@@ -175,13 +174,34 @@ class TrtDetector:
         self._stream = cuda.Stream()
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
+        if self.rotate180:
+            frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
+        padded, scale = letterbox(frame_bgr, self.input_size)
+        return self.detect_letterboxed(padded, scale)
+
+    def detect_letterboxed(self, padded: np.ndarray, scale: float) -> list[Detection]:
+        """**이미 letterbox된** uint8 이미지로 추론한다 — 원격 추론 서버용 진입점.
+
+        스테이션 PC가 letterbox까지 하고 uint8 배열을 보내오면 여기부터 이어받는다.
+        `detect()`도 이 함수를 거치므로 로컬·원격 경로가 갈라지지 않는다.
+
+        ⚠️ `rotate180`은 적용하지 않는다. 이미 letterbox된 입력이라 회전은 호출자가
+        letterbox **전에** 끝냈어야 한다.
+        """
         cuda = self._cuda
-        tensor, scale = self._preprocess(frame_bgr)
+        tensor = to_tensor(padded, self._mean, self._std)
 
         np.copyto(self._host[self._in_name], tensor.ravel())
         cuda.memcpy_htod_async(self._dev[self._in_name],
                                self._host[self._in_name], self._stream)
-        self._ctx.execute_async_v3(self._stream.handle)
+        # ⚠️ **반환값을 반드시 본다.** 실패해도 예외가 아니라 False를 돌려주므로, 안 보면
+        # 직전 버퍼(보통 0)를 그대로 후처리해 **"검출 0개"라는 그럴듯한 오답**이 나간다.
+        # 2026-07-31 실측: CUDA 컨텍스트를 다른 스레드에서 쓰자 매 요청이 여기서 실패했는데,
+        # 서버는 200 + 검출 0개로 응답해 한참 뒤에야 알아챘다.
+        if not self._ctx.execute_async_v3(self._stream.handle):
+            raise RuntimeError(
+                "TensorRT 실행 실패 — CUDA 컨텍스트가 이 스레드 것이 맞는지 확인할 것"
+                "(pycuda 컨텍스트는 스레드에 묶인다)")
         for name in self._out_names:
             cuda.memcpy_dtoh_async(self._host[name], self._dev[name], self._stream)
         self._stream.synchronize()
@@ -192,20 +212,6 @@ class TrtDetector:
         labels = outs.get("labels", list(outs.values())[-1])
         result = self._postprocess(dets[0], labels[0], scale)
         return filter_by_geometry(result) if self.geometry_filter else result
-
-    def _preprocess(self, frame: np.ndarray) -> tuple[np.ndarray, float]:
-        if self.rotate180:
-            frame = cv2.rotate(frame, cv2.ROTATE_180)
-        h, w = frame.shape[:2]
-        size = self.input_size
-        scale = min(size / w, size / h)
-        new_w, new_h = int(round(w * scale)), int(round(h * scale))
-        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        padded = np.full((size, size, 3), PAD_VALUE, dtype=np.uint8)
-        padded[:new_h, :new_w] = resized
-        normalized = (padded.astype(np.float32) - self._mean) / self._std
-        tensor = normalized.transpose(2, 0, 1)[np.newaxis]
-        return np.ascontiguousarray(tensor, dtype=np.float32), scale
 
     def _postprocess(self, dets, labels, scale) -> list[Detection]:
         out: list[Detection] = []

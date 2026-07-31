@@ -85,12 +85,43 @@ def _measure_frame(row, args, cfg, detector):
 
 
 def _config(args) -> StationConfig:
-    """--box-score가 있으면 그 임계로 바꾼 config를 준다 (detector·판정 모두 적용)."""
+    """--box-score / --model 이 있으면 반영한 config를 준다 (detector·판정 모두 적용)."""
     cfg = StationConfig()
+    if getattr(args, "model", None):
+        # 모델 교체 후보를 **같은 촬영본**으로 A/B 하기 위한 override.
+        # 입력이 동일해야 변수가 모델 하나로 좁혀진다 — 리그를 다시 세우면 배치·조명이
+        # 달라져 무엇이 오차를 옮겼는지 못 가른다.
+        cfg = replace(cfg, model_path=Path(args.model))
     if args.box_score is None:
         return cfg
     return replace(cfg, class_score_thresholds={**cfg.class_score_thresholds,
                                                 "box": args.box_score})
+
+
+def _detector(args, cfg):
+    """검출기를 만든다 — ONNX(기본) 또는 젯슨 TensorRT 엔진.
+
+    `--engine`을 주면 `TrtDetector`를 쓴다. **모델 교체 후보를 실제 배포 형태로 채점**
+    하기 위한 경로다 — TensorRT용으로 export한 ONNX는 `mmdeploy::TRTBatchedNMS` 커스텀
+    op를 담고 있어 onnxruntime으로는 아예 로드되지 않으므로, 엔진으로 재는 수밖에 없다.
+    (그리고 어차피 배포될 물건이 엔진이라 이쪽이 더 정직한 채점이다.)
+
+    ⚠️ 젯슨에서만 돈다. tensorrt·pycuda가 필요하고 엔진은 그 보드에서 빌드된 것만 로드된다.
+    """
+    if getattr(args, "engine", None):
+        from perception.trt_detector import TrtDetector
+        return TrtDetector(
+            args.engine, args.plugin,
+            input_size=cfg.input_size, score_threshold=cfg.score_threshold,
+            class_names=cfg.class_names, norm_mean=cfg.norm_mean, norm_std=cfg.norm_std,
+            class_thresholds=cfg.class_score_thresholds,
+            # 스테이션은 hole 클래스가 없어 기하 필터가 할 일이 없다. 온보드 전용 로직이
+            # 채점에 끼어들지 않도록 명시적으로 끈다.
+            geometry_filter=False,
+        )
+    return OnnxDetector(cfg.model_path, cfg.input_size, cfg.score_threshold,
+                        cfg.class_names, cfg.norm_mean, cfg.norm_std,
+                        class_thresholds=cfg.class_score_thresholds)
 
 
 def _per_box(args) -> int:
@@ -100,9 +131,7 @@ def _per_box(args) -> int:
     **배경 오탐**으로 보고 따로 집계한다 (실측: 배경 물체가 score 0.5~0.7로 섞인다)."""
     rows = list(csv.DictReader((args.dir / "session.csv").open(encoding="utf-8")))
     cfg = _config(args)
-    detector = OnnxDetector(cfg.model_path, cfg.input_size, cfg.score_threshold,
-                            cfg.class_names, cfg.norm_mean, cfg.norm_std,
-                            class_thresholds=cfg.class_score_thresholds)
+    detector = _detector(args, cfg)
     cands = candidates()
 
     matched, suspects, frames = [], [], 0
@@ -174,6 +203,13 @@ def main(argv: list[str] | None = None) -> int:
     # 다중 박스 측정에서는 임계를 올려 오탐을 빼는 편이 낫다.
     parser.add_argument("--box-score", type=float,
                         help="박스 검출 임계 override (기본: config 값)")
+    parser.add_argument("--model", type=Path,
+                        help="ONNX 모델 override (기본: config의 models/end2end.onnx). "
+                             "같은 촬영본으로 모델 교체 후보를 A/B 할 때 쓴다")
+    parser.add_argument("--engine", type=Path,
+                        help="젯슨 TensorRT 엔진으로 채점 (ONNX 대신). 젯슨에서만 동작")
+    parser.add_argument("--plugin", type=Path,
+                        help="--engine 과 함께. libmmdeploy_tensorrt_ops.so 경로")
     args = parser.parse_args(argv)
 
     if args.per_box:
@@ -181,9 +217,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = list(csv.DictReader((args.dir / "session.csv").open(encoding="utf-8")))
     cfg = _config(args)
-    detector = OnnxDetector(cfg.model_path, cfg.input_size, cfg.score_threshold,
-                            cfg.class_names, cfg.norm_mean, cfg.norm_std,
-                            class_thresholds=cfg.class_score_thresholds)
+    detector = _detector(args, cfg)
     cands = candidates()
 
     results, skipped = [], []
