@@ -35,16 +35,22 @@
 > 요청 본문(camelCase, `sessionId`·`stationId` 는 보내지 않는다):
 >
 > ```json
-> { "measurementId": "station-1-20260731-093748-0001", "status": "ok",
+> { "sessionId": "<세션 생성 응답의 sessionId>",
+>   "measurementId": "station-1-20260731-093748-0001", "status": "ok",
 >   "cargoHeight": 0.723, "tippingLevel": "safe", "overhangRatio": 0.057,
 >   "measuredAt": "2026-07-31T09:37:48+09:00" }
 > ```
+>
+> - **`sessionId` 필수(2026-07-31).** 활성 세션과 다르면 409 `STATION_SESSION_MISMATCH`,
+>   활성 세션이 없으면 409 `STATION_SESSION_NOT_ACTIVE`, 누락·공백이면 400.
+>   재전송에서도 **원래 값을 유지**한다(새 세션 값으로 바꾸면 늦은 측정이 새 세션에 귀속된다).
 >
 > - `cargoHeight` 는 **meter, 화물만**(팔레트 제외). cm → m 변환은 측정 데스크탑 책임이며 백엔드는
 >   단위를 추측해 변환하지 않는다. 팔레트 높이는 `storage.placement.pallet-height-m`(0.12)을
 >   `PlacementService` 가 **정확히 한 번** 더한다.
 > - `tippingLevel` 은 소문자 입력을 받아 **대문자로 정규화해 저장**한다.
 > - `status` 는 `ok` / `dimensions_only` / `no_detection` / `unreliable`.
+> - `sessionId` 는 필수이며 현재 활성 세션과 일치해야 한다(불일치 시 409 `STATION_SESSION_MISMATCH`).
 > - **동시에 활성 세션은 1개**, **세션당 최종 측정 결과는 1건**, **측정 결과 저장 전에는 세션 종료 불가**.
 >   측정 결과가 저장되면 status 와 무관하게 세션을 종료할 수 있다.
 > - 적재 추천은 `status=OK` + 높이 유효 + `SAFE` + `overhangRatio < 0.05` 를 **모두** 만족할 때만 실행된다.

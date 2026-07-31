@@ -9,8 +9,11 @@ import { cn } from "@/lib/utils"
  * 활성 차량 전체에 대한 비상정지 제어 바.
  *
  * NOTE(FR-503): 실제 API(`POST /api/vehicles/commands/emergency-stop-all`)에 연결돼 있다.
- * 확인 다이얼로그와 요청 상태 관리는 상위(MonitoringPage)가 담당하고,
- * 이 컴포넌트는 활성 차량 수 표시와 버튼 상태만 책임진다.
+ * 요청 상태 관리는 상위(MonitoringPage)가 담당하고, 이 컴포넌트는 활성 차량 수 표시와
+ * 버튼 상태만 책임진다.
+ *
+ * 확인 다이얼로그는 없다(prompt79) — 클릭 한 번으로 즉시 발행된다. 중복 발행은 `pending`
+ * 동안의 disabled 로만 막는다.
  */
 export function GlobalEmergencyStopBar({
   onTriggerAll,

@@ -51,7 +51,7 @@ class StationSessionLifecycleIntegrationTest {
     void fullHappyPath_openMeasureCloseThenNextSessionCanStart() throws Exception {
         String sessionId = openSession("SSL-CARGO-1");
 
-        postMeasurement("M-OK-1", okBody("M-OK-1", 0.723, "safe", 0.02))
+        postMeasurement("M-OK-1", okBody(sessionId, "M-OK-1", 0.723, "safe", 0.02))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.sessionId").value(sessionId))
                 .andExpect(jsonPath("$.data.cargoId").value("SSL-CARGO-1"))
@@ -98,12 +98,12 @@ class StationSessionLifecycleIntegrationTest {
 
     @Test
     void secondMeasurementInSameSession_is409AndFirstResultIsKept() throws Exception {
-        openSession("SSL-CARGO-1");
-        postMeasurement("M-FIRST", okBody("M-FIRST", 0.5, "safe", 0.01))
+        String sessionId = openSession("SSL-CARGO-1");
+        postMeasurement("M-FIRST", okBody(sessionId, "M-FIRST", 0.5, "safe", 0.01))
                 .andExpect(status().isCreated());
 
         // 다른 measurementId 지만 같은 세션 — measurementId 중복과 다른 오류여야 한다.
-        postMeasurement("M-SECOND", okBody("M-SECOND", 0.9, "danger", 0.4))
+        postMeasurement("M-SECOND", okBody(sessionId, "M-SECOND", 0.9, "danger", 0.4))
                 .andExpect(status().isConflict());
 
         assertThat(measurementMapper.findByMeasurementId("M-SECOND")).isEmpty();
@@ -113,9 +113,9 @@ class StationSessionLifecycleIntegrationTest {
 
     @Test
     void resendingSameMeasurementId_is409() throws Exception {
-        openSession("SSL-CARGO-1");
-        postMeasurement("M-DUP", okBody("M-DUP", 0.5, "safe", 0.01)).andExpect(status().isCreated());
-        postMeasurement("M-DUP", okBody("M-DUP", 0.9, "safe", 0.01)).andExpect(status().isConflict());
+        String sessionId = openSession("SSL-CARGO-1");
+        postMeasurement("M-DUP", okBody(sessionId, "M-DUP", 0.5, "safe", 0.01)).andExpect(status().isCreated());
+        postMeasurement("M-DUP", okBody(sessionId, "M-DUP", 0.9, "safe", 0.01)).andExpect(status().isConflict());
 
         assertThat(measurementMapper.findByMeasurementId("M-DUP").orElseThrow().getCargoHeight())
                 .isEqualTo(0.5);
@@ -123,10 +123,74 @@ class StationSessionLifecycleIntegrationTest {
 
     @Test
     void measurementWithoutActiveSession_is409() throws Exception {
-        postMeasurement("M-NOSESSION", okBody("M-NOSESSION", 0.5, "safe", 0.01))
+        postMeasurement("M-NOSESSION", okBody("no-such-session", "M-NOSESSION", 0.5, "safe", 0.01))
                 .andExpect(status().isConflict());
 
         assertThat(measurementMapper.findByMeasurementId("M-NOSESSION")).isEmpty();
+    }
+
+    // ── 늦은 측정 차단 (prompt107) ─────────────────────────────────────────
+
+    @Test
+    void lateMeasurementFromReleasedSession_isRejected_andNotStored() throws Exception {
+        String sessionA = openSession("SSL-CARGO-1");
+        // 측정 없이 강제 해제 — 데스크탑이 측정 전에 죽은 상황이다.
+        mockMvc.perform(delete("/api/stations/sessions/{id}/force", sessionA))
+                .andExpect(status().isOk());
+
+        // 세션 A 가 뒤늦게 측정을 보낸다. 활성 세션이 없으므로 거부돼야 한다.
+        postMeasurement("M-LATE-A", okBody(sessionA, "M-LATE-A", 0.723, "safe", 0.01))
+                .andExpect(status().isConflict());
+
+        assertThat(measurementMapper.findByMeasurementId("M-LATE-A")).isEmpty();
+    }
+
+    @Test
+    void lateMeasurementIsNotAttributedToTheNewSession() throws Exception {
+        String sessionA = openSession("SSL-CARGO-1");
+        mockMvc.perform(delete("/api/stations/sessions/{id}/force", sessionA))
+                .andExpect(status().isOk());
+
+        // 새 세션 B 가 열린 뒤 세션 A 의 늦은 측정이 도착한다 — 이번 변경이 막으려는 바로 그 상황.
+        String sessionB = openSession("SSL-CARGO-2");
+
+        postMeasurement("M-LATE-A", okBody(sessionA, "M-LATE-A", 0.723, "safe", 0.01))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false));
+
+        // 저장되지 않았고, 세션 B 가 오염되지도 않았다.
+        assertThat(measurementMapper.findByMeasurementId("M-LATE-A")).isEmpty();
+        assertThat(measurementMapper.existsBySessionId(sessionB)).isFalse();
+
+        // 세션 B 자신의 측정은 정상 저장된다.
+        postMeasurement("M-B", okBody(sessionB, "M-B", 0.5, "safe", 0.0))
+                .andExpect(status().isCreated());
+        assertThat(measurementMapper.findByMeasurementId("M-B").orElseThrow().getSessionId())
+                .isEqualTo(sessionB);
+    }
+
+    @Test
+    void measurementWithMissingSessionId_is400() throws Exception {
+        openSession("SSL-CARGO-1");
+
+        postMeasurement("M-NOSID", """
+                {"measurementId":"M-NOSID","status":"ok","cargoHeight":0.723,
+                 "tippingLevel":"safe","overhangRatio":0.01,"measuredAt":"2026-07-31T09:37:48+09:00"}
+                """)
+                .andExpect(status().isBadRequest());
+
+        assertThat(measurementMapper.findByMeasurementId("M-NOSID")).isEmpty();
+    }
+
+    @Test
+    void storedSessionIdEqualsRequestedSessionId() throws Exception {
+        String sessionId = openSession("SSL-CARGO-1");
+
+        postMeasurement("M-SID", okBody(sessionId, "M-SID", 0.723, "safe", 0.01))
+                .andExpect(status().isCreated());
+
+        assertThat(measurementMapper.findByMeasurementId("M-SID").orElseThrow().getSessionId())
+                .isEqualTo(sessionId);
     }
 
     // ── status 별: 저장·종료는 되고 추천만 막힌다 ───────────────────────────
@@ -136,9 +200,9 @@ class StationSessionLifecycleIntegrationTest {
         String sessionId = openSession("SSL-CARGO-1");
 
         postMeasurement("M-DIM", """
-                {"measurementId":"M-DIM","status":"dimensions_only","cargoHeight":0.723,
+                {"sessionId":"%s","measurementId":"M-DIM","status":"dimensions_only","cargoHeight":0.723,
                  "tippingLevel":null,"overhangRatio":null,"measuredAt":"2026-07-31T09:38:48+09:00"}
-                """)
+                """.formatted(sessionId))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.cargoHeight").value(0.723))
                 .andExpect(jsonPath("$.data.tippingLevel").doesNotExist())
@@ -153,13 +217,13 @@ class StationSessionLifecycleIntegrationTest {
     @Test
     void noDetectionAndUnreliable_areStoredAndCloseSession_butAreNotPlacementEligible() throws Exception {
         String first = openSession("SSL-CARGO-1");
-        postMeasurement("M-ND", nullBody("M-ND", "no_detection"))
+        postMeasurement("M-ND", nullBody(first, "M-ND", "no_detection"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.placementEligible").value(false));
         mockMvc.perform(delete("/api/stations/sessions/{id}", first)).andExpect(status().isOk());
 
         String second = openSession("SSL-CARGO-2");
-        postMeasurement("M-UN", nullBody("M-UN", "unreliable"))
+        postMeasurement("M-UN", nullBody(second, "M-UN", "unreliable"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.placementEligible").value(false));
         mockMvc.perform(delete("/api/stations/sessions/{id}", second)).andExpect(status().isOk());
@@ -170,7 +234,7 @@ class StationSessionLifecycleIntegrationTest {
         String sessionId = openSession("SSL-CARGO-1");
 
         // WARNING 은 저장은 되지만 추천 대상이 아니다 — 저장 조건과 추천 조건은 별개다.
-        postMeasurement("M-WARN", okBody("M-WARN", 0.723, "warning", 0.01))
+        postMeasurement("M-WARN", okBody(sessionId, "M-WARN", 0.723, "warning", 0.01))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.tippingLevel").value("WARNING"))
                 .andExpect(jsonPath("$.data.placementEligible").value(false));
@@ -180,10 +244,10 @@ class StationSessionLifecycleIntegrationTest {
 
     @Test
     void okButOverhangAtLimit_isStored_butIsNotPlacementEligible() throws Exception {
-        openSession("SSL-CARGO-1");
+        String sessionId = openSession("SSL-CARGO-1");
 
         // 0.05 는 경계 미포함이라 차단된다.
-        postMeasurement("M-OVER", okBody("M-OVER", 0.723, "safe", 0.05))
+        postMeasurement("M-OVER", okBody(sessionId, "M-OVER", 0.723, "safe", 0.05))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.overhangRatio").value(0.05))
                 .andExpect(jsonPath("$.data.placementEligible").value(false));
@@ -215,18 +279,19 @@ class StationSessionLifecycleIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
-    private String okBody(String measurementId, double cargoHeight, String tippingLevel, double overhang) {
+    private String okBody(String sessionId, String measurementId, double cargoHeight,
+            String tippingLevel, double overhang) {
         return """
-                {"measurementId":"%s","status":"ok","cargoHeight":%s,
+                {"sessionId":"%s","measurementId":"%s","status":"ok","cargoHeight":%s,
                  "tippingLevel":"%s","overhangRatio":%s,"measuredAt":"2026-07-31T09:37:48+09:00"}
-                """.formatted(measurementId, cargoHeight, tippingLevel, overhang);
+                """.formatted(sessionId, measurementId, cargoHeight, tippingLevel, overhang);
     }
 
-    private String nullBody(String measurementId, String status) {
+    private String nullBody(String sessionId, String measurementId, String status) {
         return """
-                {"measurementId":"%s","status":"%s","cargoHeight":null,
+                {"sessionId":"%s","measurementId":"%s","status":"%s","cargoHeight":null,
                  "tippingLevel":null,"overhangRatio":null,"measuredAt":"2026-07-31T09:37:48+09:00"}
-                """.formatted(measurementId, status);
+                """.formatted(sessionId, measurementId, status);
     }
 
     private void insertCargo(String cargoId) {

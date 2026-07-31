@@ -9,9 +9,12 @@ import java.time.OffsetDateTime;
  * (detection/distance/miniature/loadBalance 상세)을 통째로 받았지만, 그중 저장되는 값은 네 개뿐이었다.
  * 이 DTO는 <b>저장되는 값만</b> camelCase로 받는다 — 받아서 버리는 필드를 계약에 남기지 않는다.
  *
+ * <p><b>{@code sessionId} 는 필수다(prompt107).</b> 예전에는 받지 않고 백엔드가 활성 세션을 조회해
+ * 붙였는데, 그러면 세션 A 가 TTL·force 로 해제되고 세션 B 가 열린 뒤 도착한 A 의 늦은 측정이
+ * <b>B 에 잘못 귀속</b>된다. 요청이 자기 출처 세션을 밝혀야 백엔드가 그것을 걸러낼 수 있다.
+ *
  * <p><b>받지 않는 필드와 그 이유</b>
  * <ul>
- *   <li>{@code sessionId} — 백엔드가 현재 활성 세션을 조회해 붙인다(7장). 데스크탑이 세션을 알 필요가 없다.</li>
  *   <li>{@code stationId} — FR-202 스키마에서 컬럼이 사라졌다(측정 설비는 하나뿐이다).</li>
  *   <li>{@code schemaVersion} — REST 계약은 URL·DTO로 버전을 표현한다. 페이로드 안에 또 둘 이유가 없다.</li>
  * </ul>
@@ -19,6 +22,10 @@ import java.time.OffsetDateTime;
  * <p>검증은 이 record가 아니라 {@code StationMeasurementService}가 한다 — status에 따라 어떤 필드가
  * 필수/null 이어야 하는지가 달라서(15장) Bean Validation 애너테이션 하나로는 표현되지 않는다.
  *
+ * @param sessionId     이 측정이 속한 세션. 세션 생성 응답으로 받은 값을 그대로 보낸다.
+ *                      현재 활성 세션과 다르면 409 {@code STATION_SESSION_MISMATCH} 로 거부된다 —
+ *                      재전송할 때도 <b>측정 시점의 값을 유지</b>해야 한다(새 세션 값으로 바꾸면
+ *                      막으려던 오귀속이 그대로 발생한다).
  * @param measurementId 외부 측정 결과 고유 식별자. 필수, blank 불가, 100자 이하, 중복 시 409.
  * @param status        {@code ok} / {@code dimensions_only} / {@code no_detection} / {@code unreliable}.
  *                      대소문자는 {@code StationMeasurementStatus#fromRaw}가 흡수한다.
@@ -30,6 +37,7 @@ import java.time.OffsetDateTime;
  *                      {@code created_at}(수신 시각)만 남는다. 컬럼 추가는 이번 범위 밖(5장).
  */
 public record StationMeasurementCreateRequest(
+        String sessionId,
         String measurementId,
         String status,
         Double cargoHeight,

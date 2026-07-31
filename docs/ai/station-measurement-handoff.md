@@ -34,14 +34,26 @@
 > | `tippingLevel` | `tipping.level` | 소문자 그대로 보내면 백엔드가 대문자로 저장 |
 > | `overhangRatio` | `tipping.overhang` | 없음 |
 > | `measuredAt` | `measured_at` | 없음(단, **백엔드에 저장 컬럼이 없어 버려진다**) |
+> | **`sessionId`** | (측정 시점의 세션) | **필수.** 세션 생성 응답의 `sessionId` 를 그대로 |
 >
 > ```
 > POST /api/stations/measurements   Content-Type: application/json
-> { "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
+> { "sessionId": "<세션 생성 응답의 sessionId>",
+>   "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
 >   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
 > ```
 >
-> **`sessionId`/`stationId`는 보내지 않는다** — 백엔드가 활성 세션을 조회해 붙인다.
+> **`sessionId` 는 필수다(2026-07-31 계약 변경).** 예전에는 보내지 않고 백엔드가 활성 세션을 찾아
+> 붙였는데, 그러면 세션 A 가 TTL·강제 해제로 풀리고 세션 B 가 열린 뒤 도착한 A 의 늦은 측정이
+> **B 에 잘못 귀속**된다. 이제 요청이 자기 출처 세션을 밝히고 백엔드가 대조한다.
+>
+> - `POST /api/stations/sessions?cargoId=...` 응답의 `sessionId` 를 그대로 싣는다
+> - **재전송할 때도 원래 값을 유지한다** — 새 세션 값으로 바꾸면 막으려던 오귀속이 발생한다
+> - 활성 세션과 다르면 409 `STATION_SESSION_MISMATCH`, 활성 세션이 없으면 409 `STATION_SESSION_NOT_ACTIVE`
+> - 두 오류는 **재시도 대상이 아니다**(stale). 네트워크·5xx 재시도는 하되 `sessionId` 는 바꾸지 않는다
+> - 누락·공백이면 400 — 백엔드가 값을 추측하거나 활성 세션으로 대체하지 않는다
+>
+> `stationId` 는 여전히 보내지 않는다(FR-202 에서 컬럼이 사라졌다).
 > 나머지 필드(detection/distance/load_balance/box_measurements/miniature/total_height)는
 > **백엔드에 저장되지 않는다.** 전체 규격은 `docs/backend-message/communication-protocol.md`
 > §Measurement Station v2.0 (REST) 참고.
