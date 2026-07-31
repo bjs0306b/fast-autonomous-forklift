@@ -179,7 +179,7 @@ public class MonitoringService {
                         CommunicationTime.toOffset(currentTask.getUpdatedAt()));
         OffsetDateTime lastUpdatedAt = s.messageAt() != null ? s.messageAt() : s.receivedAt();
         return new DashboardResponse.VehicleView(
-                vr.vehicleId(), vr.name(), vr.active(),
+                vr.vehicleId(), vr.name(), vr.source(), vr.active(),
                 s.status(), locationView, currentTaskView, lastUpdatedAt);
     }
 

@@ -4,6 +4,7 @@ import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.dto.VehicleDetailResponse;
@@ -52,7 +53,7 @@ class VehicleServiceTest {
         when(vehicleMapper.existsByVehicleId("SIM-F01")).thenReturn(false);
 
         VehicleDetailResponse response = vehicleService.register(
-                new VehicleCreateRequest("SIM-F01", "시뮬레이션 지게차 1호"));
+                new VehicleCreateRequest("SIM-F01", "시뮬레이션 지게차 1호", VehicleSource.SIMULATION));
 
         verify(vehicleMapper).insert(any(Vehicle.class));
         ArgumentCaptor<VehicleCurrentStatus> statusCaptor = ArgumentCaptor.forClass(VehicleCurrentStatus.class);
@@ -62,6 +63,7 @@ class VehicleServiceTest {
         assertThat(statusCaptor.getValue().getMessageAt()).isNull();
         assertThat(statusCaptor.getValue().getReceivedAt()).isNotNull();
         assertThat(response.vehicleId()).isEqualTo("SIM-F01");
+        assertThat(response.source()).isEqualTo(VehicleSource.SIMULATION);
         assertThat(response.active()).isTrue();
         assertThat(response.status().status()).isEqualTo(VehicleStatus.UNKNOWN);
     }
@@ -71,7 +73,7 @@ class VehicleServiceTest {
         when(vehicleMapper.existsByVehicleId("SIM-F01")).thenReturn(true);
 
         BusinessException exception = catchThrowableOfType(
-                () -> vehicleService.register(new VehicleCreateRequest("SIM-F01", "x")),
+                () -> vehicleService.register(new VehicleCreateRequest("SIM-F01", "x", VehicleSource.SIMULATION)),
                 BusinessException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.VEHICLE_ID_DUPLICATED);
@@ -193,10 +195,13 @@ class VehicleServiceTest {
 
     private Vehicle vehicle(String vehicleId) {
         Vehicle vehicle = new Vehicle();
+        vehicle.setId(1L);
         vehicle.setVehicleId(vehicleId);
         vehicle.setName(vehicleId + " 이름");
+        vehicle.setSource(VehicleSource.SIMULATION);
         vehicle.setActive(true);
         vehicle.setCreatedAt(LocalDateTime.now());
+        vehicle.setUpdatedAt(LocalDateTime.now());
         return vehicle;
     }
 

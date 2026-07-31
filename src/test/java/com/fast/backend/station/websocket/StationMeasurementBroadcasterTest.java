@@ -96,6 +96,8 @@ class StationMeasurementBroadcasterTest {
                 OffsetDateTime.of(2026, 7, 22, 13, 5, 1, 0, ZoneOffset.ofHours(9)),
                 StationMeasurementStatus.OK,
                 null, null, null, null,
-                LocalDateTime.of(2026, 7, 22, 13, 5, 2));
+                LocalDateTime.of(2026, 7, 22, 13, 5, 2),
+                // prompt96 에서 추가된 세션·안전 필드. 이 테스트는 브로드캐스트 경로만 검증하므로 최소값.
+                "session-1", "CARGO-1", 0.72, "SAFE", 0.01, true);
     }
 }

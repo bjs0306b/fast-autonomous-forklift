@@ -15,15 +15,30 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * {@code requiredHeight = cargoHeight + palletHeightM + heightClearance}. 팔레트 높이를 DB 값에 미리
  * 더해 저장하거나 계산 단계마다 다시 더하면 이중 가산이 되므로 하지 않는다(prompt95 3장).
  * 환경변수 {@code STORAGE_PLACEMENT_PALLET_HEIGHT_M}로 재정의할 수 있다.
+ *
+ * <p>{@code maxOverhangRatioExclusive}: 적재를 허용하는 화물 돌출률 상한(무차원, 기본 0.05).
+ * 이름의 <b>Exclusive</b>가 경계 처리를 말한다 — {@code overhangRatio < limit}만 허용하므로
+ * 값이 정확히 0.05면 <b>차단</b>이다. 코드에 0.05를 박지 않고 여기서 읽는다(prompt96 7·13장).
+ * 환경변수 {@code STORAGE_PLACEMENT_MAX_OVERHANG_RATIO_EXCLUSIVE}로 재정의할 수 있다.
  */
 @ConfigurationProperties(prefix = "storage.placement")
 public record PlacementProperties(
         double heightClearance,
-        Double palletHeightM
+        Double palletHeightM,
+        Double maxOverhangRatioExclusive
 ) {
 
     /** 설정을 비워 두었을 때 쓰는 T-11 팔레트 높이(m). `docs/backend-api/optimal-placement.md` 6.2 근거. */
     public static final double DEFAULT_PALLET_HEIGHT_M = 0.12;
+
+    /** 돌출률 상한 기본값(무차원, 경계 미포함). `docs/backend-api/optimal-placement.md` 7.1 근거. */
+    public static final double DEFAULT_MAX_OVERHANG_RATIO_EXCLUSIVE = 0.05;
+
+    /**
+     * 돌출률 상한이 넘을 수 없는 값. 1.0은 화물이 파렛트 폭만큼 통째로 벗어난 상태라 상한으로는
+     * 의미가 없다 — 설정 오타(예: 5 를 "5%" 로 착각)를 기동 시점에 잡으려는 방어값이다.
+     */
+    private static final double MAX_SANE_OVERHANG_LIMIT = 1.0;
 
     public PlacementProperties {
         if (palletHeightM == null) {
@@ -32,6 +47,15 @@ public record PlacementProperties(
         if (!Double.isFinite(palletHeightM) || palletHeightM <= 0) {
             throw new IllegalArgumentException(
                     "storage.placement.pallet-height-m must be a finite value greater than 0: " + palletHeightM);
+        }
+        if (maxOverhangRatioExclusive == null) {
+            maxOverhangRatioExclusive = DEFAULT_MAX_OVERHANG_RATIO_EXCLUSIVE;
+        }
+        if (!Double.isFinite(maxOverhangRatioExclusive) || maxOverhangRatioExclusive <= 0
+                || maxOverhangRatioExclusive > MAX_SANE_OVERHANG_LIMIT) {
+            throw new IllegalArgumentException(
+                    "storage.placement.max-overhang-ratio-exclusive must be a finite value in (0, "
+                            + MAX_SANE_OVERHANG_LIMIT + "]: " + maxOverhangRatioExclusive);
         }
     }
 }

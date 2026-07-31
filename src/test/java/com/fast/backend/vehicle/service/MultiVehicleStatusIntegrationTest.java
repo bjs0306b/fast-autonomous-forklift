@@ -1,6 +1,7 @@
 package com.fast.backend.vehicle.service;
 
 import com.fast.backend.vehicle.domain.Vehicle;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.dto.VehicleDetailResponse;
 import com.fast.backend.vehicle.dto.VehicleResponse;
@@ -115,9 +116,11 @@ class MultiVehicleStatusIntegrationTest {
         Vehicle v = new Vehicle();
         v.setVehicleId(vehicleId);
         v.setName(vehicleId);
+        v.setSource(vehicleId.startsWith("SIM") ? VehicleSource.SIMULATION : VehicleSource.REAL);
         v.setActive(true);
         LocalDateTime now = LocalDateTime.now();
         v.setCreatedAt(now);
+        v.setUpdatedAt(now);
         vehicleMapper.insert(v);
     }
 

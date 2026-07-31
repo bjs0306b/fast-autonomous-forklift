@@ -15,6 +15,44 @@
 
 ---
 
+
+> ## ⚠️ station measurement 는 MQTT 를 쓰지 않는다 (prompt95·96)
+>
+> `fast/station/{station_id}/measurement` 토픽의 **구독·라우팅·수신 DTO·MQTT 전용 검증이 모두 제거**됐고
+> 설정 키 `mqtt.topics.station-measurement` 도 없어졌다. 이 문서에서 그 토픽을 "현재 규격"으로 서술하는
+> 부분은 **폐기된 내용**이다.
+>
+> 현재 수신 경로는 REST 하나뿐이다.
+>
+> | 동작 | API | 성공 |
+> |---|---|---|
+> | 세션 시작 | `POST /api/stations/sessions?cargoId=...` | 201 |
+> | 측정 등록 | `POST /api/stations/measurements` | 201 |
+> | 세션 종료 | `DELETE /api/stations/sessions/{sessionId}` | 200 |
+> | 활성 세션 조회 | `GET /api/stations/sessions/active` | 200 |
+> | 세션 최신 측정 | `GET /api/stations/sessions/{sessionId}/measurements/latest` | 200 |
+>
+> 요청 본문(camelCase, `sessionId`·`stationId` 는 보내지 않는다):
+>
+> ```json
+> { "measurementId": "station-1-20260731-093748-0001", "status": "ok",
+>   "cargoHeight": 0.723, "tippingLevel": "safe", "overhangRatio": 0.057,
+>   "measuredAt": "2026-07-31T09:37:48+09:00" }
+> ```
+>
+> - `cargoHeight` 는 **meter, 화물만**(팔레트 제외). cm → m 변환은 측정 데스크탑 책임이며 백엔드는
+>   단위를 추측해 변환하지 않는다. 팔레트 높이는 `storage.placement.pallet-height-m`(0.12)을
+>   `PlacementService` 가 **정확히 한 번** 더한다.
+> - `tippingLevel` 은 소문자 입력을 받아 **대문자로 정규화해 저장**한다.
+> - `status` 는 `ok` / `dimensions_only` / `no_detection` / `unreliable`.
+> - **동시에 활성 세션은 1개**, **세션당 최종 측정 결과는 1건**, **측정 결과 저장 전에는 세션 종료 불가**.
+>   측정 결과가 저장되면 status 와 무관하게 세션을 종료할 수 있다.
+> - 적재 추천은 `status=OK` + 높이 유효 + `SAFE` + `overhangRatio < 0.05` 를 **모두** 만족할 때만 실행된다.
+>
+> 상세는 `docs/backend-api/optimal-placement.md` §6-bis 참고.
+> (차량 위치 MQTT `forklift/+/location` 은 그대로 유지된다.)
+
+
 ## 0. 전송 계층 개요
 
 ```

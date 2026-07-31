@@ -21,6 +21,7 @@ import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.transport.service.TransportTaskService;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.location.InMemoryLatestVehicleLocationProvider;
 import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
@@ -136,6 +137,7 @@ class MultiVehicleDashboardIntegrationTest {
         cur.setStatus(status);
         cur.setMessageAt(NOW);
         cur.setReceivedAt(NOW);
+        cur.setUpdatedAt(NOW);
         vehicleCurrentStatusMapper.upsert(cur);
     }
 
@@ -143,24 +145,29 @@ class MultiVehicleDashboardIntegrationTest {
         Vehicle v = new Vehicle();
         v.setVehicleId(vehicleId);
         v.setName(vehicleId);
+        v.setSource(vehicleId.startsWith("MDB-S") ? VehicleSource.SIMULATION : VehicleSource.REAL);
         v.setActive(true);
         v.setCreatedAt(NOW);
+        v.setUpdatedAt(NOW);
         vehicleMapper.insert(v);
     }
 
     private String seedTask(String suffix, String vehicleId, TransportCommandStatus commandStatus) {
         Cargo cargo = Cargo.create("C-" + suffix, 0.8, 1.0, 0.6);
         cargo.setCreatedAt(NOW);
+        cargo.setUpdatedAt(NOW);
         cargoMapper.insert(cargo);
         Pallet pallet = new Pallet();
         pallet.setPalletId("P-" + suffix);
         pallet.setCargoId("C-" + suffix);
         pallet.setStatus(PalletStatus.WAITING);
         pallet.setCreatedAt(NOW);
+        pallet.setUpdatedAt(NOW);
         palletMapper.insert(pallet);
         Rack rack = new Rack();
         rack.setRackCode("RK-" + suffix);
         rack.setCreatedAt(NOW);
+        rack.setUpdatedAt(NOW);
         rackMapper.insert(rack);
         RackLevel level = new RackLevel();
         level.setRackId(rack.getId());
@@ -170,6 +177,7 @@ class MultiVehicleDashboardIntegrationTest {
         level.setClearHeight(0.8);
         level.setForkHeight(0.8);
         level.setCreatedAt(NOW);
+        level.setUpdatedAt(NOW);
         rackLevelMapper.insert(level);
         StorageSlot slot = new StorageSlot();
         slot.setSlotCode("S-" + suffix);
@@ -179,6 +187,7 @@ class MultiVehicleDashboardIntegrationTest {
         slot.setHeight(0.8);
         slot.setStatus(StorageSlotStatus.EMPTY);
         slot.setCreatedAt(NOW);
+        slot.setUpdatedAt(NOW);
         storageSlotMapper.insert(slot);
 
         String taskCode = taskService.createTask(new TransportTaskCreateRequest("C-" + suffix, "P-" + suffix)).taskId();
@@ -193,6 +202,7 @@ class MultiVehicleDashboardIntegrationTest {
         cmd.setCommandType("TRANSPORT");
         cmd.setStatus(commandStatus);
         cmd.setCreatedAt(NOW);
+        cmd.setUpdatedAt(NOW);
         transportCommandMapper.insert(cmd);
         return taskCode;
     }

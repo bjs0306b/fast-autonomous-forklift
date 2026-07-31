@@ -6,6 +6,7 @@ import com.fast.backend.command.dto.VehicleCommandResponse;
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.vehicle.domain.Vehicle;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -143,8 +144,10 @@ class SafetyCommandCategoryQueryIntegrationTest {
         Vehicle v = new Vehicle();
         v.setVehicleId(vehicleId);
         v.setName(vehicleId);
+        v.setSource(VehicleSource.REAL);
         v.setActive(true);
         v.setCreatedAt(NOW);
+        v.setUpdatedAt(NOW);
         vehicleMapper.insert(v);
     }
 }

@@ -22,13 +22,8 @@ import com.fast.backend.isaac.dto.IsaacForkliftStatusMessage;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
 import com.fast.backend.isaac.service.IsaacForkliftStatusService;
-<<<<<<< HEAD
 import com.fast.backend.loadsafety.dto.LoadSafetyMessage;
 import com.fast.backend.loadsafety.service.LoadSafetyService;
-import com.fast.backend.station.dto.StationMeasurementMessage;
-import com.fast.backend.station.service.StationMeasurementService;
-=======
->>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,13 +68,8 @@ public class MqttMessageRouter {
             VehicleCommandResultService vehicleCommandResultService,
             EmbeddedForkStatusService embeddedForkStatusService,
             EmbeddedErrorService embeddedErrorService,
-<<<<<<< HEAD
-            StationMeasurementService stationMeasurementService,
             TransportCommandResultService transportCommandResultService,
             LoadSafetyService loadSafetyService) {
-=======
-            TransportCommandResultService transportCommandResultService) {
->>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
         this.objectMapper = objectMapper;
         this.mqttTopics = mqttTopics;
         this.forkliftStatusService = forkliftStatusService;
@@ -128,15 +118,10 @@ public class MqttMessageRouter {
                 routeForkStatus(topic, payload);
             } else if (mqttTopics.isForkliftErrorTopic(topic)) {
                 routeEmbeddedError(topic, payload);
-<<<<<<< HEAD
             } else if (mqttTopics.isCargoDetectedTopic(topic)) {
                 routeCargoDetected(payload);
-            } else if (mqttTopics.isStationMeasurementTopic(topic)) {
-                routeStationMeasurement(topic, payload);
             } else if (mqttTopics.isForkliftLoadSafetyTopic(topic)) {
                 routeLoadSafety(topic, payload);
-=======
->>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
             }
         } catch (JsonProcessingException e) {
             log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
@@ -152,14 +137,9 @@ public class MqttMessageRouter {
                 || mqttTopics.isForkliftPathTopic(topic)
                 || mqttTopics.isForkliftCommandResultTopic(topic)
                 || mqttTopics.isForkliftForkStatusTopic(topic)
-<<<<<<< HEAD
                 || mqttTopics.isForkliftErrorTopic(topic)
                 || mqttTopics.isCargoDetectedTopic(topic)
-                || mqttTopics.isStationMeasurementTopic(topic)
                 || mqttTopics.isForkliftLoadSafetyTopic(topic);
-=======
-                || mqttTopics.isForkliftErrorTopic(topic);
->>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.fast.backend.monitoring.dto;
 
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 
 import java.time.OffsetDateTime;
@@ -14,7 +15,7 @@ import java.util.List;
  * {@code GET /api/vehicles}를, 현재 작업을 얻으려면 {@code tasks} 100건을 프론트가 직접 필터링해야 했다.
  * 그 두 가지를 이 응답 안에서 해결한다:
  * <ul>
- *   <li>{@link VehicleView#name()} — 차량 기본 정보(source 는 FR-202 에서 제거됨, prompt90)</li>
+ *   <li>{@link VehicleView#name()} / {@link VehicleView#source()} — 차량 기본 정보</li>
  *   <li>{@link LocationView#messageAt()} / {@link LocationView#receivedAt()} / {@link LocationView#source()}
  *       — 위치 신선도 판단과 REAL/SIM 위치 출처 구분</li>
  *   <li>{@link VehicleView#currentTask()} — 차량별 진행 중 작업 요약(종료 상태 제외)</li>
@@ -43,6 +44,7 @@ public record DashboardResponse(
     public record VehicleView(
             String vehicleId,
             String name,
+            VehicleSource source,
             boolean active,
             VehicleStatus status,
             LocationView location,

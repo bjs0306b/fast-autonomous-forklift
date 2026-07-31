@@ -1,6 +1,7 @@
 package com.fast.backend.vehicle.controller;
 
 import com.fast.backend.common.api.ApiResponse;
+import com.fast.backend.vehicle.domain.VehicleSource;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.dto.VehicleActiveUpdateRequest;
 import com.fast.backend.vehicle.dto.VehicleCreateRequest;
@@ -42,9 +43,9 @@ class VehicleControllerTest {
 
     @Test
     void register_returns201WithServiceResult() {
-        VehicleCreateRequest request = new VehicleCreateRequest("SIM-F01", "시뮬레이션 지게차 1호");
+        VehicleCreateRequest request = new VehicleCreateRequest("SIM-F01", "시뮬레이션 지게차 1호", VehicleSource.SIMULATION);
         VehicleDetailResponse expected = new VehicleDetailResponse(
-                "SIM-F01", "시뮬레이션 지게차 1호", true, null, null,
+                "SIM-F01", "시뮬레이션 지게차 1호", VehicleSource.SIMULATION, true, null, null,
                 VehicleStatusResponse.unknown());
         when(vehicleService.register(request)).thenReturn(expected);
 
@@ -57,7 +58,7 @@ class VehicleControllerTest {
     @Test
     void list_returnsServiceResultWrapped() {
         List<VehicleResponse> expected = List.of(
-                new VehicleResponse("SIM-F01", "1호", true, VehicleStatusResponse.unknown()));
+                new VehicleResponse("SIM-F01", "1호", VehicleSource.SIMULATION, true, VehicleStatusResponse.unknown()));
         when(vehicleService.findActiveVehicles()).thenReturn(expected);
 
         ApiResponse<List<VehicleResponse>> response = controller.list();
@@ -69,7 +70,7 @@ class VehicleControllerTest {
     @Test
     void detail_returnsServiceResultWrapped() {
         VehicleDetailResponse expected = new VehicleDetailResponse(
-                "SIM-F01", "1호", true, null, null, VehicleStatusResponse.unknown());
+                "SIM-F01", "1호", VehicleSource.SIMULATION, true, null, null, VehicleStatusResponse.unknown());
         when(vehicleService.getDetail("SIM-F01")).thenReturn(expected);
 
         ApiResponse<VehicleDetailResponse> response = controller.detail("SIM-F01");
@@ -81,7 +82,7 @@ class VehicleControllerTest {
     void updateActive_returnsServiceResultWrapped() {
         VehicleActiveUpdateRequest request = new VehicleActiveUpdateRequest(false);
         VehicleDetailResponse expected = new VehicleDetailResponse(
-                "SIM-F01", "1호", false, null, null, VehicleStatusResponse.unknown());
+                "SIM-F01", "1호", VehicleSource.SIMULATION, false, null, null, VehicleStatusResponse.unknown());
         when(vehicleService.updateActive("SIM-F01", false)).thenReturn(expected);
 
         ApiResponse<VehicleDetailResponse> response = controller.updateActive("SIM-F01", request);
