@@ -51,6 +51,8 @@ public enum ErrorCode {
     // ── 측정 세션(prompt96) ──────────────────────────────────────────────────
     STATION_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 측정 세션입니다."),
     STATION_SESSION_NOT_ACTIVE(HttpStatus.CONFLICT, "활성화된 측정 세션이 아닙니다."),
+    /** 활성 세션은 있는데 요청이 가리키는 세션과 다르다 — 해제된 옛 세션의 늦은 측정(prompt107). */
+    STATION_SESSION_MISMATCH(HttpStatus.CONFLICT, "측정 요청의 세션이 현재 활성 세션과 일치하지 않습니다."),
     STATION_ALREADY_OCCUPIED(HttpStatus.CONFLICT, "측정 설비가 이미 다른 세션에 점유되어 있습니다."),
     /** 측정 결과가 저장되기 전에는 세션을 종료할 수 없다(3장). */
     STATION_MEASUREMENT_NOT_COMPLETED(HttpStatus.CONFLICT, "측정 결과가 저장되지 않아 세션을 종료할 수 없습니다."),
