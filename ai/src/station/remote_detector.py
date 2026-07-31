@@ -49,11 +49,25 @@ class RemoteDetector:
 
     def __init__(self, base_url: str, input_size: int = 800,
                  timeout: float = DEFAULT_TIMEOUT,
-                 local_detector=None) -> None:
+                 local_detector=None,
+                 score_threshold: float = 0.5,
+                 class_thresholds: dict[str, float] | None = None) -> None:
+        """`score_threshold`·`class_thresholds`는 **로컬 검출기와 같은 값**을 준다.
+
+        ⚠️ **판정을 서버에 맡기면 경로에 따라 결과가 갈린다.** 2026-07-31 실측: 서버가
+        온보드 기본값(`pallet 0.7`)을 쓰는 바람에, 스테이션 임계(0.4)로는 통과할 파렛트
+        (score 0.58~0.65)가 보드에서만 버려졌다. 같은 장면이 로컬은 `ok`, 보드는
+        `dimensions_only`가 되어 전복·편하중이 통째로 빠졌다.
+
+        그래서 서버는 후보만 돌려주고 **거르는 일은 여기서** 한다 — 로컬 경로와 같은
+        코드·같은 값이라 두 경로가 갈릴 수 없다.
+        """
         self.base_url = base_url.rstrip("/")
         self.input_size = input_size
         self.timeout = timeout
         self.local_detector = local_detector
+        self.score_threshold = score_threshold
+        self.class_thresholds = dict(class_thresholds or {})
         self.last_path = "none"
         self.last_error = ""
         self.last_inference_ms: float | None = None
@@ -103,9 +117,14 @@ class RemoteDetector:
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8')[:120]}") from None
         self.last_inference_ms = payload.get("inference_ms")
-        return [
-            Detection(label=d["label"], score=float(d["score"]),
-                      box=BBox(x=float(d["x"]), y=float(d["y"]),
-                               w=float(d["w"]), h=float(d["h"])))
-            for d in payload.get("detections", [])
-        ]
+        out = []
+        for d in payload.get("detections", []):
+            label = d["label"]
+            score = float(d["score"])
+            # 판정은 여기서 — 로컬 검출기와 같은 임계를 쓴다(위 docstring 참조).
+            if score < self.class_thresholds.get(label, self.score_threshold):
+                continue
+            out.append(Detection(label=label, score=score,
+                                 box=BBox(x=float(d["x"]), y=float(d["y"]),
+                                          w=float(d["w"]), h=float(d["h"]))))
+        return out

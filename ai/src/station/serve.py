@@ -283,8 +283,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.infer_url:
             return local
         from station.remote_detector import RemoteDetector
+        # 임계를 로컬과 **같은 값**으로 넘긴다 — 경로에 따라 판정이 갈리지 않게.
         return RemoteDetector(args.infer_url, input_size=cfg.input_size,
-                              local_detector=local)
+                              local_detector=local,
+                              score_threshold=cfg.score_threshold,
+                              class_thresholds=cfg.class_score_thresholds)
 
     def measure_and_emit(detector=None, frame=None) -> dict | None:
         """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None.
