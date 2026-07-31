@@ -192,46 +192,28 @@ python src/station/serve.py --once --out sample.json          # 라이브
 python src/station/serve.py --once --image <사진> --distance 200   # 사진으로
 ```
 
-<<<<<<< HEAD
-## 전달 방식 — MQTT 발행 (2026-07-30 구현)
-
-측정 JSON을 백엔드 브로커로 발행한다. **백엔드는 받는 쪽이 이미 완성**돼 있다 —
-`fast/station/+/measurement` 구독 → `StationMeasurementService` → DB(`station_measurement`)
-→ WebSocket(`/topic/stations/measurements`). 비어 있던 **발행 측**을 `station/publisher.py`로
-채웠다.
-
-```bash
-# 브로커는 환경변수로만 (실제 IP·인증정보 하드코딩 금지)
-MQTT_HOST=<브로커> MQTT_PORT=1883 [MQTT_USERNAME=… MQTT_PASSWORD=…] \
-    python src/station/serve.py --once --publish
-```
-
-- 토픽 `fast/station/{station_id}/measurement`, **QoS 1 · retained false**
-  (`communication-protocol.md` §2 인바운드 규약, `dummy-real-f01-location-publisher.py`와 동일).
-- `--publish` 없이 실행하면 종전대로 stdout/파일까지만.
-
-### ⚠️ 남은 확인 (팀)
-
-1. **브로커 접속값**: 백엔드가 GPU서버로 이전(2026-07-28)됐으므로 그 배포처의
-   `MQTT_HOST`·포트·인증(평문/TLS)을 스테이션 PC 환경에 주입해야 한다. 젯슨 온보드
-   브리지가 `~/mqtt-certs/ca.crt`를 쓰므로 TLS일 가능성 — 백엔드 팀 확인 필요.
-2. **DTO 규격 정합**: 현재 백엔드 `StationMeasurementMessage`에는 `tipping`·
-   `dimensions.total_height_cm`·`box_measurements`가 **없다**(구버전). 발행 측은 규격(위
-   v1.0+)대로 전량 쏘고, **미지원 필드는 백엔드가 무시**하므로 발행은 깨지지 않는다.
-   전복·총높이를 DB/화면에 쓰려면 백엔드 DTO·스키마 확장이 필요(백엔드 담당).
-3. 실제 브로커 왕복 테스트는 접속값 확보 후. 지금은 토픽·페이로드 순수 로직만 단위
-   테스트(`tests/test_publisher.py`).
-=======
 ## 전달 방식 — 확정(REST)
 
 **확정됐다.** 측정 데스크탑이 `POST /api/stations/measurements`로 직접 호출한다.
 MQTT(`fast/station/+/measurement`)는 **폐기**됐고 백엔드에서 구독·라우팅·DTO가 모두 제거됐다.
 측정 데스크탑은 **DB에 직접 접속하지 않는다** — 이 REST API가 유일한 저장 경로다.
 
-데스크탑 쪽에 남은 작업:
+데스크탑 쪽 구현 완료 (2026-07-31, `station/rest_client.py`):
 
-1. 위 표대로 원본 JSON → REST 요청 6필드로 축약
-2. **`height_cm` ÷ 100** 으로 cm → m 변환(백엔드는 단위를 추측해 변환하지 않는다)
-3. 측정 전에 `POST /api/stations/sessions?cargoId=...`로 세션이 열려 있어야 함(없으면 409)
-4. 409 `STATION_MEASUREMENT_ID_DUPLICATED` 는 이미 저장된 결과라는 뜻 — 재전송 불필요
->>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
+```bash
+STATION_API_BASE=http://<백엔드> python src/station/serve.py --once --publish
+```
+
+1. ✅ 원본 JSON → REST 요청 6필드로 축약 (`to_request`)
+2. ✅ **`height_cm` ÷ 100** 으로 cm → m 변환
+3. ⚠️ 측정 전에 `POST /api/stations/sessions?cargoId=...`로 세션이 열려 있어야 함 —
+   **세션 개설은 아직 자동화 안 됨**(누가 여는지 팀 합의 필요). 없으면 409를 받고
+   `rest_client`가 그 사유를 stderr로 안내한다.
+4. ✅ 409 `STATION_MEASUREMENT_ID_DUPLICATED`는 **성공으로 취급**(이미 저장됨, 재전송 불필요)
+
+> ⚠️ **`cargoHeight`에 `total_height_cm`을 넣지 말 것.** 백엔드가 적재 판단에서 파렛트
+> 0.12m를 따로 더하므로(`requiredHeight = cargoHeight + 0.12 + clearance`) 총높이를 보내면
+> 파렛트를 두 번 더한다. 단위 변환과 이 구분은 `tests/test_rest_client.py`가 회귀 검증한다.
+
+**남은 확인**: 백엔드 base URL(`STATION_API_BASE`)과 실제 왕복 테스트. 지금은 요청 변환
+로직만 단위 테스트했고 서버 왕복은 미검증이다.
