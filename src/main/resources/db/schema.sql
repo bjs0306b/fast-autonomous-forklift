@@ -181,11 +181,6 @@ CREATE TABLE IF NOT EXISTS station_session (
 CREATE TABLE IF NOT EXISTS station_state (
     singleton_id      INT          NOT NULL PRIMARY KEY COMMENT '단일 스테이션 행 고정값',
     active_session_id VARCHAR(100) NULL COMMENT '현재 점유 중인 측정 세션. NULL 이면 유휴',
-    -- 점유 시각(prompt106). TTL 자동 해제의 기준이다. 측정 데스크탑이 kill -9/전원차단으로
-    -- 죽으면 세션 종료 요청이 오지 않아 잠금이 영구히 남는데, 이 값으로 경과 시간을 판정해
-    -- 다음 openSession 이 스스로 회수한다(별도 스케줄러를 두지 않는다).
-    -- active_session_id 와 항상 함께 세팅/해제된다. 유휴 상태면 둘 다 NULL 이다.
-    acquired_at       DATETIME(6)  NULL COMMENT '현재 세션을 점유한 시각. TTL 만료 판정 기준',
 
     CONSTRAINT chk_station_state_singleton
         CHECK (singleton_id = 1),

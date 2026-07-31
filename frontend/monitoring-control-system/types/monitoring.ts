@@ -119,28 +119,10 @@ export interface DashboardResponse {
 }
 
 /**
- * Isaac Sim WebRTC 영상 연결 상태.
- *
- * **사용자가 고르는 값이 아니다**(prompt80). 오직 실제 WebRTC 이벤트만이 이 값을 바꾼다 —
- * 화면 어디에도 이 상태를 수동으로 지정하는 select/토글을 두지 않는다.
- *
- *   idle          연결을 아직 시작하지 않음
- *   connecting    최초 연결 시도 중(시그널링 포함)
- *   connected     **영상이 실제로 재생 중**(video 의 playing 이벤트 기준)
- *   reconnecting  끊긴 뒤 재연결 시도 중
- *   disconnected  연결됐다가 끊김
- *   failed        연결 실패(오류)
- *
- * `connected` 판정 기준은 시그널링 성공이 아니라 **영상 프레임 재생**이다.
- * 시그널링만 붙은 상태를 connected 로 표시하면 검은 화면을 "연결됨"으로 읽게 된다.
+ * 디지털 트윈 영상 스트림 연결 상태.
+ * 실제 스트림은 아직 연결하지 않고 상태만 표현한다(FR-402-1 범위 밖).
  */
-export type WebRtcStatus =
-  | "idle"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "disconnected"
-  | "failed"
+export type StreamConnectionStatus = "idle" | "connecting" | "connected" | "error"
 
 /** 관제 실시간(WebSocket) 연결 상태. 영상 스트림 상태와는 별개다. */
 export type RealtimeConnectionStatus = "connecting" | "connected" | "disconnected" | "error"

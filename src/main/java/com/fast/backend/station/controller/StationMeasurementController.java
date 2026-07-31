@@ -77,27 +77,6 @@ public class StationMeasurementController {
         return ApiResponse.success(null);
     }
 
-    /**
-     * 운영자 강제 해제(prompt106). 측정 결과 존재 여부와 <b>무관하게</b> 설비 잠금을 푼다.
-     *
-     * <p>측정 데스크탑이 측정을 보내기 전에 죽으면 {@code DELETE /sessions/{id}} 는
-     * {@code STATION_MEASUREMENT_NOT_COMPLETED}(409)로 거부되어 잠금이 남는다. 이 경로가 그
-     * 복구 수단이며, 가짜 측정 행을 만들지 않고 {@code station_state} 만 비운다.
-     *
-     * <p>요청 sessionId 가 현재 점유 세션과 다르거나 이미 유휴면
-     * 409({@code STATION_SESSION_NOT_ACTIVE}) — 오래된 화면에서 누른 요청이 방금 시작된 정상
-     * 세션을 끊지 않게 한다. 성공 응답은 기존 {@code closeSession} 과 같은
-     * {@code 200 + ApiResponse}(프로젝트 공통 규약)를 따른다.
-     *
-     * <p>⚠️ 현재 이 저장소에는 인증·권한 체계가 없어 <b>누구나 호출할 수 있다.</b>
-     * 운영 배포 전 관리자 권한으로 제한해야 한다(Service Javadoc 의 TODO 참고).
-     */
-    @DeleteMapping("/sessions/{sessionId}/force")
-    public ApiResponse<Void> forceReleaseSession(@PathVariable String sessionId) {
-        stationMeasurementService.forceReleaseSession(sessionId);
-        return ApiResponse.success(null);
-    }
-
     @GetMapping("/sessions/active")
     public ApiResponse<StationSession> getActiveSession() {
         return ApiResponse.success(stationMeasurementService.findActiveSession());

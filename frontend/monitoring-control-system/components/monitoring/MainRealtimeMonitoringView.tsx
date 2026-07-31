@@ -6,9 +6,8 @@ import { cn } from "@/lib/utils"
 import type {
   RealtimeConnectionStatus,
   SelectedVehicleSummary,
-  WebRtcStatus,
+  StreamConnectionStatus,
 } from "@/types/monitoring"
-import { WEBRTC_STATUS_HEADLINE, WEBRTC_STATUS_TEXT } from "@/lib/config/webrtcStatusText"
 import { ConnectionStatusBadge } from "./ConnectionStatusBadge"
 import { DigitalTwinVideoLayer } from "./DigitalTwinVideoLayer"
 import { FullscreenButton } from "./FullscreenButton"
@@ -18,24 +17,16 @@ import { SelectedVehicleOverlay } from "./SelectedVehicleOverlay"
 /**
  * MainRealtimeMonitoringView
  *
- * 실제 Isaac Sim 디지털 트윈 영상(WebRTC)을 표시하는 전용 영역.
+ * 실제 Isaac Sim / 디지털 트윈 3D 영상을 표시할 전용 영역.
  * 프론트에서 창고 평면도나 차량 마커를 직접 그리지 않는다. (그 역할은 MiniMap 담당)
+ * 스트림 방식이 확정되기 전에는 DigitalTwinVideoLayer(placeholder)만 표시한다.
  *
- * 영상 상태는 이 컴포넌트가 만들지 않는다 — 상위가 실제 WebRTC 이벤트로 판정한 값을 받아
- * 배지·오버레이·문구를 그릴 뿐이다(prompt80).
- *
- * Three.js / WebGL 은 사용하지 않는다.
+ * Three.js / WebGL / 실제 영상 스트리밍은 사용하지 않는다.
  */
 export interface MainRealtimeMonitoringViewProps {
   /** 디지털 트윈 영상 스트림 연결 상태 (기본: idle) */
-  streamStatus?: WebRtcStatus
-  /** 영상 연결 실패/끊김 사유 */
-  streamError?: string | null
-  /** <video>/<audio> 컨테이너 ref (useIsaacSimStream 이 준다) */
-  streamContainerRef: React.RefObject<HTMLDivElement | null>
-  /** video 요소 ref (재생 이벤트 관찰용) */
-  streamVideoRef: React.RefObject<HTMLVideoElement | null>
-  /** 연결 실패 상태에서 재시도 버튼 클릭 시 호출(자동 재연결과 별개인 수동 즉시 재시도) */
+  streamStatus?: StreamConnectionStatus
+  /** 연결 실패 상태에서 재시도 버튼 클릭 시 호출 */
   onRetryConnection?: () => void
   /** 화면 위에 작게 표시할 선택 차량 요약 (선택 안 됐으면 null) */
   selectedVehicle?: SelectedVehicleSummary | null
@@ -51,9 +42,6 @@ export interface MainRealtimeMonitoringViewProps {
 
 export function MainRealtimeMonitoringView({
   streamStatus = "idle",
-  streamError = null,
-  streamContainerRef,
-  streamVideoRef,
   onRetryConnection,
   selectedVehicle = null,
   realtimeStatus = "connecting",
@@ -90,22 +78,13 @@ export function MainRealtimeMonitoringView({
       )}
       aria-label="디지털 트윈 실시간 영상 화면"
     >
-      {/* 디지털 트윈 영상 영역 (실 WebRTC 영상 + 미연결 시 placeholder) */}
-      <DigitalTwinVideoLayer
-        status={streamStatus}
-        error={streamError}
-        containerRef={streamContainerRef}
-        videoRef={streamVideoRef}
-      />
+      {/* 디지털 트윈 영상 영역 (placeholder / 추후 실영상으로 교체) */}
+      <DigitalTwinVideoLayer status={streamStatus} />
 
-      {/* 상단 좌측: 화면 정체성 + 연결 축 상태.
-          "연결 예정" 이라는 고정 문구를 실제 상태로 바꿨다 — 연결됐는데도 "연결 예정"이라고
-          적혀 있으면 배지와 어긋나 어느 쪽을 믿어야 할지 알 수 없다. */}
+      {/* 상단 좌측: 화면 정체성 오버레이 */}
       <div className="pointer-events-none absolute left-3 top-3 z-20 flex flex-col gap-0.5">
         <span className="text-xs font-semibold text-slate-100">디지털 트윈 영상</span>
-        <span className="text-[10px] text-slate-400" data-testid="stream-primary-label">
-          Isaac Sim Stream · {WEBRTC_STATUS_TEXT[streamStatus].primary}
-        </span>
+        <span className="text-[10px] text-slate-400">Isaac Sim Stream · 연결 예정</span>
       </div>
 
       {/* 상단 우측: 상태 배지 + 전체 화면 버튼 + 선택 차량 오버레이 */}
@@ -122,23 +101,18 @@ export function MainRealtimeMonitoringView({
           영상이 정상 표시될 때 하단에 겹쳐 보이게 한다. */}
       {overlay}
 
-      {/* 연결 중 / 재연결 중 로딩 오버레이 */}
-      {streamStatus === "connecting" || streamStatus === "reconnecting" ? (
+      {/* 연결 중(로딩) 오버레이 */}
+      {streamStatus === "connecting" ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/45 backdrop-blur-[1px]">
           <div className="flex flex-col items-center gap-3 text-center">
             <Loader2 className="size-8 animate-spin text-sky-400" aria-hidden="true" />
-            <p className="text-sm font-medium text-slate-100">
-              {WEBRTC_STATUS_HEADLINE[streamStatus]}…
-            </p>
-            {streamStatus === "reconnecting" ? (
-              <p className="text-xs text-slate-400">연결이 끊겨 자동으로 다시 연결하고 있습니다.</p>
-            ) : null}
+            <p className="text-sm font-medium text-slate-100">영상 스트림 연결 중…</p>
           </div>
         </div>
       ) : null}
 
       {/* 연결 실패 오버레이 */}
-      {streamStatus === "failed" ? (
+      {streamStatus === "error" ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/55 backdrop-blur-[1px]">
           <div className="flex flex-col items-center gap-3 rounded-lg border border-red-500/30 bg-slate-900/90 px-6 py-5 text-center shadow-xl">
             <div className="flex size-11 items-center justify-center rounded-full bg-red-500/15 text-red-400">
@@ -146,11 +120,7 @@ export function MainRealtimeMonitoringView({
             </div>
             <div>
               <p className="text-sm font-medium text-slate-100">영상 연결에 실패했습니다</p>
-              {/* 실패 사유를 그대로 보여 준다 — "연결할 수 없습니다"만으로는 조치할 수 없다. */}
-              <p className="mt-1 max-w-xs text-xs break-all text-slate-400">
-                {streamError ?? "스트림 서버에 연결할 수 없습니다."}
-              </p>
-              <p className="mt-1 text-[11px] text-slate-500">3초 뒤 자동으로 다시 연결합니다.</p>
+              <p className="mt-1 text-xs text-slate-400">스트림 서버에 연결할 수 없습니다.</p>
             </div>
             {onRetryConnection ? (
               <button

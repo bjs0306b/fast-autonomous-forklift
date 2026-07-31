@@ -21,7 +21,6 @@ Prerequisite
 
 import json
 import math
-import os
 import threading
 from datetime import datetime
 
@@ -40,22 +39,13 @@ import omni.kit.app
 # ---------------------------------------------------------------------------
 # Config - this block is the only part that should need editing
 # ---------------------------------------------------------------------------
-# MQTT broker. This is NOT the Isaac Sim streaming endpoint - Omniverse Kit
-# livestream uses TCP/UDP 47998 and UDP 49000, which carry video/input for the
-# streaming client and never MQTT. Do not point these at each other.
-#
-# Default "localhost" is correct when the broker runs on the same machine as
-# Isaac Sim (the usual setup: mosquitto on the sim server). Override without
-# editing this file when the broker lives elsewhere:
-#
-#   Linux/Isaac : export FAST_MQTT_HOST=<broker-ip>   FAST_MQTT_PORT=1883
-#   Windows     : $env:FAST_MQTT_HOST = "<broker-ip>"
-#
-# If you do point this at a remote broker, that broker must listen on more than
-# loopback (`listener 1883 0.0.0.0` in mosquitto.conf) and the firewall must
-# allow 1883 - a broker bound to 127.0.0.1 is unreachable from another host.
-BROKER_HOST = os.getenv("FAST_MQTT_HOST", "localhost")
-BROKER_PORT = int(os.getenv("FAST_MQTT_PORT", "1883"))
+BROKER_HOST = "localhost"   # replace with the EC2 broker address
+BROKER_PORT = 1883
+# NOTE: "localhost" only works when this script runs on the same host as the
+# broker. Mosquitto here listens on 127.0.0.1 / [::1] only, so Isaac Sim running
+# in WSL, Docker, or on another PC cannot reach it with this value - point it at
+# the broker machine's LAN IP and add a matching `listener 1883 0.0.0.0` on the
+# broker side. See docs/backend-message/communication-protocol.md.
 
 # These are MQTT identifiers and must match `vehicle.vehicle_id` in the database
 # exactly. The DB rows are REAL-F01 / SIM-F01 with a HYPHEN; the backend drops

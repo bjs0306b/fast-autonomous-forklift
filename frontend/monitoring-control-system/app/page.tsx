@@ -11,8 +11,18 @@ import { LoadSafetyOverlay } from "@/components/monitoring/LoadSafetyOverlay"
 import { useMonitoringDashboard } from "@/hooks/useMonitoringDashboard"
 import { useMonitoringSocket } from "@/hooks/useMonitoringSocket"
 import { emergencyStopAll, emergencyStopVehicle } from "@/lib/api/commandApi"
-import { useIsaacSimStream } from "@/components/monitoring/IsaacSimStream"
-import type { RealtimeConnectionStatus, SelectedVehicleSummary } from "@/types/monitoring"
+import type {
+  RealtimeConnectionStatus,
+  SelectedVehicleSummary,
+  StreamConnectionStatus,
+} from "@/types/monitoring"
+
+const STREAM_OPTIONS: { value: StreamConnectionStatus; label: string }[] = [
+  { value: "idle", label: "미연결" },
+  { value: "connecting", label: "연결 중" },
+  { value: "connected", label: "연결됨" },
+  { value: "error", label: "연결 실패" },
+]
 
 export default function MonitoringPage() {
   const {
@@ -30,19 +40,7 @@ export default function MonitoringPage() {
     applyLoadSafetyEvent,
   } = useMonitoringDashboard()
 
-  /**
-   * Isaac Sim 영상 연결.
-   *
-   * 마운트 즉시 스스로 연결을 시작하고, 상태는 실제 WebRTC 이벤트로만 바뀐다(prompt80).
-   * 페이지에는 이 상태를 바꾸는 UI 가 없다 — 예전의 dev 전용 select 는 제거했다.
-   */
-  const {
-    status: streamStatus,
-    error: streamError,
-    containerRef: streamContainerRef,
-    videoRef: streamVideoRef,
-    reconnect: reconnectStream,
-  } = useIsaacSimStream()
+  const [streamStatus, setStreamStatus] = useState<StreamConnectionStatus>("idle")
 
   // --- FR-503 비상정지 상태 ---
   // 차량별 진행 중 명령(중복 클릭 방지). 차량 A 요청 중에도 차량 B 는 독립적으로 사용 가능하다.
@@ -123,10 +121,8 @@ export default function MonitoringPage() {
    */
   const handleEmergencyStopVehicle = useCallback(
     async (vehicleId: string) => {
-      // 확인 창을 두지 않는다(prompt79) — 비상정지는 한 번의 클릭으로 즉시 나가야 한다.
-      // 오발행 방지는 확인 창 대신 (1) 아래 pending 가드, (2) 버튼 disabled,
-      // (3) 이미 ESTOP 인 차량의 버튼 비활성(VehicleDetailPanel)으로 한다.
       if (pendingCommandByVehicleId[vehicleId]) return // 중복 클릭 차단
+      if (!window.confirm(`${vehicleId} 차량에 비상정지 명령을 전송하시겠습니까?`)) return
 
       setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: "EMERGENCY_STOP" }))
       setNotice(null)
@@ -177,10 +173,15 @@ export default function MonitoringPage() {
    * 대상 수의 실제 응답 필드명은 totalCount 가 아니라 requestedCount 다.
    */
   const handleGlobalEmergencyStop = useCallback(async () => {
-    // 확인 창을 두지 않는다(prompt79). 대상은 여전히 **현재 활성 차량 전체**이며,
-    // 활성 차량이 0대면 요청 자체를 보내지 않는다(버튼도 disabled 다).
     if (globalEmergencyStopPending) return
     if (activeVehicleCount === 0) return
+    if (
+      !window.confirm(
+        `활성 차량 ${activeVehicleCount}대에 비상정지 명령을 전송합니다. 계속하시겠습니까?`,
+      )
+    ) {
+      return
+    }
 
     setGlobalEmergencyStopPending(true)
     setNotice(null)
@@ -245,10 +246,29 @@ export default function MonitoringPage() {
         </div>
 
         {/*
-          영상 상태를 사람이 고르는 컨트롤은 없다(prompt80).
-          dev 전용 select 도 제거했다 — 개발 중이든 아니든 화면의 연결 문구는 실제 WebRTC
-          상태여야 하고, 손으로 바꿀 수 있는 상태값은 결국 "가짜 연결됨"을 만든다.
+          개발 전용 스트림 상태 컨트롤.
+
+          운영 빌드에서는 DOM 에 포함되지 않는다(prompt67.md 7장) — Next.js 가 NODE_ENV 를 빌드 시점에
+          인라인하므로 production 빌드에서 이 분기는 통째로 제거된다. 운영 화면에서 조작자가 영상 상태를
+          connected/error 로 임의 변경할 수 있으면, 실제 스트림이 없는데도 "연결됨"으로 보이게 되어
+          가짜 상태를 만든다. 개발 중 각 상태의 렌더링을 확인하는 용도로만 남긴다.
         */}
+        {process.env.NODE_ENV === "development" ? (
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="hidden sm:inline">dev · 영상 상태</span>
+            <select
+              value={streamStatus}
+              onChange={(e) => setStreamStatus(e.target.value as StreamConnectionStatus)}
+              className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+            >
+              {STREAM_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </header>
 
       {/* 초기 조회 실패 배너. 마지막으로 받은 차량 데이터는 지우지 않는다. */}
@@ -272,11 +292,7 @@ export default function MonitoringPage() {
         <div className="flex min-h-0 flex-col">
           <MainRealtimeMonitoringView
             streamStatus={streamStatus}
-            streamError={streamError}
-            streamContainerRef={streamContainerRef}
-            streamVideoRef={streamVideoRef}
-            // 자동 재연결(3초)과 별개로, 기다리지 않고 즉시 다시 시도한다.
-            onRetryConnection={reconnectStream}
+            onRetryConnection={() => setStreamStatus("connecting")}
             selectedVehicle={selectedSummary}
             realtimeStatus={realtimeStatus}
             // 적재 위험 경고는 WARNING/DANGER 일 때만 스스로 렌더된다(정상이면 null).

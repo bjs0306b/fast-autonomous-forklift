@@ -4,9 +4,7 @@ import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.station.domain.StationMeasurement;
 import com.fast.backend.station.domain.StationMeasurementStatus;
-import com.fast.backend.station.config.StationSessionProperties;
 import com.fast.backend.station.domain.StationSession;
-import com.fast.backend.station.domain.StationState;
 import com.fast.backend.station.domain.TippingLevel;
 import com.fast.backend.station.dto.StationMeasurementCreateRequest;
 import com.fast.backend.station.dto.StationMeasurementResponse;
@@ -19,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -54,31 +51,23 @@ public class StationMeasurementService {
     private static final Logger log = LoggerFactory.getLogger(StationMeasurementService.class);
 
     private static final int MAX_MEASUREMENT_ID_LENGTH = 100;
-    /** station_session.session_id 컬럼 길이와 같다 — DB 가 자르기 전에 400 으로 돌려준다. */
-    private static final int MAX_SESSION_ID_LENGTH = 100;
 
     private final StationMeasurementMapper measurementMapper;
     private final StationSessionMapper sessionMapper;
     private final StationMeasurementResponseMapper responseMapper;
     private final StationMeasurementPlacementEligibility placementEligibility;
     private final StationMeasurementBroadcaster broadcaster;
-    private final StationSessionProperties sessionProperties;
-    private final Clock clock;
 
     public StationMeasurementService(StationMeasurementMapper measurementMapper,
             StationSessionMapper sessionMapper,
             StationMeasurementResponseMapper responseMapper,
             StationMeasurementPlacementEligibility placementEligibility,
-            StationMeasurementBroadcaster broadcaster,
-            StationSessionProperties sessionProperties,
-            Clock clock) {
+            StationMeasurementBroadcaster broadcaster) {
         this.measurementMapper = measurementMapper;
         this.sessionMapper = sessionMapper;
         this.responseMapper = responseMapper;
         this.placementEligibility = placementEligibility;
         this.broadcaster = broadcaster;
-        this.sessionProperties = sessionProperties;
-        this.clock = clock;
     }
 
     // ── 세션 ────────────────────────────────────────────────────────────────
@@ -95,77 +84,14 @@ public class StationMeasurementService {
         if (cargoId == null || cargoId.isBlank()) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "cargoId 는 필수입니다.");
         }
-
-        LocalDateTime now = LocalDateTime.now(clock);
-        LocalDateTime expiredBefore = now.minus(sessionProperties.ttl());
-
-        // 점유를 빼앗기 전에 "무엇을 회수하는지" 먼저 읽어 둔다. 로그 전용이며 판정에는 쓰지 않는다 —
-        // 판정은 아래 조건부 UPDATE 가 단독으로 한다(이 조회와 UPDATE 사이에 상태가 바뀌어도 안전).
-        StationState before = sessionMapper.findState().orElse(null);
-
         String sessionId = UUID.randomUUID().toString();
         sessionMapper.insert(new StationSession(sessionId, cargoId));
-
-        if (sessionMapper.acquireStation(sessionId, now, expiredBefore) == 0) {
+        if (sessionMapper.acquireStation(sessionId) == 0) {
             throw new BusinessException(ErrorCode.STATION_ALREADY_OCCUPIED,
                     "측정 설비가 이미 점유 중입니다. 기존 세션을 먼저 종료하세요.");
         }
-
-        if (before != null && before.isOccupied() && before.isExpired(expiredBefore)) {
-            // 정상 종료를 못 하고 죽은 세션을 회수한 경우다. 조용히 넘어가면 "왜 남의 세션이
-            // 끊겼는지" 추적할 수 없으므로 WARN 으로 남긴다.
-            log.warn("Station session expired and released: expiredSessionId={}, acquiredAt={}, "
-                            + "expiredAt={}, ttlSeconds={}, newSessionId={}",
-                    before.getActiveSessionId(), before.getAcquiredAt(), now,
-                    sessionProperties.ttlSeconds(), sessionId);
-        }
-
-        log.info("Station session acquired: sessionId={}, cargoId={}, acquiredAt={}",
-                sessionId, cargoId, now);
+        log.info("Station session opened: sessionId={}, cargoId={}", sessionId, cargoId);
         return new StationSession(sessionId, cargoId);
-    }
-
-    /**
-     * 운영자 강제 해제(prompt106). <b>측정 결과 존재 여부와 무관하게</b> 잠금을 푼다.
-     *
-     * <p>{@link #closeSession} 은 측정이 저장된 뒤에만 종료를 허용한다 — 정상 흐름에서 측정을
-     * 빠뜨린 채 세션이 닫히는 것을 막기 위해서다. 그런데 측정 데스크탑이 측정을 보내기 전에 죽으면
-     * 그 조건 때문에 <b>정상 종료 요청조차 거부되어</b> 잠금이 남는다. 이 API 는 그 상황의 복구
-     * 경로이며, 그래서 EXISTS 조건이 없다.
-     *
-     * <p><b>가짜 측정 행을 만들지 않는다.</b> 기존 우회책(desktop 의 {@code --abandon})은 잠금을 풀려고
-     * unreliable 측정 행을 남겨 DB 를 오염시켰다. 여기서는 {@code station_state} 만 비운다.
-     *
-     * <p>요청 sessionId 가 실제 점유 세션과 다르면 해제하지 않는다 — 오래된 화면을 보고 누른 요청이
-     * 방금 시작된 정상 세션을 끊는 것을 막는다.
-     *
-     * <p>TODO(보안): 운영자 전용으로 보호해야 한다. 현재 이 저장소에는 인증·권한 체계가 없어
-     * 누구나 호출할 수 있다. Spring Security 도입 시 이 엔드포인트를 관리자 권한으로 제한할 것.
-     */
-    @Transactional
-    public void forceReleaseSession(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "sessionId 는 필수입니다.");
-        }
-
-        StationState before = sessionMapper.findState().orElse(null);
-        String occupiedSessionId = before == null ? null : before.getActiveSessionId();
-
-        if (sessionMapper.forceReleaseStation(sessionId) == 0) {
-            // 실패 원인 규명 전용 — 상태를 바꾸지 않는다. 이미 유휴인 경우와 다른 세션이 점유 중인
-            // 경우를 같은 코드로 돌려주되, 메시지로 구분한다(기존 closeSession 과 같은 정책).
-            log.warn("Station session force release rejected: requestedSessionId={}, "
-                            + "occupiedSessionId={}", sessionId, occupiedSessionId);
-            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
-                    occupiedSessionId == null
-                            ? "점유 중인 세션이 없습니다: " + sessionId
-                            : "요청한 세션이 현재 점유 세션과 다릅니다: requested=" + sessionId
-                                    + ", occupied=" + occupiedSessionId);
-        }
-
-        log.warn("Station session force released: requestedSessionId={}, occupiedSessionId={}, "
-                        + "acquiredAt={}", sessionId, occupiedSessionId,
-                before == null ? null : before.getAcquiredAt());
     }
 
     /**
@@ -218,7 +144,6 @@ public class StationMeasurementService {
         if (request == null) {
             throw new BusinessException(ErrorCode.STATION_MEASUREMENT_INVALID, "요청 본문이 비어 있습니다.");
         }
-        String requestedSessionId = validateSessionId(request.sessionId());
         String measurementId = validateMeasurementId(request.measurementId());
         StationMeasurementStatus status = StationMeasurementStatus.fromRaw(request.status())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STATION_MEASUREMENT_STATUS_INVALID,
@@ -230,50 +155,21 @@ public class StationMeasurementService {
                     "이미 저장된 measurement_id 입니다: " + measurementId);
         }
 
-        // 점유 상태를 행 잠금과 함께 읽는다(prompt107). 여기부터 커밋까지 acquireStation/
-        // releaseStation/forceReleaseStation 이 대기하므로, "검증 통과 후 INSERT 전에 세션이
-        // 바뀌는" TOCTOU 가 발생하지 않는다.
-        StationState state = sessionMapper.findStateForUpdate()
+        StationSession session = sessionMapper.findActiveSession()
                 .orElseThrow(() -> new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
-                        "측정 설비 상태를 읽을 수 없습니다: measurementId=" + measurementId));
-
-        if (!state.isOccupied()) {
-            // TTL 만료·강제 해제로 이미 풀렸거나 애초에 열린 적이 없다.
-            log.warn("Station measurement rejected: no active session — measurementId={}, "
-                    + "requestedSessionId={}", measurementId, requestedSessionId);
-            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
-                    "활성 세션이 없어 측정 결과를 저장할 수 없습니다: measurementId=" + measurementId);
-        }
-
-        String activeSessionId = state.getActiveSessionId();
-        if (!activeSessionId.equals(requestedSessionId)) {
-            // 세션 A 가 해제되고 세션 B 가 열린 뒤 도착한 A 의 늦은 측정이 여기서 걸린다.
-            // 활성 세션으로 자동 재귀속하지 않는다 — 그게 이 검증의 존재 이유다.
-            log.warn("Station measurement rejected: session mismatch — measurementId={}, "
-                            + "requestedSessionId={}, activeSessionId={}",
-                    measurementId, requestedSessionId, activeSessionId);
-            throw new BusinessException(ErrorCode.STATION_SESSION_MISMATCH,
-                    "측정 요청의 세션이 현재 활성 세션과 일치하지 않습니다: requested="
-                            + requestedSessionId + ", active=" + activeSessionId);
-        }
-
-        StationSession session = sessionMapper.findBySessionId(requestedSessionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.STATION_SESSION_NOT_FOUND,
-                        "존재하지 않는 측정 세션입니다: " + requestedSessionId));
+                        "활성 세션이 없어 측정 결과를 저장할 수 없습니다: measurementId=" + measurementId));
 
         // 세션당 최종 결과는 1건. 사전 확인은 빠른 실패용이고, 경합의 최종 방어는
         // uk_station_measurement_session UNIQUE 제약이다(동시 요청은 DB 가 막는다).
-        if (measurementMapper.existsBySessionId(requestedSessionId)) {
+        if (measurementMapper.existsBySessionId(session.getSessionId())) {
             throw new BusinessException(ErrorCode.STATION_SESSION_MEASUREMENT_ALREADY_EXISTS,
-                    "이 세션에는 이미 측정 결과가 저장되어 있습니다: sessionId=" + requestedSessionId);
+                    "이 세션에는 이미 측정 결과가 저장되어 있습니다: sessionId=" + session.getSessionId());
         }
 
         LocalDateTime receivedAt = LocalDateTime.now();
         StationMeasurement entity = new StationMeasurement();
         entity.setMeasurementId(measurementId);
-        // 활성 세션 조회값이 아니라 **요청이 밝힌 세션**을 저장한다. 위에서 두 값이 같음을
-        // 잠금 아래에서 확인했으므로 동일하지만, 자동 귀속이 되살아나지 않도록 출처를 명시한다.
-        entity.setSessionId(requestedSessionId);
+        entity.setSessionId(session.getSessionId());
         entity.setStatus(status);
         entity.setCargoHeight(request.cargoHeight());
         // 소문자 입력을 대문자로 정규화해 저장한다 — 비교하는 쪽이 표기를 신경 쓰지 않게 한다.
@@ -290,7 +186,7 @@ public class StationMeasurementService {
         measurementMapper.insert(entity);
 
         boolean eligible = placementEligibility.isEligible(entity);
-        log.info("Station measurement accepted: measurementId={}, sessionId={}, cargoId={}, status={}, "
+        log.info("Station measurement stored: measurementId={}, sessionId={}, cargoId={}, status={}, "
                         + "cargoHeightM={}, tippingLevel={}, overhangRatio={}, placementEligible={}",
                 entity.getMeasurementId(), session.getSessionId(), session.getCargoId(), status,
                 entity.getCargoHeight(), entity.getTippingLevel(), entity.getOverhangRatio(), eligible);
@@ -352,22 +248,6 @@ public class StationMeasurementService {
     }
 
     // ── 검증 ────────────────────────────────────────────────────────────────
-
-    /**
-     * 요청 sessionId 검증(prompt107). 누락·공백은 400 이다 — 구버전 클라이언트를 위해 값을
-     * 추측하거나 활성 세션으로 대체하지 않는다. 그렇게 하면 막으려던 오귀속이 그대로 발생한다.
-     */
-    private String validateSessionId(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "sessionId 는 필수입니다. 세션 생성 응답의 sessionId 를 그대로 보내야 합니다.");
-        }
-        if (sessionId.length() > MAX_SESSION_ID_LENGTH) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "sessionId 는 " + MAX_SESSION_ID_LENGTH + "자 이하여야 합니다: " + sessionId.length());
-        }
-        return sessionId;
-    }
 
     private String validateMeasurementId(String measurementId) {
         if (measurementId == null || measurementId.isBlank()) {

@@ -53,19 +53,6 @@ storage:
     pallet-height-m: 0.12
     max-overhang-ratio-exclusive: 0.05
 
-# 측정 세션 점유 정책(prompt106).
-#
-# ttl-seconds
-#   단위: 초. 세션 점유가 유효한 시간(기본 600 = 10분).
-#   측정 데스크탑이 정상 종료 없이 죽으면(kill -9·전원 차단·네트워크 단절) 세션 종료 요청이 오지
-#   않아 단일 설비 잠금이 영구히 남는다. 이 시간이 지난 점유는 **다음 openSession 이 회수**한다
-#   (별도 스케줄러 없음).
-#   너무 짧으면 정상 측정 중인 세션을 빼앗고, 너무 길면 복구가 늦어진다 — 현장 측정 소요시간에 맞춘다.
-#   환경변수: STATION_SESSION_TTL_SECONDS / 제약: 0 초과 86400 이하
-station:
-  session:
-    ttl-seconds: ${STATION_SESSION_TTL_SECONDS:600}
-
 logging:
   level:
     root: INFO
