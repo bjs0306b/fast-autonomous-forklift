@@ -35,6 +35,49 @@ from perception.load_balance import BBox, Detection
 PAD_VALUE = 114
 
 
+# slack 24px의 근거: eval 정답 라벨 221개에 필터를 걸어보니 8px에서는 **진짜 구멍 3개가
+# 버려졌다**(0069·0072·0096, 전부 하단으로 8.3~14.6px 초과). 오라벨이 아니라 규약의
+# 결과다 — pallet은 amodal, hole은 modal이라 가까이서 비스듬히 보면 구멍 안쪽이
+# 파렛트 하단선보다 아래로 보인다. 24px이면 정답을 하나도 안 버리면서(221→221)
+# 창밖 건물 같은 도메인 밖 오탐(파렛트 자체가 없음)은 그대로 걸린다.
+DEFAULT_SLACK = 24.0
+
+
+def hole_inside_pallet(hole, pallet, slack: float = DEFAULT_SLACK) -> bool:
+    """구멍이 파렛트 bbox 안에 있나 (라벨 가이드 §4-1과 같은 판정)."""
+    return (hole.x >= pallet.x - slack
+            and hole.y >= pallet.y - slack
+            and hole.x + hole.w <= pallet.x + pallet.w + slack
+            and hole.y + hole.h <= pallet.y + pallet.h + slack)
+
+
+def filter_by_geometry(detections: list[Detection],
+                       slack: float = DEFAULT_SLACK) -> list[Detection]:
+    """기하로 hole 오탐을 거른다 — **점수가 아니라 구조로**.
+
+    라벨 가이드 §4의 sanity check를 런타임에 그대로 적용한다:
+      ① `pallet`이 없으면 `hole`도 없다 (구멍은 파렛트의 일부다)
+      ② `hole`은 어떤 `pallet` bbox 안에 있어야 한다
+
+    2026-07-31 젯슨 라이브에서 **창밖 건물 창문을 hole 0.70으로 오탐**했다. 격자무늬가
+    개구부와 닮았고, 학습셋에 창밖 장면이 없어(도메인 밖) 점수만으로는 못 거른다.
+    임계를 올리면 진짜 구멍의 재현율(G1 99.5%)까지 깎이므로 기하로 거른다 —
+    스테이션 `pipeline.on_pallet`이 같은 이유로 재현율 손실 없이 98.1%를 얻은 방식이다.
+
+    파렛트는 건드리지 않는다. 파렛트 오탐은 이 규칙으로 못 거르고, G2가 100%라 당장
+    문제도 아니다.
+    """
+    pallets = [d for d in detections if d.label == "pallet"]
+    if not pallets:
+        # ① 파렛트가 없으면 hole은 전부 버린다.
+        return [d for d in detections if d.label != "hole"]
+    out = []
+    for d in detections:
+        if d.label != "hole" or any(hole_inside_pallet(d.box, p.box, slack) for p in pallets):
+            out.append(d)
+    return out
+
+
 class TrtDetector:
     def __init__(
         self,
@@ -47,6 +90,7 @@ class TrtDetector:
         norm_std: tuple[float, float, float] = (57.375, 57.12, 58.395),
         class_thresholds: dict[str, float] | None = None,
         rotate180: bool = False,
+        geometry_filter: bool = True,
     ) -> None:
         import tensorrt as trt
         import pycuda.driver as cuda
@@ -86,6 +130,7 @@ class TrtDetector:
         self._mean = np.array(norm_mean, dtype=np.float32)
         self._std = np.array(norm_std, dtype=np.float32)
         self.rotate180 = rotate180
+        self.geometry_filter = geometry_filter
 
         self._alloc()
 
@@ -123,7 +168,8 @@ class TrtDetector:
         # mmdeploy end2end 출력 이름은 dets, labels
         dets = outs.get("dets", next(iter(outs.values())))
         labels = outs.get("labels", list(outs.values())[-1])
-        return self._postprocess(dets[0], labels[0], scale)
+        result = self._postprocess(dets[0], labels[0], scale)
+        return filter_by_geometry(result) if self.geometry_filter else result
 
     def _preprocess(self, frame: np.ndarray) -> tuple[np.ndarray, float]:
         if self.rotate180:
