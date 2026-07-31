@@ -1,12 +1,17 @@
-"""측정 REST 전송 — 요청 변환 테스트 (S15P11A304-91).
+"""측정 REST 전송 — 요청 변환·세션 수명 테스트 (S15P11A304-91).
 
-실제 백엔드 왕복은 서버 주소 확보 후. 여기선 브로커·서버 없이 검증되는
-**필드 매핑과 단위 변환**만 본다 — 여기가 틀리면 조용히 잘못된 값이 저장된다.
+**필드 매핑과 단위 변환**이 틀리면 조용히 잘못된 값이 저장된다. **세션을 못 닫으면**
+설비가 잠겨 아무도 측정을 못 한다(백엔드에 TTL이 없다). 둘 다 서버 없이 검증한다 —
+HTTP 호출은 `_call`을 갈아끼워 가로챈다.
 """
 
 from __future__ import annotations
 
-from station.rest_client import to_request
+import pytest
+
+from station import rest_client
+from station.rest_client import (SessionNotReleased, StationApiError,
+                                 measurement_session, to_request)
 
 FULL = {
     "measurement_id": "station-1-20260731-093748-0001",
@@ -64,3 +69,93 @@ def test_dimensions_only는_전복이_없다() -> None:
                     "tipping": {"assessable": False}})
     assert r["cargoHeight"] == 0.3
     assert r["tippingLevel"] is None
+
+
+# ── 세션 수명 ────────────────────────────────────────────────────────────────
+
+class FakeApi:
+    """`_call`을 대신해 호출을 기록한다. `fail_close`로 종료 거부를 흉내 낸다."""
+
+    def __init__(self, fail_close: str | None = None) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.fail_close = fail_close
+
+    def __call__(self, method, url, body=None, timeout=None):
+        self.calls.append((method, url))
+        if method == "POST" and "/sessions" in url:
+            return {"sessionId": "sess-1", "cargoId": "cargo-1"}
+        if method == "DELETE" and self.fail_close:
+            raise StationApiError(409, self.fail_close)
+        return {}
+
+    @property
+    def methods(self) -> list[str]:
+        return [m for m, _ in self.calls]
+
+
+@pytest.fixture
+def api(monkeypatch):
+    fake = FakeApi()
+    monkeypatch.setattr(rest_client, "_call", fake)
+    return fake
+
+
+def test_정상_종료하면_세션이_닫힌다(api) -> None:
+    with measurement_session("cargo-1") as session_id:
+        assert session_id == "sess-1"
+    assert api.methods == ["POST", "DELETE"]
+
+
+def test_예외가_나도_세션이_닫힌다(api) -> None:
+    """전송이 터져도 설비를 잠근 채 나가면 안 된다."""
+    with pytest.raises(RuntimeError, match="측정 실패"):
+        with measurement_session("cargo-1"):
+            raise RuntimeError("측정 실패")
+    assert "DELETE" in api.methods
+
+
+def test_키보드인터럽트에도_세션이_닫힌다(api) -> None:
+    """Ctrl-C·SIGTERM이 같은 경로를 탄다."""
+    with pytest.raises(KeyboardInterrupt):
+        with measurement_session("cargo-1"):
+            raise KeyboardInterrupt
+    assert "DELETE" in api.methods
+
+
+def test_원래_예외를_종료실패가_덮지_않는다(monkeypatch) -> None:
+    """측정이 왜 실패했는지가 세션이 왜 안 닫혔는지보다 중요하다."""
+    monkeypatch.setattr(rest_client, "_call",
+                        FakeApi(fail_close="STATION_MEASUREMENT_NOT_COMPLETED"))
+    with pytest.raises(RuntimeError, match="측정 실패"):
+        with measurement_session("cargo-1"):
+            raise RuntimeError("측정 실패")
+
+
+def test_닫기_실패는_조용히_넘어가지_않는다(monkeypatch) -> None:
+    """측정이 저장되기 전엔 백엔드가 종료를 거부한다 — 잠긴 채 남으므로 알려야 한다."""
+    monkeypatch.setattr(rest_client, "_call",
+                        FakeApi(fail_close="STATION_MEASUREMENT_NOT_COMPLETED"))
+    with pytest.raises(SessionNotReleased) as e:
+        with measurement_session("cargo-1"):
+            pass
+    assert e.value.session_id == "sess-1"
+
+
+def test_이미_닫힌_세션은_실패가_아니다(monkeypatch) -> None:
+    monkeypatch.setattr(rest_client, "_call",
+                        FakeApi(fail_close="STATION_SESSION_NOT_ACTIVE"))
+    with measurement_session("cargo-1"):
+        pass          # 예외 없이 끝나야 한다
+
+
+def test_세션_열기_실패하면_본문을_실행하지_않는다(monkeypatch) -> None:
+    """설비가 점유 중이면 측정을 보내면 안 된다 — 남의 화물에 붙는다."""
+    def occupied(method, url, body=None, timeout=None):
+        raise StationApiError(409, "STATION_ALREADY_OCCUPIED")
+
+    monkeypatch.setattr(rest_client, "_call", occupied)
+    entered = False
+    with pytest.raises(StationApiError):
+        with measurement_session("cargo-1"):
+            entered = True
+    assert not entered

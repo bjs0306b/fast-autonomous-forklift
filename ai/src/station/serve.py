@@ -81,6 +81,60 @@ def probe_cameras(max_index: int = 3) -> None:
         cap.release()
 
 
+def release_session(abandon: bool = False) -> int:
+    """잠긴 세션을 푼다 — `--release-session`.
+
+    백엔드에 세션 TTL이 없어서, 측정 전송이 실패한 채 프로세스가 끝나면 설비가 잠긴
+    상태로 남는다. 그 상태에서는 **아무도 새 측정을 시작할 수 없다**(409 ALREADY_OCCUPIED).
+    사람이 푸는 유일한 경로다.
+
+    `--abandon`은 마지막 수단이다. 백엔드는 **측정이 저장된 세션만** 닫아주므로, 측정
+    없이 잠긴 세션은 `unreliable` 측정을 하나 남겨야 풀린다. **없는 측정을 지어내는
+    것이 아니라 "이 세션은 측정에 실패했다"를 기록하는 것**이라 status가 unreliable이다.
+    """
+    from station.rest_client import (StationApiError, active_session, close_session,
+                                     post_measurement)
+
+    session = active_session()
+    if not session:
+        print("활성 세션이 없습니다 — 설비는 비어 있습니다.")
+        return 0
+    session_id = session.get("sessionId")
+    print(f"활성 세션: sessionId={session_id} cargoId={session.get('cargoId')}")
+
+    try:
+        close_session(session_id)
+        print("세션을 닫았습니다.")
+        return 0
+    except StationApiError as e:
+        if not (e.status == 409 and "MEASUREMENT_NOT_COMPLETED" in e.body):
+            print(f"세션 종료 실패: {e}", file=sys.stderr)
+            return 1
+
+    print("이 세션엔 측정 결과가 없어 백엔드가 종료를 거부합니다.", file=sys.stderr)
+    if not abandon:
+        print("  --abandon 을 주면 unreliable 측정을 남기고 강제로 풉니다.", file=sys.stderr)
+        return 1
+
+    from datetime import datetime, timezone
+    stamp = datetime.now(timezone.utc).astimezone()
+    abandoned = {
+        "measurement_id": f"abandoned-{session_id}",
+        "status": "unreliable",
+        "measured_at": stamp.isoformat(timespec="seconds"),
+        "dimensions": None,
+        "tipping": None,
+    }
+    try:
+        post_measurement(abandoned)
+        close_session(session_id)
+    except StationApiError as e:
+        print(f"강제 해제 실패: {e}", file=sys.stderr)
+        return 1
+    print(f"unreliable 측정을 남기고 세션을 풀었습니다 (measurementId={abandoned['measurement_id']}).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="측정 스테이션 (FR-101-5)")
     parser.add_argument("--once", action="store_true", help="1회 측정 후 종료")
@@ -92,11 +146,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--publish", action="store_true",
                         help="측정 결과를 백엔드로 전송 "
                              "(POST /api/stations/measurements, STATION_API_BASE 환경변수)")
+    parser.add_argument("--cargo-id",
+                        help="이 측정의 화물 ID. 주면 세션을 열고 전송 후 반드시 닫는다. "
+                             "안 주면 남이 연 세션에 측정이 붙는다(오귀속 위험)")
+    parser.add_argument("--release-session", action="store_true",
+                        help="잠긴 측정 세션을 조회·해제한다 (측정은 하지 않는다)")
+    parser.add_argument("--abandon", action="store_true",
+                        help="--release-session 전용. 측정이 없어 닫히지 않는 세션을 "
+                             "unreliable 측정을 남겨 강제로 푼다")
     args = parser.parse_args(argv)
 
     if args.probe:
         probe_cameras()
         return 0
+    if args.release_session:
+        return release_session(abandon=args.abandon)
     if not args.once:
         parser.error("--once 또는 --probe를 지정하세요 (상시 서비스 모드는 추후)")
 
@@ -146,11 +210,29 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.publish:
         # status != ok도 보낸다 — 백엔드가 status별 검증을 하고, 재측정 판단에 쓴다.
-        from station.rest_client import send
-        ok = send(payload)
-        print(f"[publish] {'성공' if ok else '실패'} "
-              f"POST /api/stations/measurements ({payload.get('measurement_id')})",
-              file=sys.stderr)
+        from station.rest_client import measurement_session, send
+
+        def publish() -> bool:
+            ok = send(payload)
+            print(f"[publish] {'성공' if ok else '실패'} "
+                  f"POST /api/stations/measurements ({payload.get('measurement_id')})",
+                  file=sys.stderr)
+            return ok
+
+        if args.cargo_id:
+            # **세션은 전송 직전에 연다.** 백엔드 문서상 정상 흐름은 "세션 시작 → 측정 →
+            # 결과 등록"이지만, 그렇게 하면 카메라·거리센서가 실패했을 때 측정 없는
+            # 세션이 남고 백엔드가 종료를 거부해(MEASUREMENT_NOT_COMPLETED) 설비가 잠긴다.
+            # 측정은 이미 끝나 있으므로 여기서 열어도 귀속은 동일하고, 못 닫는 구간이
+            # 요청 한 번으로 줄어든다. (설비 점유를 실시간으로 보여주려면 앞으로 옮겨야
+            # 하는데, 그건 팀 합의 사항이다.)
+            with measurement_session(args.cargo_id):
+                ok = publish()
+        else:
+            print("[publish] ⚠️ --cargo-id 없이 보냅니다 — 백엔드는 요청의 화물을 묻지 않고 "
+                  "**현재 활성 세션**에 붙입니다. 남이 연 세션이 있으면 그 화물로 "
+                  "잘못 기록되고, 사후에 알아낼 방법이 없습니다.", file=sys.stderr)
+            ok = publish()
         if not ok:
             return 1
     return 0

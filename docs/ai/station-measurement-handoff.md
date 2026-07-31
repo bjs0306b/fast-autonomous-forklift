@@ -206,14 +206,59 @@ STATION_API_BASE=http://<백엔드> python src/station/serve.py --once --publish
 
 1. ✅ 원본 JSON → REST 요청 6필드로 축약 (`to_request`)
 2. ✅ **`height_cm` ÷ 100** 으로 cm → m 변환
-3. ⚠️ 측정 전에 `POST /api/stations/sessions?cargoId=...`로 세션이 열려 있어야 함 —
-   **세션 개설은 아직 자동화 안 됨**(누가 여는지 팀 합의 필요). 없으면 409를 받고
-   `rest_client`가 그 사유를 stderr로 안내한다.
+3. ✅ **세션 개설·종료 자동화**(2026-07-31) — `--cargo-id`를 주면 데스크탑이 직접 연다. 아래 참조
 4. ✅ 409 `STATION_MEASUREMENT_ID_DUPLICATED`는 **성공으로 취급**(이미 저장됨, 재전송 불필요)
 
 > ⚠️ **`cargoHeight`에 `total_height_cm`을 넣지 말 것.** 백엔드가 적재 판단에서 파렛트
 > 0.12m를 따로 더하므로(`requiredHeight = cargoHeight + 0.12 + clearance`) 총높이를 보내면
 > 파렛트를 두 번 더한다. 단위 변환과 이 구분은 `tests/test_rest_client.py`가 회귀 검증한다.
 
-**남은 확인**: 백엔드 base URL(`STATION_API_BASE`)과 실제 왕복 테스트. 지금은 요청 변환
-로직만 단위 테스트했고 서버 왕복은 미검증이다.
+**서버 확인 완료 (2026-07-31)**: 백엔드가 `http://70.12.246.250:8080`에 떠 있다. 실제
+페이로드를 보내 **6필드가 전부 검증을 통과**했다(400이 아니라 409 `SESSION_NOT_ACTIVE` —
+세션만 없었고 규격은 맞았다). 200까지의 왕복은 세션을 열어야 하므로 미확인.
+
+## 세션 — 단일 설비 뮤텍스
+
+백엔드는 `station_state`의 `active_session_id` **한 행**으로 설비 점유를 지킨다. 열려
+있는 동안 다른 화물은 세션을 못 연다(409 `STATION_ALREADY_OCCUPIED`).
+
+```bash
+STATION_API_BASE=http://70.12.246.250:8080 \
+  python src/station/serve.py --once --publish --cargo-id cargo-1
+```
+
+### ⚠️ `--cargo-id` 없이 보내면 남의 화물에 붙는다
+
+측정 요청에는 **cargoId가 없다.** 백엔드는 `findActiveSession()`으로 **현재 활성 세션**을
+찾아 붙일 뿐 화물을 대조하지 않는다. 누가 다른 화물로 세션을 열어둔 상태에서 보내면
+**그 화물에 조용히 기록되고, 사후에 알아낼 방법이 없다.**
+
+→ **측정 데스크탑이 자기 세션을 열고 자기가 닫는다.** ("누가 여는지"의 답이다.)
+
+### ⚠️ 세션은 스스로 안 풀린다
+
+백엔드에 **TTL·자동 만료가 없다.** 게다가 종료는 **측정이 저장된 뒤에만** 된다
+(409 `STATION_MEASUREMENT_NOT_COMPLETED`). 전송이 실패한 채 끝나면 설비가 잠긴 채 남고
+**아무도 새 측정을 시작할 수 없다.**
+
+`measurement_session` 컨텍스트 매니저가 보장하는 범위는 이만큼이다:
+
+| 종료 경로 | 닫히나 |
+|---|---|
+| 정상 종료 · 예외 · Ctrl-C | ✅ |
+| `SIGTERM`(kill, 서비스 정지) | ✅ 핸들러로 예외 전환 |
+| `SIGKILL`(kill -9) · 전원 차단 | ❌ 불가능 |
+| 측정 전송 실패 후 종료 | ❌ 백엔드가 종료를 거부 |
+
+마지막 둘은 사람이 푼다:
+
+```bash
+python src/station/serve.py --release-session            # 조회 후 종료 시도
+python src/station/serve.py --release-session --abandon  # 측정 없는 세션 강제 해제
+```
+
+`--abandon`은 `unreliable` 측정을 하나 남겨 잠금을 푼다. **없는 측정을 지어내는 것이
+아니라 "이 세션은 측정에 실패했다"를 기록하는 것**이다.
+
+> **백엔드에 요청할 것**: 세션 TTL(예: 10분 무활동 시 자동 해제) 또는 강제 해제
+> 엔드포인트. 지금은 클라이언트가 아무리 조심해도 `kill -9` 한 번이면 설비가 잠긴다.
