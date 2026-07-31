@@ -1,0 +1,298 @@
+# Nav2 params for the simulated forklift in the FULL-SIZE NVIDIA warehouse.
+#
+# Scale note: this scene is real size (warehouse ~20x30 m, forklift ~2.6 m,
+# wheelbase ~1.6 m). All numbers below are metres at that scale - do NOT reuse
+# the miniature (0.16 m) values here or the robot mis-judges its own size and
+# clips walls.
+#
+# Frames come from kinematic_vehicle.py: SIM_F02_base_link / SIM_F02_odom, and
+# the lidar frame SIM_F02_laser (set in the RTX Lidar graph). Topics are under
+# /sim_f02. Only the lidar (scan) is used as an obstacle source for now; add the
+# ToF PointCloud2 sources once those topics are verified.
+#
+# Launch:
+#   source ~/ros_env.sh
+#   ros2 launch nav2_bringup bringup_launch.py use_sim_time:=True \
+#     map:=/home/ubuntu/forklift_ws/nav2/maps/sim_warehouse.yaml \
+#     params_file:=<this file>
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: "SIM_F02_base_link"
+    odom_frame_id: "SIM_F02_odom"
+    global_frame_id: "map"
+    scan_topic: /sim_f02/scan
+    laser_min_range: 1.0
+    laser_max_range: 20.0
+    max_particles: 2000
+    min_particles: 500
+    update_min_d: 0.2
+    update_min_a: 0.2
+    resample_interval: 1
+    transform_tolerance: 1.0                # 0.5 -> 1.0 (느린 TF 허용)
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    # Publish map->odom immediately at startup instead of waiting for a manual
+    # /initialpose. Without this, Nav2 is launched before the map frame exists,
+    # global_costmap fails to activate (no map->base transform), and the whole
+    # stack half-starts and rejects goals. Bake the spawn pose in so AMCL sets
+    # it on the first scan. Keep these x/y in sync with the forklift's spawn
+    # (v.x, v.y in kinematic_vehicle.py) - here (10, 15).
+    set_initial_pose: true
+    initial_pose:
+      x: 3.0
+      y: 2.0
+      z: 0.0
+      yaw: 0.0
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: SIM_F02_base_link
+    odom_topic: /sim_f02/odom
+    bt_loop_duration: 20                    # 10 -> 20 (느린 시뮬 대응)
+    default_server_timeout: 60              # 20 -> 60 (플래너 응답 대기 여유)
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 15.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # 0.3 m was too tight: at 2 m/s with a ~10 FPS sim the vehicle moves ~0.4 m
+      # per control step and jumps straight over the acceptance band, then (being
+      # forward-only) has to loop back on a 2.8 m radius - that is what produced
+      # 21 recoveries and an overshoot from a goal at x=14 out to x=17.2.
+      xy_goal_tolerance: 0.25                   # 0.5 -> 0.25 위치 조여서 방향 정렬 유도
+      yaw_goal_tolerance: 0.1                   # 0.25(±14°) -> 0.1(±6°) 도착 방향 엄격
+      stateful: true
+
+    # Regulated Pure Pursuit follows the path with a lookahead point - correct
+    # for a car-like (Ackermann) chassis that cannot rotate toward the goal.
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 1.0     # 2.0 overshot the goal band (see goal_checker)
+      lookahead_dist: 1.5
+      min_lookahead_dist: 0.8
+      max_lookahead_dist: 3.0
+      use_velocity_scaled_lookahead_dist: true
+      transform_tolerance: 1.0              # 0.2 -> 1.0
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.5
+      # Off: with inflation_radius at 1.5 m the aisles are broadly high-cost, and
+      # cost-regulated scaling slowed the truck to a crawl there. Too slow trips
+      # the progress checker, which fires recovery behaviours in a loop.
+      use_regulated_linear_velocity_scaling: false
+      regulated_linear_scaling_min_radius: 0.81   # = min turning radius (1.4/tan60)
+      regulated_linear_scaling_min_speed: 0.25
+      use_rotate_to_heading: false                # Ackermann: no spin in place
+      allow_reversing: true                       # 시연: 랙 진입/이탈, 적재 후 후진에 필요
+      max_angular_accel: 1.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 2.0                 # 5.0 -> 2.0 (부하 감소)
+      publish_frequency: 1.0                # 2.0 -> 1.0
+      transform_tolerance: 1.0
+      global_frame: SIM_F02_odom
+      robot_base_frame: SIM_F02_base_link
+      rolling_window: true
+      width: 10
+      height: 10
+      resolution: 0.05
+      footprint: "[[1.6, 0.75], [1.6, -0.75], [-1.6, -0.75], [-1.6, 0.75]]"
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /sim_f02/scan
+          data_type: "LaserScan"
+          max_obstacle_height: 3.0
+          raytrace_max_range: 20.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 15.0
+          obstacle_min_range: 0.0
+          clearing: true
+          marking: true
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 1.5
+        # Must be >= the footprint's circumscribed radius (sqrt(1.3^2+0.6^2)=1.45),
+        # or SMAC cannot use the potential field to skip full-footprint collision
+        # checks and planning slows down badly (planner configure took 16 s at 0.7).
+        inflation_radius: 1.8
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: SIM_F02_base_link
+      resolution: 0.05
+      track_unknown_space: true
+      transform_tolerance: 1.0
+      footprint: "[[1.6, 0.75], [1.6, -0.75], [-1.6, -0.75], [-1.6, 0.75]]"
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /sim_f02/scan
+          data_type: "LaserScan"
+          max_obstacle_height: 3.0
+          raytrace_max_range: 20.0
+          obstacle_max_range: 15.0
+          clearing: true
+          marking: true
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 1.5
+        inflation_radius: 1.8   # see local_costmap note - must cover 1.45 m
+
+map_server:
+  ros__parameters:
+    use_sim_time: true
+    yaml_filename: "/home/ubuntu/forklift_ws/nav2/maps/sim_warehouse.yaml"
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 1.0         # 5.0 -> 1.0 (시뮬이 느려 5Hz 못 맞춤)
+    planner_plugins: ["GridBased"]
+    GridBased:
+      # SMAC Hybrid-A* respects the turning radius; NavFn would plan paths the
+      # Ackermann forklift cannot follow.
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      tolerance: 0.3
+      allow_unknown: true
+      max_iterations: 1000000
+      max_planning_time: 15.0                # 5.0 hit TIMEOUT (error_code 208)
+      # Keep DUBIN (forward only). REEDS_SHEPP was tried to let the vehicle back
+      # out of trouble, but its reverse cusps made the controller oscillate
+      # forward/back on the spot - worse than not reversing at all. The overshoot
+      # that motivated it is handled by the lower speed and wider goal tolerance.
+      motion_model_for_search: "REEDS_SHEPP"      # 후진 포함 (DUBIN=전진전용)
+      angle_quantization_bins: 72
+      minimum_turning_radius: 0.81   # = wheelbase 1.4 / tan(max_steer 1.047, 60 deg)
+      reverse_penalty: 1.0    # 1.5 -> 1.0 후진을 전진과 동등하게 (랙 진입/방향정렬에 적극 활용)
+      change_penalty: 1.0     # 2.0 -> 1.0 방향전환 덜 억제 (0.15 는 진동, 1.0 은 균형)
+      non_straight_penalty: 1.2
+      cost_penalty: 2.0
+      analytic_expansion_ratio: 3.5
+      smooth_path: true
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: SIM_F02_odom
+    robot_base_frame: SIM_F02_base_link
+    # Register the full standard set so bt_navigator's default behavior tree
+    # finds every recovery action server it references at startup (missing ones
+    # make bt_navigator error out). The Ackermann forklift will not actually use
+    # "spin" (it cannot rotate in place), but the action server must still exist.
+    # All four are required: the default behaviour tree
+    # (navigate_to_pose_w_replanning_and_recovery.xml) waits on each recovery
+    # action server by name, so dropping one - "backup" was tried, to stop the
+    # truck rocking forward/back during repeated recoveries - makes bt_navigator
+    # fail to load the tree entirely and the whole bringup aborts.
+    # Recoveries firing at all is the symptom; fix the cause (the controller
+    # reporting "collision ahead") rather than removing the recovery.
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+collision_monitor:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: "SIM_F02_base_link"
+    odom_frame_id: "SIM_F02_odom"
+    # Sits at the end of the velocity chain: takes the smoothed command and
+    # forwards it to the real /cmd_vel, stopping the vehicle if the lidar sees
+    # something inside the stop circle.
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel"
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.5
+    source_timeout: 1.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    polygons: ["PolygonStop"]
+    PolygonStop:
+      type: "circle"
+      radius: 0.6
+      action_type: "stop"
+      min_points: 4
+      visualize: false
+      enabled: true
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "/sim_f02/scan"
+      min_height: 0.15
+      max_height: 2.0
+      enabled: true
+
+docking_server:
+  ros__parameters:
+    use_sim_time: true
+    # Not used by the forklift demo, but opennav_docking is launched by
+    # navigation_launch and refuses to configure without a dock plugin. Give it
+    # a single no-op plugin so the node activates; nothing calls it.
+    controller_frequency: 50.0
+    initial_perception_timeout: 5.0
+    wait_charge_timeout: 5.0
+    dock_plugins: ["nova_carter_dock"]
+    nova_carter_dock:
+      plugin: "opennav_docking::SimpleChargingDock"
+      docking_threshold: 0.05
+      staging_x_offset: -0.7
+    docks: ["home_dock"]
+    home_dock:
+      type: "nova_carter_dock"
+      frame: map
+      pose: [0.0, 0.0, 0.0]
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: true
+    smoothing_frequency: 20.0
+    max_velocity: [2.0, 0.0, 1.0]
+    min_velocity: [-2.0, 0.0, -1.0]
+    max_accel: [1.0, 0.0, 2.0]
+    max_decel: [-1.0, 0.0, -2.0]
+    odom_topic: "/sim_f02/odom"
+    odom_duration: 0.1
