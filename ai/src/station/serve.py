@@ -126,7 +126,9 @@ def release_session(abandon: bool = False) -> int:
         "tipping": None,
     }
     try:
-        post_measurement(abandoned)
+        # ⚠️ `session_id`를 반드시 실어야 한다. 2026-07-31 백엔드가 sessionId를 필수로
+        # 바꿨을 때 이 복구 경로를 빠뜨려, **정작 잠긴 세션을 풀려는 순간 400으로 실패**했다.
+        post_measurement(abandoned, session_id=session_id)
         close_session(session_id)
     except StationApiError as e:
         print(f"강제 해제 실패: {e}", file=sys.stderr)
@@ -179,6 +181,28 @@ def check_wiring(args) -> int:
         print(f"  {'✅' if match else '❌'} index {cfg.camera_index}: {w}x{h}"
               + ("" if match else f" — 캘리브레이션 기준 {cfg.frame_width}x{cfg.frame_height}와 다르다"))
         ok = ok and match
+
+        # **정지 판정 임계가 센서 노이즈 바닥보다 위인지 확인한다.** 아래면 판정이
+        # 아예 동작하지 않는다 — 가만히 있어도 늘 "안 멎었다"가 된다(2026-07-31 실측 사고).
+        # 조명·카메라가 바뀌면 노이즈가 달라지므로 시연 전에 매번 본다.
+        from station.trigger import STILL_DIFF, frame_motion
+        for _ in range(cfg.warmup_frames):
+            cap.read()
+        vals, prev = [], None
+        for _ in range(20):
+            got, f = cap.read()
+            if not got:
+                break
+            if prev is not None:
+                vals.append(frame_motion(prev, f))
+            prev = f
+        if vals:
+            floor = max(vals)
+            margin_ok = STILL_DIFF > floor * 1.2
+            print(f"  {'✅' if margin_ok else '❌'} 정지 판정: 노이즈 바닥 "
+                  f"{min(vals):.2f}~{floor:.2f} vs 임계 {STILL_DIFF}"
+                  + ("" if margin_ok else "  ← **임계가 낮아 판정이 안 된다**"))
+            ok = ok and margin_ok
     else:
         print(f"  ❌ index {cfg.camera_index} 안 열림 (--probe로 확인)")
         ok = False
@@ -213,6 +237,18 @@ def main(argv: list[str] | None = None) -> int:
                              "안 주면 지금까지처럼 로컬에서 추론")
     parser.add_argument("--check", action="store_true",
                         help="측정하지 않고 점검만 — 추론 서버·백엔드 연결 확인 (시연 전용)")
+    parser.add_argument("--listen", action="store_true",
+                        help="상시 모드 — 시뮬의 측정 요청(MQTT)을 기다렸다가 측정한다")
+    parser.add_argument("--broker", default="70.12.130.106",
+                        help="--listen 전용. MQTT 브로커 주소")
+    parser.add_argument("--broker-port", type=int, default=1883)
+    parser.add_argument("--topic", default="fast/station/measure_request",
+                        help="측정 요청 토픽. 시뮬 쪽 규격에 맞춘다")
+    parser.add_argument("--cargo-field", default="cargoId",
+                        help="요청 페이로드에서 화물 ID를 담은 키 이름")
+    parser.add_argument("--max-measurements", type=int, default=0,
+                        help="--listen 전용. N건 측정 후 종료(0=무한). "
+                             "리허설·검증용 — 한 번만 돌려보고 로그를 확인할 때 쓴다")
     args = parser.parse_args(argv)
 
     if args.probe:
@@ -222,8 +258,12 @@ def main(argv: list[str] | None = None) -> int:
         return release_session(abandon=args.abandon)
     if args.check:
         return check_wiring(args)
-    if not args.once:
-        parser.error("--once 또는 --probe를 지정하세요 (상시 서비스 모드는 추후)")
+    if not (args.once or args.listen):
+        parser.error("--once(1회) 또는 --listen(상시 대기) 또는 --probe 를 지정하세요")
+    if args.listen and not args.publish:
+        # 상시 모드는 시뮬 신호를 받아 백엔드에 저장하는 것이 목적이다. 전송을 안 하면
+        # 측정만 하고 버리게 되므로 실수를 막는다.
+        parser.error("--listen 은 --publish 와 함께 씁니다")
 
     cfg = StationConfig()
 
@@ -243,12 +283,22 @@ def main(argv: list[str] | None = None) -> int:
         if not args.infer_url:
             return local
         from station.remote_detector import RemoteDetector
+        # 임계를 로컬과 **같은 값**으로 넘긴다 — 경로에 따라 판정이 갈리지 않게.
         return RemoteDetector(args.infer_url, input_size=cfg.input_size,
-                              local_detector=local)
+                              local_detector=local,
+                              score_threshold=cfg.score_threshold,
+                              class_thresholds=cfg.class_score_thresholds)
 
-    def measure_and_emit(detector=None) -> dict | None:
-        """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None."""
-        if args.image:
+    def measure_and_emit(detector=None, frame=None) -> dict | None:
+        """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None.
+
+        `frame`을 주면 그걸 쓴다 — **상시 모드(`--listen`)는 카메라를 계속 열어두고**
+        직접 잡은 프레임을 넘긴다. 매번 `capture()`를 부르면 자동 노출 워밍업만 0.8초라
+        측정 예산(≤1초)을 넘긴다.
+        """
+        if frame is not None:
+            pass
+        elif args.image:
             frame = cv2.imread(str(args.image))
             if frame is None:
                 print(f"이미지를 읽을 수 없습니다: {args.image}", file=sys.stderr)
@@ -309,7 +359,11 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return ok
 
-    if not (args.publish and args.cargo_id):
+    # ⚠️ `not args.listen`이 빠지면 상시 모드가 여기 걸린다. `--listen`은 cargoId를
+    # MQTT로 받으므로 **시작 시점엔 `--cargo-id`가 없는 것이 정상**인데, 그것을
+    # "cargo-id 없이 보내는 1회 측정"으로 오인해 상시 모드에 도달하지 못했다
+    # (2026-07-31 실측 — 카메라를 열어 한 번 재고 세션 없이 전송해 400을 받았다).
+    if not args.listen and not (args.publish and args.cargo_id):
         payload = measure_and_emit()
         if payload is None:
             return 1
@@ -333,21 +387,101 @@ def main(argv: list[str] | None = None) -> int:
     # 했다. 근본 해결(TTL·강제 해제)은 S15P11A304-172.
     from station.rest_client import SessionNotReleased, StationApiError, measurement_session
 
+    def measure_for_cargo(cargo_id: str, detector=None, frame=None) -> int:
+        """세션 열기 → 측정 → 전송 → 닫기. `--once`와 `--listen`이 함께 쓴다.
+
+        두 모드가 같은 함수를 타야 "손으로는 되는데 자동으로는 안 된다"가 안 생긴다.
+        """
+        try:
+            with measurement_session(cargo_id) as session_id:
+                payload = measure_and_emit(detector, frame)
+                if payload is None:
+                    return 1
+                # sessionId는 백엔드 필수 필드다(2026-07-31~). 활성 세션 조회로 붙이던
+                # 방식은 TTL 만료 뒤 늦게 도착한 측정이 다음 세션에 오귀속되는 구멍이 있었다.
+                return 0 if publish(payload, session_id) else 1
+        except StationApiError as e:
+            # 세션 열기 실패(대개 409 ALREADY_OCCUPIED) — 측정은 시작도 안 했다.
+            print(f"[station-api] 세션을 열 수 없어 측정을 건너뜁니다: {e}", file=sys.stderr)
+            return 1
+        except SessionNotReleased:
+            return 2      # 잠긴 세션이 남았다 — 성공(0)·측정실패(1)와 구분한다
+
+    if not args.listen:
+        return measure_for_cargo(args.cargo_id)
+
+    # ── 상시 모드 ────────────────────────────────────────────────────────────
+    #
+    # 시뮬이 적재 위치에 도착하면 신호를 쏘고, 그때 한 번 측정한다. 사람이 버튼을
+    # 누르는 방식은 "무인 스마트팩토리"와 맞지 않는다.
+    #
+    # **카메라와 추론기를 미리 만들어 둔다.** 요청이 온 뒤에 열면 자동 노출 워밍업만
+    # 0.8초라 측정 예산(≤1초)을 넘긴다.
+    from station.trigger import MeasureTrigger, wait_until_still
+
+    # **브로커를 카메라보다 먼저 연결한다.** 주소·포트가 틀렸으면 하드웨어를 잡기 전에
+    # 실패하는 편이 낫다 — 카메라를 열어놓고 죽으면 다른 프로세스가 못 쓴다.
+    trigger = MeasureTrigger(args.broker, args.broker_port, args.topic,
+                             args.cargo_field)
     try:
-        with measurement_session(args.cargo_id) as session_id:
-            payload = measure_and_emit()
-            if payload is None:
-                return 1
-            # sessionId는 백엔드 필수 필드다(2026-07-31~). 활성 세션 조회로 붙이던
-            # 방식은 TTL 만료 뒤 늦게 도착한 측정이 다음 세션에 오귀속되는 구멍이 있었다.
-            ok = publish(payload, session_id)
-    except StationApiError as e:
-        # 세션 열기 실패(대개 409 ALREADY_OCCUPIED) — 측정은 시작도 안 했다.
-        print(f"[station-api] 세션을 열 수 없어 측정을 건너뜁니다: {e}", file=sys.stderr)
+        trigger.__enter__()
+    except Exception as e:
+        print(f"[listen] ❌ 브로커 연결 실패 {args.broker}:{args.broker_port} — "
+              f"{type(e).__name__}: {e}", file=sys.stderr)
         return 1
-    except SessionNotReleased:
-        return 2        # 잠긴 세션이 남았다 — 성공(0)·측정실패(1)와 구분한다
-    return 0 if ok else 1
+
+    detector = build_detector()
+    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        print(f"카메라 index {cfg.camera_index} 안 열림 (--probe로 확인)", file=sys.stderr)
+        trigger.__exit__(None, None, None)
+        return 1
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
+    for _ in range(cfg.warmup_frames):
+        cap.read()
+
+    def grab():
+        ok, f = cap.read()
+        return f if ok else None
+
+    print(f"상시 모드 — {args.topic} 대기 중. Ctrl-C로 종료", flush=True)
+    measured: set[str] = set()
+    rc = done = 0
+    try:
+        with trigger as trig:
+            for req in trig.requests():
+                if req.cargo_id in measured:
+                    # 같은 화물을 두 번 재면 백엔드가 409로 거부한다. 신호가 중복으로
+                    # 오는 경우를 여기서 걸러 로그를 깨끗하게 둔다.
+                    print(f"[listen] 이미 측정한 화물 — 건너뜀: {req.cargo_id}",
+                          file=sys.stderr)
+                    continue
+
+                # 사람이 의자를 밀다 멈춘 직후라 아직 흔들린다. 멎을 때까지 기다린다.
+                frame, still = wait_until_still(grab)
+                if frame is None:
+                    print("[listen] 프레임을 못 잡았다 — 건너뜀", file=sys.stderr)
+                    continue
+                if not still:
+                    # 흔들린 채로도 잰다. 시연에서 "아무 일도 안 일어남"보다는 낫고,
+                    # 결과에 남으니 나중에 걸러낼 수 있다.
+                    print("[listen] ⚠️ 흔들림이 안 멎었다 — 그대로 측정한다"
+                          "(모션 블러·가장자리 왜곡 위험)", file=sys.stderr)
+
+                rc = measure_for_cargo(req.cargo_id, detector, frame)
+                if rc == 0:
+                    measured.add(req.cargo_id)
+                done += 1
+                if args.max_measurements and done >= args.max_measurements:
+                    print(f"[listen] {done}건 측정 완료 — 종료", flush=True)
+                    break
+                print(f"[listen] 측정 종료 rc={rc} — 다음 요청 대기", flush=True)
+    except KeyboardInterrupt:
+        print("\n종료", flush=True)
+    finally:
+        cap.release()
+    return 0
 
 
 if __name__ == "__main__":

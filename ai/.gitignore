@@ -1,0 +1,32 @@
+# 실행 산출물 — 스크립트를 `ai/`에서 돌리면 여기에 떨어진다.
+#
+# 규칙을 **`ai/` 최상위로만 한정**(`/` 접두)한 이유: 하위 폴더에는 커밋해야 할
+# 그림·데이터가 생길 수 있는데(docs 첨부, 테스트 픽스처) 전역 패턴이면 그것까지
+# 조용히 숨긴다. 여기 걸리는 건 "돌리면 생기는 것"뿐이다.
+#
+# 모델 가중치는 `models/.gitignore`가 따로 맡는다.
+
+# 실행 로그
+/*.log
+
+# 진단·데모 캡처 (serve.py --probe, annotate, station_live_view --save-dir 등)
+/camera_probe_*.jpg
+/raw_shot*.jpg
+/live_*.jpg
+/annotated.png
+/chair*.png
+/stack_now.png
+/demo*.png
+/demo*.jpg
+/demo*.json
+
+# 라이브 뷰 녹화 (station_live_view --record)
+/*.mp4
+
+# 측정 결과 JSON (serve.py --out 기본값)
+/measurement*.json
+
+# 데이터셋·체크포인트 아카이브 — 노트북↔서버 주고받을 때 여기 놓인다.
+# 수백 MB짜리라 실수로 커밋하면 되돌리기 어렵다.
+/*.tar.gz
+/*.zip

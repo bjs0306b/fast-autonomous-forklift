@@ -139,14 +139,26 @@ def main(argv=None) -> int:
     ap.add_argument("--port", type=int, default=8877)
     ap.add_argument("--input-size", type=int, default=800,
                     help="스테이션 모델 입력. 클라이언트 letterbox 크기와 같아야 한다")
-    ap.add_argument("--score", type=float, default=0.5,
-                    help="기본 임계. 클래스별 임계는 스테이션 config가 최종 판정에서 적용")
+    ap.add_argument("--score", type=float, default=0.05,
+                    help="후보 바닥 임계. **판정용이 아니다** — 클래스별 임계는 스테이션 "
+                         "config가 쥐고 클라이언트가 적용한다. 낮게 두어야 경로에 따라 "
+                         "판정이 갈리지 않는다")
     a = ap.parse_args(argv)
 
     print(f"엔진 로드: {a.engine}", flush=True)
+    # ⚠️ **서버는 판정하지 않는다. 후보만 돌려준다.**
+    #
+    # 클래스별 임계를 서버가 적용하면 **경로에 따라 판정이 달라진다.** 2026-07-31 실측:
+    # `TrtDetector`의 기본값이 온보드용 `pallet 0.7`이라, 스테이션 임계(0.4)로는 통과할
+    # 파렛트(score 0.58~0.65)가 보드에서만 버려져 같은 장면이 로컬은 `ok`, 보드는
+    # `dimensions_only`로 갈렸다. 전복·편하중이 통째로 빠지는 차이다.
+    #
+    # 임계는 스테이션 config가 쥔다(`cfg.threshold_for`). 서버는 바닥 임계만 걸어
+    # 후보를 넘기고, 거르는 일은 클라이언트가 로컬 경로와 **똑같이** 한다.
     _detector = TrtDetector(a.engine, a.plugin, input_size=a.input_size,
                             score_threshold=a.score,
                             class_names=("box", "pallet"),
+                            class_thresholds={},      # 클래스별 임계 없음 — 판정은 호출자가
                             rotate180=False,          # 스테이션 카메라는 정립
                             geometry_filter=False)    # hole 클래스가 없다
     _engine_path = str(a.engine)
