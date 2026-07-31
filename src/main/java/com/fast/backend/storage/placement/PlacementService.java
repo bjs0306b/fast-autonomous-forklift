@@ -22,6 +22,7 @@ import java.util.List;
  * <p><b>한 슬롯에서 두 방향이 모두 가능하면 남는 평면 공간(widthRemaining+lengthRemaining)이 더 작은
  * 방향</b>을 고른다(6장). 슬롯 간 우선순위는 7장 순서를 그대로 따른다:
  * <ol>
+<<<<<<< HEAD
  *   <li>실제로 들어가는 슬롯만(필터)</li>
  *   <li>wastedVolume이 가장 작은 슬롯</li>
  *   <li>widthRemaining+lengthRemaining+heightRemaining이 가장 작은 슬롯</li>
@@ -35,12 +36,26 @@ import java.util.List;
  * {@code slot부피 - cargo부피}이며 clearance를 포함하지 않는다.
  *
  * <p>추천 가능한 슬롯이 없으면 {@link ErrorCode#NO_AVAILABLE_STORAGE_SLOT}을 던진다.
+=======
+ *   <li>{@code status == EMPTY} 인 후보만 본다</li>
+ *   <li>{@code cargoHeight + palletHeightM + heightClearance <= usableHeight} 를 만족해야 한다</li>
+ *   <li>남는 후보 중 pickup 지점에서 가까운 순 → 여유 높이가 작은 순(딱 맞는 칸 우선) → slotCode 순</li>
+ * </ol>
+ *
+ * <p><b>팔레트 높이(prompt95 3장)</b>: {@code cargoHeight} 는 <b>화물만의 높이</b>(m)다 —
+ * {@code station_measurement.cargo_height} 에 팔레트 높이가 들어 있지 않다. 화물은 항상 팔레트에 실려
+ * 운반되므로 랙 간섭 판정에는 팔레트 높이를 더해야 하며, 그 값은 설정
+ * {@code storage.placement.pallet-height-m} 에서 온다(코드에 0.12 를 박지 않는다). 이 클래스가
+ * 팔레트 높이를 더하는 <b>유일한 지점</b>이다 — 저장 시점이나 DTO 변환에서 미리 더하면 이중 가산이 된다.
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
  */
 public class PlacementService {
 
     private final double heightClearance;
+    private final double palletHeightM;
 
     public PlacementService(PlacementProperties placementProperties) {
+<<<<<<< HEAD
         this.heightClearance = placementProperties.heightClearance();
     }
 
@@ -51,22 +66,58 @@ public class PlacementService {
      * @param pickupY   팔레트 pickup Y(m)
      * @return Best Fit 추천 슬롯
      * @throws BusinessException 적재 가능한 슬롯이 없으면 NO_AVAILABLE_STORAGE_SLOT
+=======
+        this.heightClearance = placementProperties == null ? 0.0 : placementProperties.heightClearance();
+        this.palletHeightM = placementProperties == null
+                ? PlacementProperties.DEFAULT_PALLET_HEIGHT_M
+                : placementProperties.palletHeightM();
+    }
+
+    /**
+     * @param cargoHeight 측정된 <b>화물만의</b> 높이(m, 팔레트 제외). {@code station_measurement.cargo_height}
+     *                    에서 온다. 값이 없으면 적합성을 판단할 수 없어 예외를 던진다 — 추측하지 않는다.
+     * @param candidates  후보 슬롯
+     * @param pickupX     픽업 X(m). null 이면 거리 우선순위를 생략한다.
+     * @param pickupY     픽업 Y(m)
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
      */
     public PlacementRecommendation recommend(
             Cargo cargo, List<PlacementCandidate> candidates, Double pickupX, Double pickupY) {
         if (cargo == null) {
             throw new BusinessException(ErrorCode.CARGO_DIMENSION_INVALID, "cargo는 필수입니다.");
         }
+<<<<<<< HEAD
+=======
+
+        // 팔레트 높이를 여기서 정확히 한 번 더한다(prompt95 3장). 아래 판정·여유 높이 계산은 모두
+        // 이 값을 쓴다 — 두 식이 서로 다른 기준을 쓰면 "들어간다고 판정했는데 여유가 음수"가 된다.
+        double totalLoadHeight = cargoHeight + palletHeightM;
+
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
         List<PlacementRecommendation> feasible = new ArrayList<>();
         if (candidates != null) {
             for (PlacementCandidate candidate : candidates) {
                 if (candidate == null || candidate.status() != StorageSlotStatus.EMPTY) {
                     continue; // EMPTY만 추천 대상(BLOCKED/OCCUPIED/RESERVED 제외)
                 }
+<<<<<<< HEAD
                 PlacementRecommendation evaluated = evaluate(cargo, candidate, pickupX, pickupY);
                 if (evaluated != null) {
                     feasible.add(evaluated);
                 }
+=======
+                if (totalLoadHeight + heightClearance > candidate.usableHeight()) {
+                    continue;
+                }
+                feasible.add(new PlacementRecommendation(
+                        candidate.slotCode(),
+                        candidate.destinationX(),
+                        candidate.destinationY(),
+                        candidate.destinationHeading(),
+                        candidate.forkHeight(),
+                        candidate.usableHeight() - totalLoadHeight,
+                        distance(pickupX, pickupY, candidate.destinationX(), candidate.destinationY())));
+>>>>>>> ad35a6d (feat: 스테이션 계측 REST API)
             }
         }
 

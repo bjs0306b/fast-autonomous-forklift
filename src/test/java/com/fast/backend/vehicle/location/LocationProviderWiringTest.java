@@ -39,7 +39,6 @@ class LocationProviderWiringTest {
         service.handleLocation(message);
 
         VehicleLocationSnapshot snap = provider.findLatest("REAL-F01").orElseThrow();
-        assertThat(snap.source()).isEqualTo("REAL");
         assertThat(snap.x()).isEqualTo(2.4);
         assertThat(snap.frameId()).isEqualTo("map");
         assertThat(snap.messageAt()).isEqualTo(MSG_AT);
@@ -58,7 +57,6 @@ class LocationProviderWiringTest {
         service.handleLocation(message);
 
         VehicleLocationSnapshot snap = provider.findLatest("SIM-F01").orElseThrow();
-        assertThat(snap.source()).isEqualTo("SIM");
         assertThat(snap.frameId()).isEqualTo("map");
         assertThat(snap.heading()).isEqualTo(180.0);
     }

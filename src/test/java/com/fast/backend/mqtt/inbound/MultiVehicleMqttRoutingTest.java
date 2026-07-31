@@ -2,7 +2,6 @@ package com.fast.backend.mqtt.inbound;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fast.backend.ai.service.AiCargoAnalysisService;
 import com.fast.backend.command.dto.VehicleCommandResultMessage;
 import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.config.mqtt.MqttProperties;
@@ -16,8 +15,6 @@ import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.service.IsaacForkliftLocationService;
 import com.fast.backend.isaac.service.IsaacForkliftStatusService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
-import com.fast.backend.loadsafety.service.LoadSafetyService;
-import com.fast.backend.station.service.StationMeasurementService;
 import com.fast.backend.transport.dispatch.TransportCommandResultService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +47,7 @@ class MultiVehicleMqttRoutingTest {
         MqttProperties.Topics topics = new MqttProperties.Topics(
                 "forklift/+/status", "forklift/+/location", "forklift/+/path",
                 "forklift/+/command-result", "forklift/+/fork-status", "forklift/+/error",
-                "cargo/detected", "forklift/%s/command", "fast/station/+/measurement",
+                "cargo/detected", "forklift/%s/command",
                 "forklift/+/load-safety");
         MqttTopics mqttTopics = new MqttTopics(new MqttProperties(
                 "tcp://localhost:1883", null, null, "in", "out",
@@ -66,7 +63,7 @@ class MultiVehicleMqttRoutingTest {
                 mock(AiCargoAnalysisService.class), isaacForkliftLocationService,
                 mock(IsaacForkliftStatusService.class), mock(IsaacForkliftPathService.class),
                 vehicleCommandResultService, mock(EmbeddedForkStatusService.class),
-                mock(EmbeddedErrorService.class), mock(StationMeasurementService.class),
+                mock(EmbeddedErrorService.class),
                 transportCommandResultService, mock(LoadSafetyService.class));
     }
 

@@ -50,8 +50,7 @@ class MqttPropertiesBindingTest {
                         "mqtt.topics.forklift-fork-status=forklift/+/fork-status",
                         "mqtt.topics.forklift-error=forklift/+/error",
                         "mqtt.topics.cargo-detected=cargo/detected",
-                        "mqtt.topics.forklift-command=forklift/%s/command",
-                        "mqtt.topics.station-measurement=fast/station/+/measurement")
+                        "mqtt.topics.forklift-command=forklift/%s/command")
                 .run(context -> {
                     MqttProperties properties = context.getBean(MqttProperties.class);
                     assertThat(properties.defaultQos()).isEqualTo(1);
@@ -72,22 +71,22 @@ class MqttPropertiesBindingTest {
                     assertThat(properties.topics().forkliftError()).isEqualTo("forklift/+/error");
                     assertThat(properties.topics().cargoDetected()).isEqualTo("cargo/detected");
                     assertThat(properties.topics().forkliftCommand()).isEqualTo("forklift/%s/command");
-                    assertThat(properties.topics().stationMeasurement()).isEqualTo("fast/station/+/measurement");
                 });
     }
 
     @Test
-    void topicsRecord_hasNoEmergencyFieldAnymore() {
-        // prompt32.md에서 forklift/{id}/emergency 전용 토픽을 제거했다 — Topics record에 그 필드가
-        // 부활하지 않았는지 회귀 검증한다(리플렉션으로 컴포넌트 이름만 확인, 값 바인딩과 무관).
+    void topicsRecord_hasNoRemovedFieldsAnymore() {
+        // prompt32.md에서 forklift/{id}/emergency 를, prompt95.md에서 fast/station/+/measurement 를
+        // 제거했다 — Topics record에 그 필드들이 부활하지 않았는지 회귀 검증한다(리플렉션으로 컴포넌트
+        // 이름만 확인, 값 바인딩과 무관).
         var componentNames = java.util.Arrays.stream(MqttProperties.Topics.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName)
                 .toList();
 
-        assertThat(componentNames).doesNotContain("forkliftEmergency");
+        assertThat(componentNames).doesNotContain("forkliftEmergency", "stationMeasurement");
         assertThat(componentNames).containsExactlyInAnyOrder(
                 "forkliftStatus", "forkliftLocation", "forkliftPath", "forkliftCommandResult",
-                "forkliftForkStatus", "forkliftError", "cargoDetected", "forkliftCommand", "stationMeasurement",
+                "forkliftForkStatus", "forkliftError", "cargoDetected", "forkliftCommand",
                 // prompt63.md 4장으로 추가된 적재 화물 안전 구독 토픽.
                 "forkliftLoadSafety");
     }

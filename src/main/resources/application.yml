@@ -14,11 +14,25 @@ spring:
 server:
   port: 8080
 
-# 적재 위치 추천 설정(prompt46.md 6장). height-clearance는 화물 높이 위에 확보할 여유 높이(m).
-# 값을 지정하지 않으면 0(여유 없음)이며, 실제 운영 여유값은 팀 협의 대상이다(prompt46.md 20장).
+# 적재 위치 추천 설정(prompt46.md 6장, prompt95.md 2장).
+#
+# height-clearance
+#   단위: meter. 화물+팔레트 위에 추가로 확보할 안전 여유 높이.
+#   값을 지정하지 않으면 0(여유 없음)이며, 실제 운영 여유값은 팀 협의 대상이다(prompt46.md 20장).
+#   환경변수: STORAGE_PLACEMENT_HEIGHT_CLEARANCE
+#
+# pallet-height-m
+#   단위: meter.
+#   의미: T-11 팔레트 실물 높이(1100×1100mm 규격, 높이 0.12m).
+#   DB 반영: station_measurement.cargo_height 에는 **포함되지 않는다**(화물만의 높이).
+#   사용처: 적재 높이 판정에서 PlacementService 가 **정확히 한 번만** 더한다.
+#           requiredHeight = cargoHeight + pallet-height-m + height-clearance
+#   환경변수: STORAGE_PLACEMENT_PALLET_HEIGHT_M
+#   제약: null 불가(미지정 시 0.12), finite, 0 초과.
 storage:
   placement:
     height-clearance: 0.05
+    pallet-height-m: 0.12
 
 logging:
   level:

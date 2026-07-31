@@ -84,7 +84,6 @@ class VehicleCommandMapperTest {
         command.setEmergencyStopApplied(true);
         command.setRequiresReset(true);
         command.setResultMessage("주행과 포크 정지 완료");
-        command.setUpdatedAt(LocalDateTime.now().withNano(0));
         commandMapper.update(command);
 
         VehicleCommand loaded = commandMapper.findByCommandId("CMD-M-003").orElseThrow();
@@ -152,7 +151,6 @@ class VehicleCommandMapperTest {
         command.setStatus(VehicleCommandStatus.PENDING);
         command.setIssuedAt(now);
         command.setCreatedAt(now);
-        command.setUpdatedAt(now);
         return command;
     }
 }

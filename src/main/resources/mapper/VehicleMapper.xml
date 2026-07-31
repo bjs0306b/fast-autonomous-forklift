@@ -3,24 +3,25 @@
 <mapper namespace="com.fast.backend.vehicle.mapper.VehicleMapper">
 
     <resultMap id="vehicleResultMap" type="com.fast.backend.vehicle.domain.Vehicle">
-        <id property="id" column="id"/>
-        <result property="vehicleId" column="vehicle_id"/>
+        <!--
+            FR-202 최종 스키마: vehicle 은 vehicle_id(PK)/name/active/created_at/updated_at 뿐이다.
+            대리키 id, source(REAL/SIMULATION), vehicle_type 은 DB·도메인·API 에서 모두 제거됐다(prompt90).
+            vehicle_id 가 자연키 PK 이므로 useGeneratedKeys 를 쓰지 않는다.
+        -->
+        <id property="vehicleId" column="vehicle_id"/>
         <result property="name" column="name"/>
-        <result property="source" column="source"/>
-        <result property="vehicleType" column="vehicle_type"/>
         <result property="active" column="active"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
-    <insert id="insert" parameterType="com.fast.backend.vehicle.domain.Vehicle"
-            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
-        INSERT INTO vehicle (vehicle_id, name, source, vehicle_type, active, created_at, updated_at)
-        VALUES (#{vehicleId}, #{name}, #{source}, #{vehicleType}, #{active}, #{createdAt}, #{updatedAt})
+    <insert id="insert" parameterType="com.fast.backend.vehicle.domain.Vehicle">
+        INSERT INTO vehicle (vehicle_id, name, active, created_at, updated_at)
+        VALUES (#{vehicleId}, #{name}, #{active}, #{createdAt}, #{updatedAt})
     </insert>
 
     <select id="findByVehicleId" resultMap="vehicleResultMap">
-        SELECT id, vehicle_id, name, source, vehicle_type, active, created_at, updated_at
+        SELECT vehicle_id, name, active, created_at, updated_at
         FROM vehicle
         WHERE vehicle_id = #{vehicleId}
     </select>
@@ -39,7 +40,7 @@
     </update>
 
     <select id="findAllActive" resultMap="vehicleResultMap">
-        SELECT id, vehicle_id, name, source, vehicle_type, active, created_at, updated_at
+        SELECT vehicle_id, name, active, created_at, updated_at
         FROM vehicle
         WHERE active = true
         ORDER BY vehicle_id
