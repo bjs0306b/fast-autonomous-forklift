@@ -16,6 +16,7 @@ import com.fast.backend.station.mapper.StationSessionMapper;
 import com.fast.backend.station.websocket.StationMeasurementBroadcaster;
 import com.fast.backend.storage.domain.Cargo;
 import com.fast.backend.storage.mapper.CargoMapper;
+import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.transport.service.TransportTaskMeasurementService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +60,7 @@ public class StationMeasurementService {
     private final StationMeasurementPlacementEligibility placementEligibility;
     private final StationMeasurementBroadcaster broadcaster;
     private final CargoMapper cargoMapper;
+    private final TransportTaskMapper transportTaskMapper;
     private final StationSessionProperties sessionProperties;
     private final TransportTaskMeasurementService transportTaskMeasurementService;
     private final Clock clock;
@@ -69,6 +71,7 @@ public class StationMeasurementService {
             StationMeasurementPlacementEligibility placementEligibility,
             StationMeasurementBroadcaster broadcaster,
             CargoMapper cargoMapper,
+            TransportTaskMapper transportTaskMapper,
             StationSessionProperties sessionProperties,
             TransportTaskMeasurementService transportTaskMeasurementService,
             Clock clock) {
@@ -78,6 +81,7 @@ public class StationMeasurementService {
         this.placementEligibility = placementEligibility;
         this.broadcaster = broadcaster;
         this.cargoMapper = cargoMapper;
+        this.transportTaskMapper = transportTaskMapper;
         this.sessionProperties = sessionProperties;
         this.transportTaskMeasurementService = transportTaskMeasurementService;
         this.clock = clock;
@@ -117,6 +121,15 @@ public class StationMeasurementService {
             throw new BusinessException(ErrorCode.STATION_ALREADY_OCCUPIED,
                     "측정 설비가 이미 점유 중입니다. 기존 세션을 먼저 종료하세요.");
         }
+
+        // 차량 도착 요청으로 대기 중인 작업이 있으면 AI가 연 세션을 그 작업에 연결한다.
+        // 수동 측정처럼 연결할 작업이 없는 경우에는 독립 세션으로 그대로 허용한다.
+        transportTaskMapper.findPendingMeasurementByCargoId(cargoId).ifPresent(task -> {
+            if (transportTaskMapper.startMeasurement(task.getId(), sessionId) != 1) {
+                throw new IllegalStateException(
+                        "Failed to bind the station session to transport task: " + task.getTaskCode());
+            }
+        });
 
         if (before != null && before.isOccupied() && before.isExpired(expiredBefore)) {
             // 정상 종료를 못 하고 죽은 세션을 회수한 경우다. 조용히 넘어가면 "왜 남의 세션이

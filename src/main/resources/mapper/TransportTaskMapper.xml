@@ -104,6 +104,13 @@
         SET measurement_session_id=#{sessionId}, status='MEASURING'
         WHERE id=#{id} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
     </update>
+    <select id="findPendingMeasurementByCargoId" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE cargo_id=#{cargoId} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+    </select>
     <select id="findByMeasurementSessionId" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
         WHERE measurement_session_id=#{sessionId}

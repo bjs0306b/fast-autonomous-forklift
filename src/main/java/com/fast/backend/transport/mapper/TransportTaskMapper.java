@@ -51,6 +51,7 @@ public interface TransportTaskMapper {
             @Param("destinationHeading") Double destinationHeading,
             @Param("forkHeight") Double forkHeight);
     int startMeasurement(@Param("id") Long id, @Param("sessionId") String sessionId);
+    Optional<TransportTask> findPendingMeasurementByCargoId(String cargoId);
     Optional<TransportTask> findByMeasurementSessionId(String sessionId);
     int lockMeasurementLane();
     boolean existsMeasurementLaneBusy();

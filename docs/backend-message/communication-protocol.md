@@ -6,7 +6,7 @@
 
 ```text
 차량 제어: 관제 REST 요청 → Spring Boot MQTT 명령 → ROS2 처리 → MQTT 상태/결과 수신
-화물 측정: taskId 연결 MOVE 성공 → 백엔드 MQTT 측정 요청 → AI 최대 3회 측정
+화물 측정: taskId 연결 MOVE 성공 → 백엔드 MQTT 측정 요청 → AI 세션 생성 및 1회 측정
              → AI REST 결과 등록
   → MySQL 저장
   → REST 조회 및 STOMP WebSocket 갱신
@@ -29,7 +29,7 @@
 | `forklift/{vehicleId}/path` | ROS2/Isaac → 백엔드 | `forkliftId`, `waypoints[]`, `goal{x,y,heading}`, `timestamp` |
 | `forklift/{vehicleId}/command` | 백엔드 → ROS2 | 명령 envelope |
 | `forklift/{vehicleId}/command-result` | ROS2 → 백엔드 | `commandId`, `vehicleId`, `result`, `message`, `completedAt` |
-| `fast/station/measure_request` | 백엔드 → 측정 AI | `sessionId`, `cargoId`, `taskId`, `vehicleId`, `maxAttempts`, `requestedAt` |
+| `fast/station/measure_request` | 백엔드 → 측정 AI | `cargoId` |
 
 ### 차량 명령
 
@@ -51,7 +51,7 @@
 
 ### 측정 결과
 
-백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 세션을 열고 MQTT 측정 요청을 발행한다. 측정 AI는 요청의 `sessionId`를 그대로 포함해 `POST /api/stations/measurements`로 최종 결과를 등록한다.
+백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 `cargoId`로 MQTT 측정 요청을 발행한다. 측정 AI는 세션 생성 API를 호출하고, 응답으로 받은 `sessionId`를 포함해 `POST /api/stations/measurements`로 최종 결과를 등록한다. 세션 생성 시 백엔드는 같은 화물의 측정 대기 작업과 세션을 연결한다.
 
 ```json
 {

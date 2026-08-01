@@ -19,8 +19,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 측정 세션과 측정 결과 API.
  *
- * <p>정상 운반 흐름에서는 MOVE 성공 후 백엔드가 세션을 열고 MQTT 측정 요청을 보낸다. 측정 프로그램은
- * 요청에 포함된 sessionId로 최종 결과만 REST 등록한다. 세션 생성 API는 수동 점검용으로도 유지한다.
+ * <p>정상 운반 흐름에서는 MOVE 성공 후 백엔드가 cargoId로 MQTT 측정 요청을 보낸다. 측정 프로그램이
+ * 세션 생성 API를 호출하면 백엔드는 해당 세션을 운반 작업에 연결하고, 측정 프로그램은 받은 sessionId로
+ * 최종 결과를 REST 등록한다.
  *
  * <p><b>정상 흐름</b>: 세션 시작 → 측정 → 결과 저장과 세션 자동 해제 → 적재 추천.
  * 활성 세션이 있으면 새 세션을 시작할 수 없다.

@@ -24,7 +24,7 @@ import java.time.Clock;
  * 등록하면 그쪽이 우선한다.
  */
 @Configuration
-@EnableConfigurationProperties({StationSessionProperties.class, StationMeasurementRequestProperties.class})
+@EnableConfigurationProperties(StationSessionProperties.class)
 public class StationSessionConfig {
 
     @Bean

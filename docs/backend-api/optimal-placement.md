@@ -66,7 +66,7 @@ heightRemaining = usableHeight - (cargoHeight + palletHeight)
 
 ## 작업 생성과 예약
 
-운반 작업은 `cargoId`만으로 먼저 생성하며 이 시점의 `measurementId`, 목적지, 포크 높이는 null이다. 차량 배정 후 `taskId`가 연결된 MOVE 명령이 성공하면 백엔드가 측정 세션과 MQTT 요청을 생성한다.
+운반 작업은 `cargoId`만으로 먼저 생성하며 이 시점의 `measurementId`, 목적지, 포크 높이는 null이다. 차량 배정 후 `taskId`가 연결된 MOVE 명령이 성공하면 백엔드가 MQTT 측정 요청을 보낸다. AI가 기존 API로 세션을 생성하면 백엔드는 같은 `cargoId`의 대기 작업에 해당 세션을 연결한다.
 
 최종 측정 결과가 적합하면 백엔드는 다음을 하나의 트랜잭션으로 처리한다.
 

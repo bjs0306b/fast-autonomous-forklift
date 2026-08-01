@@ -61,7 +61,9 @@ class TransportTaskServiceIntegrationTest {
         assertThat(taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP, now, null, null)).isEqualTo(1);
         StationSession session = measurementService.openSession(cargo.getCargoId());
-        assertThat(taskMapper.startMeasurement(task.getId(), session.getSessionId())).isEqualTo(1);
+        TransportTask measuring = taskMapper.findById(task.getId()).orElseThrow();
+        assertThat(measuring.getStatus()).isEqualTo(TaskStatus.MEASURING);
+        assertThat(measuring.getMeasurementSessionId()).isEqualTo(session.getSessionId());
         measurementService.create(new com.fast.backend.station.dto.StationMeasurementCreateRequest(
                 session.getSessionId(), "MEASUREMENT-TRANSPORT", "ok",
                 0.50, "safe", 0.02));

@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS transport_task (
     id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '운반 작업 내부 식별자',
     task_code             VARCHAR(50)  NOT NULL COMMENT '외부 운반 작업 식별자',
     cargo_id              VARCHAR(50)  NOT NULL COMMENT '운반 대상 화물 식별자',
-    measurement_session_id VARCHAR(100) NULL COMMENT '측정 위치 도착 후 발급된 세션 식별자',
+    measurement_session_id VARCHAR(100) NULL COMMENT 'AI의 세션 생성 요청 후 연결된 세션 식별자',
     measurement_id        VARCHAR(100) NULL COMMENT '측정 완료 후 연결되는 배치 판단 결과',
     vehicle_id            VARCHAR(50)  NULL COMMENT '배정된 차량 식별자',
     destination_slot_code VARCHAR(50)  NULL COMMENT '측정 완료 후 선택되는 목적지 적재 위치',

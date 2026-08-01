@@ -99,7 +99,7 @@
 |---|---|
 | `id`, `task_code` | 내부 키와 외부 작업 식별자 |
 | `cargo_id` | 운반 대상 화물 |
-| `measurement_session_id` | 측정 위치 도착 후 발급되어 작업과 결과를 연결하는 세션 |
+| `measurement_session_id` | AI의 세션 생성 요청 후 작업과 결과를 연결하는 세션 |
 | `measurement_id` | 측정 완료 후 연결되는 배치 판단 근거. 측정 전에는 null |
 | `vehicle_id` | 배정 차량, 배정 전 null |
 | `destination_slot_code` | 측정 완료 후 선택한 적재 위치. 측정 전에는 null |
@@ -107,7 +107,7 @@
 | `status` | 작업 진행 상태 |
 | `assigned_at` ~ `failed_at`, `created_at` | 상태별 이력 시각 |
 
-작업은 측정 전에 생성된다. MOVE 성공 후 `measurement_session_id`가 연결되고, 최종 측정 결과가 적합할 때 목적지 예약과 스냅샷 저장을 함께 처리한다. 목적지 스냅샷은 슬롯 설정이 나중에 바뀌어도 이미 생성된 작업의 실행 목표를 보존한다.
+작업은 측정 전에 생성된다. MOVE 성공 후 AI가 측정 세션을 생성하면 `measurement_session_id`가 연결되고, 최종 측정 결과가 적합할 때 목적지 예약과 스냅샷 저장을 함께 처리한다. 목적지 스냅샷은 슬롯 설정이 나중에 바뀌어도 이미 생성된 작업의 실행 목표를 보존한다.
 
 ### vehicle_command
 

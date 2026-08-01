@@ -8,8 +8,10 @@
 운반 작업 생성 및 차량 배정
 → taskId가 포함된 측정 위치 MOVE 명령 발행
 → ROS2가 MOVE 결과 SUCCESS 반환
-→ 백엔드가 측정 세션 생성 및 fast/station/measure_request 발행
-→ AI 측정 프로그램이 최대 3회 촬영·추론
+→ 백엔드가 cargoId로 fast/station/measure_request 발행
+→ AI 측정 프로그램이 기존 REST API로 측정 세션 생성
+→ 백엔드가 세션과 대기 중인 운반 작업 연결
+→ AI 측정 프로그램이 1회 촬영·추론
 → AI 측정 프로그램이 최종 결과를 REST로 등록
 → 백엔드가 적재 위치를 선택·예약하고 작업을 PICKING_UP으로 전환
 ```
@@ -52,29 +54,20 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 
 ```json
 {
-  "sessionId": "uuid",
-  "cargoId": "CARGO-001",
-  "taskId": "TASK-uuid",
-  "vehicleId": "FORKLIFT-01",
-  "maxAttempts": 3,
-  "requestedAt": "2026-08-02T10:00:00+09:00"
+  "cargoId": "CARGO-001"
 }
 ```
 
-- 한 요청 안에서 새 프레임으로 최대 `maxAttempts`회 측정한다.
-- 중간 실패 결과를 백엔드에 보내지 않고 최종 결과 한 건만 전송한다.
+- 요청 한 건당 한 번 측정하고 최종 결과 한 건만 전송한다.
+- AI는 기존 `POST /api/stations/sessions?cargoId=...` API로 세션을 생성한다.
+- 백엔드는 생성된 세션을 같은 `cargoId`의 측정 대기 작업과 연결한다.
 - 이미지 파일은 저장하지 않는다. 실시간 영상 표시가 필요하면 측정 결과 계약과 별도 스트림으로 구현한다.
 
-현재 코드에서 필요한 변경 지점은 다음과 같다.
-
-- `ai/src/station/trigger.py`: `cargoId`뿐 아니라 요청의 `sessionId`, `taskId`, `vehicleId`, `maxAttempts`를 측정 실행부에 전달
-- `ai/src/station/serve.py`: MQTT 요청으로 시작한 경우 새 세션을 열지 않고 요청의 `sessionId` 사용
-- `ai/src/station/serve.py`: 한 요청 안에서 새 프레임으로 최대 `maxAttempts`회 재측정
-- `ai/src/station/rest_client.py`: 이미 지원하는 `session_id` 인자로 요청의 `sessionId` 전달
+현재 AI의 `trigger.py`, `serve.py`, `rest_client.py` 세션 생성 흐름을 그대로 사용한다.
 
 ### 최종 결과 등록
 
-AI 측정 프로그램은 `POST /api/stations/measurements`로 결과를 등록한다. 요청에서 받은 `sessionId`를 반드시 그대로 돌려보내야 한다.
+AI 측정 프로그램은 세션 생성 API에서 받은 `sessionId`를 그대로 사용해 `POST /api/stations/measurements`로 결과를 등록한다.
 
 ```json
 {
@@ -109,6 +102,7 @@ AI 측정 프로그램은 `POST /api/stations/measurements`로 결과를 등록�
 
 - 한 번에 하나의 작업만 측정 위치로 이동하거나 측정할 수 있다.
 - `vehicle_command.task_id`로 MOVE 결과와 운반 작업을 연결한다.
+- AI가 세션을 생성하면 같은 `cargoId`의 측정 대기 작업에 연결한다.
 - `transport_task.measurement_session_id`로 측정 결과의 대상 작업을 확정한다.
 - 측정 요청 실패, MOVE 실패, 부적합 측정 결과는 작업을 `FAILED`로 종료한다.
 - AI 측정 결과는 MQTT가 아니라 REST 한 경로로만 받는다.
