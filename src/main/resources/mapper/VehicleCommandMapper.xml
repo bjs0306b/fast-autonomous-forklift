@@ -33,6 +33,9 @@
     <select id="findByCommandId" resultMap="result">
         SELECT <include refid="columns"/> FROM vehicle_command WHERE command_id=#{commandId}
     </select>
+    <select id="findByCommandIdForUpdate" resultMap="result">
+        SELECT <include refid="columns"/> FROM vehicle_command WHERE command_id=#{commandId} FOR UPDATE
+    </select>
     <select id="findRecentByVehicleId" resultMap="result">
         SELECT <include refid="columns"/> FROM vehicle_command
         WHERE vehicle_id=#{vehicleId}

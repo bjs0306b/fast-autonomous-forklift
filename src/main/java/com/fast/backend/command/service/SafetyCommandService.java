@@ -58,7 +58,7 @@ public class SafetyCommandService {
         validateVehicleId(vehicleId);
         requireActiveVehicle(vehicleId);
         VehicleCommandResponse response = vehicleCommandService.issueCommand(
-                vehicleId, new VehicleCommandRequest(command, null, null, null));
+                vehicleId, new VehicleCommandRequest(command, null, null, null, null));
         broadcaster.broadcastPublish(command, response);
         return response;
     }
@@ -77,7 +77,7 @@ public class SafetyCommandService {
             String vehicleId = vehicle.getVehicleId();
             try {
                 VehicleCommandResponse response = vehicleCommandService.issueCommand(
-                        vehicleId, new VehicleCommandRequest(EMERGENCY_STOP, null, null, null));
+                        vehicleId, new VehicleCommandRequest(EMERGENCY_STOP, null, null, null, null));
                 broadcaster.broadcastPublish(EMERGENCY_STOP, response);
                 boolean ok = "PUBLISHED".equals(response.status());
                 if (ok) {

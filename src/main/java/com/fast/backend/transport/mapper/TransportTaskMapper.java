@@ -35,6 +35,25 @@ public interface TransportTaskMapper {
             @Param("pickedUpAt") LocalDateTime pickedUpAt,
             @Param("completedAt") LocalDateTime completedAt,
             @Param("failedAt") LocalDateTime failedAt);
+    int updateStatusIfCurrent(
+            @Param("id") Long id,
+            @Param("expectedStatus") TaskStatus expectedStatus,
+            @Param("targetStatus") TaskStatus targetStatus,
+            @Param("startedAt") LocalDateTime startedAt,
+            @Param("pickedUpAt") LocalDateTime pickedUpAt,
+            @Param("failedAt") LocalDateTime failedAt);
+    int completeMeasurement(
+            @Param("id") Long id,
+            @Param("measurementId") String measurementId,
+            @Param("destinationSlotCode") String destinationSlotCode,
+            @Param("destinationX") Double destinationX,
+            @Param("destinationY") Double destinationY,
+            @Param("destinationHeading") Double destinationHeading,
+            @Param("forkHeight") Double forkHeight);
+    int startMeasurement(@Param("id") Long id, @Param("sessionId") String sessionId);
+    Optional<TransportTask> findByMeasurementSessionId(String sessionId);
+    int lockMeasurementLane();
+    boolean existsMeasurementLaneBusy();
     boolean existsActiveTaskByVehicleId(String vehicleId);
     boolean existsOpenTaskByCargoId(String cargoId);
     boolean existsActiveTaskBySlotCode(String slotCode);

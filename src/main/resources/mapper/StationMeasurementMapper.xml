@@ -46,13 +46,4 @@
         LIMIT 1
     </select>
 
-    <select id="findLatestByCargoId" resultMap="stationMeasurementResultMap">
-        SELECT m.sequence_no, m.measurement_id, m.session_id, m.status,
-               m.cargo_height, m.tipping_level, m.overhang_ratio, m.created_at
-        FROM station_measurement m
-        JOIN station_session s ON s.session_id = m.session_id
-        WHERE s.cargo_id = #{cargoId}
-        ORDER BY m.sequence_no DESC
-        LIMIT 1
-    </select>
 </mapper>

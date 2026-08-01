@@ -6,8 +6,8 @@
 
 ```text
 차량 제어: 관제 REST 요청 → Spring Boot MQTT 명령 → ROS2 처리 → MQTT 상태/결과 수신
-화물 측정: 측정 AI가 REST로 세션 생성 → 측정 → REST 결과 등록
-             (백엔드는 같은 결과 DTO의 MQTT 수신도 지원)
+화물 측정: taskId 연결 MOVE 성공 → 백엔드 MQTT 측정 요청 → AI 최대 3회 측정
+             → AI REST 결과 등록
   → MySQL 저장
   → REST 조회 및 STOMP WebSocket 갱신
 ```
@@ -29,7 +29,7 @@
 | `forklift/{vehicleId}/path` | ROS2/Isaac → 백엔드 | `forkliftId`, `waypoints[]`, `goal{x,y,heading}`, `timestamp` |
 | `forklift/{vehicleId}/command` | 백엔드 → ROS2 | 명령 envelope |
 | `forklift/{vehicleId}/command-result` | ROS2 → 백엔드 | `commandId`, `vehicleId`, `result`, `message`, `completedAt` |
-| `fast/station/measurement` | 측정 AI → 백엔드(선택 경로) | 측정 결과 |
+| `fast/station/measure_request` | 백엔드 → 측정 AI | `sessionId`, `cargoId`, `taskId`, `vehicleId`, `maxAttempts`, `requestedAt` |
 
 ### 차량 명령
 
@@ -51,8 +51,7 @@
 
 ### 측정 결과
 
-현재 측정 AI는 `POST /api/stations/sessions?cargoId=...`로 세션을 연 뒤 측정 결과를
-`POST /api/stations/measurements`로 등록한다. 백엔드 MQTT 수신 경계를 사용할 때도 payload는 같다.
+백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 세션을 열고 MQTT 측정 요청을 발행한다. 측정 AI는 요청의 `sessionId`를 그대로 포함해 `POST /api/stations/measurements`로 최종 결과를 등록한다.
 
 ```json
 {
@@ -76,15 +75,26 @@
 
 | Method | 경로 | 역할 |
 |---|---|---|
+| `POST` | `/api/cargos` | 측정 전 화물 등록 |
 | `POST` | `/api/stations/sessions?cargoId=...` | 측정 세션 생성 |
 | `DELETE` | `/api/stations/sessions/{sessionId}/force` | 실패 후 남은 세션 강제 해제 |
 | `GET` | `/api/stations/sessions/active` | 현재 측정 중인 세션 조회 |
 | `GET` | `/api/stations/sessions/{sessionId}/measurements/latest` | 세션 측정 결과 조회 |
 | `POST` | `/api/stations/measurements` | 측정 결과 등록 |
-| `POST` | `/api/transport-tasks` | 측정 결과 기반 적재 위치 선정 및 운반 작업 생성 |
+| `POST` | `/api/transport-tasks` | 측정 전 운반 작업 생성 |
 | `PATCH` | `/api/transport-tasks/{taskId}/assign` | 차량 배정 |
 | `PATCH` | `/api/transport-tasks/{taskId}/status` | 작업 상태 전이 |
-| `POST` | `/api/vehicles/{vehicleId}/commands` | 차량 명령 생성·MQTT 발행 |
+| `POST` | `/api/vehicles/{vehicleId}/commands` | 차량 명령 생성·MQTT 발행. 측정 위치 MOVE에는 `taskId` 포함 |
+
+측정 위치 MOVE 요청 예시는 다음과 같다. `taskId`는 `POST /api/transport-tasks` 응답의 문자열 작업 식별자다.
+
+```json
+{
+  "taskId": "TASK-uuid",
+  "command": "MOVE",
+  "destination": {"x": 1.0, "y": 2.0, "heading": 90.0, "frameId": "map"}
+}
+```
 
 ## 실시간 화면
 
@@ -96,3 +106,5 @@
 - REST 재시도나 MQTT QoS 1 재전송으로 같은 결과가 다시 와도 `measurementId` unique 제약으로 중복 저장하지 않는다.
 - 위치 메시지는 `messageAt`이 현재 저장값보다 새로울 때만 반영한다.
 - DB를 새로 만드는 MVP 단계이므로 별도 마이그레이션 파일은 두지 않는다.
+
+외부 파트별 구현 책임과 예시는 `docs/backend-message/cargo-measurement-workflow-contract.md`를 따른다.

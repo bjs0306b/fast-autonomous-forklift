@@ -36,7 +36,7 @@ mqtt:
     forklift-location: forklift/+/location
     forklift-path: forklift/+/path
     forklift-command-result: forklift/+/command-result
-    station-measurement: fast/station/measurement
+    station-measure-request: fast/station/measure_request
     forklift-command: forklift/%s/command
 
 vehicle:

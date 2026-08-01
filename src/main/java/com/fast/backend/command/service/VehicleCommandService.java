@@ -16,6 +16,9 @@ import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.vehicle.domain.Vehicle;
 import com.fast.backend.vehicle.mapper.VehicleMapper;
+import com.fast.backend.transport.domain.TaskStatus;
+import com.fast.backend.transport.domain.TransportTask;
+import com.fast.backend.transport.mapper.TransportTaskMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,14 +39,17 @@ public class VehicleCommandService {
     private final VehicleMapper vehicleMapper;
     private final VehicleCommandMapper commandMapper;
     private final VehicleCommandPublisher publisher;
+    private final TransportTaskMapper transportTaskMapper;
 
     public VehicleCommandService(
             VehicleMapper vehicleMapper,
             VehicleCommandMapper commandMapper,
-            VehicleCommandPublisher publisher) {
+            VehicleCommandPublisher publisher,
+            TransportTaskMapper transportTaskMapper) {
         this.vehicleMapper = vehicleMapper;
         this.commandMapper = commandMapper;
         this.publisher = publisher;
+        this.transportTaskMapper = transportTaskMapper;
     }
 
     @Transactional
@@ -59,10 +65,12 @@ public class VehicleCommandService {
         VehicleCommandTargetSystem target = resolveTarget(request.targetSystem(), command);
         VehicleCommandCategory category = resolveCategory(request.commandCategory(), command);
         VehicleCommandPayload payload = buildPayload(command, request.destination());
+        TransportTask linkedTask = resolveLinkedTask(request.taskId(), vehicleId, command);
         OffsetDateTime issuedAt = CommunicationTime.nowOffset();
 
         VehicleCommand entity = new VehicleCommand();
         entity.setCommandId(UUID.randomUUID().toString());
+        entity.setTaskId(linkedTask == null ? null : linkedTask.getId());
         entity.setVehicleId(vehicleId);
         entity.setCommand(command);
         entity.setTargetSystem(target);
@@ -78,9 +86,49 @@ public class VehicleCommandService {
         } catch (RuntimeException exception) {
             entity.setStatus(VehicleCommandStatus.PUBLISH_FAILED);
             entity.setResultMessage(exception.getMessage());
+            if (linkedTask != null) {
+                transportTaskMapper.updateStatusIfCurrent(
+                        linkedTask.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.FAILED,
+                        null, null, CommunicationTime.toLocal(issuedAt));
+            }
         }
         commandMapper.update(entity);
         return toResponse(entity);
+    }
+
+    private TransportTask resolveLinkedTask(String taskCode, String vehicleId, VehicleCommandType command) {
+        if (taskCode == null || taskCode.isBlank()) {
+            return null;
+        }
+        if (command != VehicleCommandType.MOVE) {
+            throw new BusinessException(ErrorCode.COMMAND_COMBINATION_INVALID,
+                    "taskId는 측정 위치로 이동하는 MOVE 명령에만 연결할 수 있습니다.");
+        }
+        TransportTask task = transportTaskMapper.findByTaskCode(taskCode.trim())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TRANSPORT_TASK_NOT_FOUND));
+        if (!vehicleId.equals(task.getVehicleId())) {
+            throw new BusinessException(ErrorCode.VEHICLE_NOT_AVAILABLE,
+                    "운반 작업에 배정된 차량과 명령 대상 차량이 다릅니다.");
+        }
+        if (task.getStatus() != TaskStatus.ASSIGNED) {
+            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION,
+                    "ASSIGNED 상태 작업만 측정 위치 이동 명령을 시작할 수 있습니다.");
+        }
+        // station_state의 단일 행을 잠가 동시 MOVE 요청 두 건이 모두 빈 측정 차선을 보는 경합을 막는다.
+        transportTaskMapper.lockMeasurementLane();
+        if (transportTaskMapper.existsMeasurementLaneBusy()) {
+            throw new BusinessException(ErrorCode.STATION_ALREADY_OCCUPIED,
+                    "다른 차량이 측정 위치로 이동 중이거나 측정 중입니다.");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (transportTaskMapper.updateStatusIfCurrent(
+                task.getId(), TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP,
+                now, null, null) != 1) {
+            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION);
+        }
+        task.setStatus(TaskStatus.MOVING_TO_PICKUP);
+        task.setStartedAt(now);
+        return task;
     }
 
     @Transactional(readOnly = true)

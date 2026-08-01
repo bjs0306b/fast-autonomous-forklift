@@ -1,0 +1,114 @@
+# 화물 측정 연동 계약
+
+이 문서는 백엔드 밖의 ROS2·AI·Isaac Sim 담당자가 구현해야 할 최소 계약을 정리한다. 백엔드는 DB와 아래 MQTT/REST 경계까지만 책임진다.
+
+## 전체 순서
+
+```text
+운반 작업 생성 및 차량 배정
+→ taskId가 포함된 측정 위치 MOVE 명령 발행
+→ ROS2가 MOVE 결과 SUCCESS 반환
+→ 백엔드가 측정 세션 생성 및 fast/station/measure_request 발행
+→ AI 측정 프로그램이 최대 3회 촬영·추론
+→ AI 측정 프로그램이 최종 결과를 REST로 등록
+→ 백엔드가 적재 위치를 선택·예약하고 작업을 PICKING_UP으로 전환
+```
+
+작업 상태는 `ASSIGNED → MOVING_TO_PICKUP → MEASURING → PICKING_UP` 순서로 진행한다. 측정 결과가 안전 조건을 만족하지 않거나 빈 적재 위치가 없으면 `FAILED`로 종료한다.
+
+## ROS2 담당 계약
+
+ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결과를 `forklift/{vehicleId}/command-result`로 반환한다.
+
+- 받은 `commandId`, `vehicleId`, `targetSystem`, `commandCategory`, `command`를 결과에 그대로 사용한다.
+- Nav2 목표 도착이 성공했을 때만 `result=SUCCESS`를 보낸다.
+- 취소·실패·거부는 각각 `CANCELLED`, `FAILED`, `REJECTED`로 보낸다.
+- 좌표계는 `map`, 좌표는 m, `heading`은 degree를 사용한다.
+- ROS2가 측정 요청 토픽을 직접 발행하거나 `cargoId`를 관리하지 않는다.
+
+현재 `ros2_ws/src/fast_mqtt_bridge`는 명령 검증과 결과 envelope까지 있으나 실제 Nav2 실행 adapter가 임시 구현이다. ROS2 담당자는 MOVE를 `NavigateToPose`에 연결하고 목표 종료 결과를 아래 형식으로 반환해야 한다.
+
+```json
+{
+  "commandId": "uuid",
+  "vehicleId": "FORKLIFT-01",
+  "targetSystem": "ROS2",
+  "commandCategory": "MOVE",
+  "command": "MOVE",
+  "result": "SUCCESS",
+  "message": "goal reached",
+  "completedAt": "2026-08-02T10:00:00+09:00"
+}
+```
+
+## AI 측정 프로그램 담당 계약
+
+### 측정 요청 수신
+
+- 토픽: `fast/station/measure_request`
+- 방향: 백엔드 → AI 측정 프로그램
+- QoS: 1
+- retained: false
+
+```json
+{
+  "sessionId": "uuid",
+  "cargoId": "CARGO-001",
+  "taskId": "TASK-uuid",
+  "vehicleId": "FORKLIFT-01",
+  "maxAttempts": 3,
+  "requestedAt": "2026-08-02T10:00:00+09:00"
+}
+```
+
+- 한 요청 안에서 새 프레임으로 최대 `maxAttempts`회 측정한다.
+- 중간 실패 결과를 백엔드에 보내지 않고 최종 결과 한 건만 전송한다.
+- 이미지 파일은 저장하지 않는다. 실시간 영상 표시가 필요하면 측정 결과 계약과 별도 스트림으로 구현한다.
+
+현재 코드에서 필요한 변경 지점은 다음과 같다.
+
+- `ai/src/station/trigger.py`: `cargoId`뿐 아니라 요청의 `sessionId`, `taskId`, `vehicleId`, `maxAttempts`를 측정 실행부에 전달
+- `ai/src/station/serve.py`: MQTT 요청으로 시작한 경우 새 세션을 열지 않고 요청의 `sessionId` 사용
+- `ai/src/station/serve.py`: 한 요청 안에서 새 프레임으로 최대 `maxAttempts`회 재측정
+- `ai/src/station/rest_client.py`: 이미 지원하는 `session_id` 인자로 요청의 `sessionId` 전달
+
+### 최종 결과 등록
+
+AI 측정 프로그램은 `POST /api/stations/measurements`로 결과를 등록한다. 요청에서 받은 `sessionId`를 반드시 그대로 돌려보내야 한다.
+
+```json
+{
+  "sessionId": "uuid",
+  "measurementId": "station-20260802-0001",
+  "status": "ok",
+  "cargoHeight": 0.723,
+  "tippingLevel": "safe",
+  "overhangRatio": 0.04
+}
+```
+
+- `cargoHeight`: 팔레트를 제외한 화물 높이(m)
+- `status`: `ok`, `dimensions_only`, `no_detection`, `unreliable`
+- `ok`일 때 `tippingLevel`과 `overhangRatio`가 필수다.
+- `sessionId`가 현재 활성 세션과 다르면 백엔드는 이전 화물의 늦은 결과로 판단해 거부한다.
+
+## Isaac Sim 담당 계약
+
+- 측정 시작 여부와 작업 상태를 판단하지 않는다.
+- 기존 WebRTC 화면 송출 구조를 유지한다.
+- 차량 이동 시각화가 필요하면 ROS2/백엔드가 제공하는 차량 위치를 소비한다.
+- 실물 미니어처 AMCL `map` 좌표가 기준이며, 현실 스케일 모델의 배율 변환은 Isaac Sim 내부에서 처리한다.
+
+현재 WebRTC 및 시각화 코드는 유지한다. Isaac Sim이 `fast/station/measure_request`를 직접 발행하던 구조가 있다면 제거하고 ROS2의 MOVE 결과만 사용한다.
+
+## Embedded 담당 계약
+
+이 측정 흐름 때문에 변경할 사항은 없다. 기존 주행·포크 UART 및 리미트 스위치 제어를 유지한다.
+
+## 백엔드가 보장하는 항목
+
+- 한 번에 하나의 작업만 측정 위치로 이동하거나 측정할 수 있다.
+- `vehicle_command.task_id`로 MOVE 결과와 운반 작업을 연결한다.
+- `transport_task.measurement_session_id`로 측정 결과의 대상 작업을 확정한다.
+- 측정 요청 실패, MOVE 실패, 부적합 측정 결과는 작업을 `FAILED`로 종료한다.
+- AI 측정 결과는 MQTT가 아니라 REST 한 경로로만 받는다.

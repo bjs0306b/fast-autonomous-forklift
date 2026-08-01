@@ -12,8 +12,6 @@ import com.fast.backend.forklift.service.ForkliftLocationService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.dto.IsaacForkliftPathMessage;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
-import com.fast.backend.station.dto.StationMeasurementCreateRequest;
-import com.fast.backend.station.service.StationMeasurementService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -30,7 +28,6 @@ public class MqttMessageRouter {
     private final ForkliftLocationService locationService;
     private final IsaacForkliftPathService pathService;
     private final VehicleCommandResultService commandResultService;
-    private final StationMeasurementService measurementService;
 
     public MqttMessageRouter(
             ObjectMapper objectMapper,
@@ -38,15 +35,13 @@ public class MqttMessageRouter {
             ForkliftStatusService statusService,
             ForkliftLocationService locationService,
             IsaacForkliftPathService pathService,
-            VehicleCommandResultService commandResultService,
-            StationMeasurementService measurementService) {
+            VehicleCommandResultService commandResultService) {
         this.objectMapper = objectMapper;
         this.topics = topics;
         this.statusService = statusService;
         this.locationService = locationService;
         this.pathService = pathService;
         this.commandResultService = commandResultService;
-        this.measurementService = measurementService;
     }
 
     public void route(String topic, String payload) {
@@ -78,8 +73,6 @@ public class MqttMessageRouter {
                 if (matchesTopicVehicle(topic, message.vehicleId())) {
                     commandResultService.handleResult(message);
                 }
-            } else if (topics.isStationMeasurementTopic(topic)) {
-                measurementService.create(objectMapper.treeToValue(root, StationMeasurementCreateRequest.class));
             }
         } catch (JsonProcessingException e) {
             log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
@@ -92,8 +85,7 @@ public class MqttMessageRouter {
         return topics.isForkliftStatusTopic(topic)
                 || topics.isForkliftLocationTopic(topic)
                 || topics.isForkliftPathTopic(topic)
-                || topics.isForkliftCommandResultTopic(topic)
-                || topics.isStationMeasurementTopic(topic);
+                || topics.isForkliftCommandResultTopic(topic);
     }
 
     private boolean matchesTopicVehicle(String topic, String payloadVehicleId) {

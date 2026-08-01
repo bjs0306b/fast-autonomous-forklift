@@ -8,6 +8,7 @@ public class TransportTask {
     private Long id;
     private String taskCode;
     private String cargoId;
+    private String measurementSessionId;
     private String measurementId;
     private String vehicleId;
     private String destinationSlotCode;
@@ -29,6 +30,8 @@ public class TransportTask {
     public void setTaskCode(String taskCode) { this.taskCode = taskCode; }
     public String getCargoId() { return cargoId; }
     public void setCargoId(String cargoId) { this.cargoId = cargoId; }
+    public String getMeasurementSessionId() { return measurementSessionId; }
+    public void setMeasurementSessionId(String measurementSessionId) { this.measurementSessionId = measurementSessionId; }
     public String getMeasurementId() { return measurementId; }
     public void setMeasurementId(String measurementId) { this.measurementId = measurementId; }
     public String getVehicleId() { return vehicleId; }

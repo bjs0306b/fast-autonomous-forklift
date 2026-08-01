@@ -84,7 +84,7 @@ features/transport
 ## 경계
 
 ```text
-B: 측정 결과 검증 → 적재 위치 선정 → transport_task 생성
+B: transport_task 생성 → 측정 결과 검증 → 적재 위치 선정·예약
                                       ↓ taskId, vehicleId
 A: vehicle_command 생성 → MQTT 발행 → ROS2/Isaac Sim 실행
                                       ↓ 명령 결과·차량 상태

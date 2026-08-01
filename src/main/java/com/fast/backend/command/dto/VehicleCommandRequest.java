@@ -20,12 +20,15 @@ import jakarta.validation.constraints.NotBlank;
  * 보낸 경우에는 확정 조합과 일치하는지 검증하고, 어긋나면 400으로 거부한다 — 호출자가 잘못 알고 있는
  * 조합을 조용히 고쳐서 발행하면 안 되기 때문이다.
  *
- * <p>{@code destination}은 MOVE 명령에서만 필수다.
+ * <p>{@code destination}은 MOVE 명령에서만 필수다. 측정 위치로 이동시키는 명령에는
+ * {@code taskId}를 넣는다. 백엔드는 이 값으로 내부 {@code vehicle_command.task_id}를 연결하고 작업을
+ * {@code MOVING_TO_PICKUP}으로 전환한다. 독립 수동 명령에서는 {@code taskId}를 생략한다.
  */
 public record VehicleCommandRequest(
         @NotBlank String command,
         String targetSystem,
         String commandCategory,
-        VehicleCommandDestination destination
+        VehicleCommandDestination destination,
+        String taskId
 ) {
 }

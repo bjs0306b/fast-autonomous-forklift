@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 public record TransportTaskResponse(
         String taskId,
         String cargoId,
+        String measurementSessionId,
         String measurementId,
         String vehicleId,
         TaskStatus status,
@@ -27,11 +28,13 @@ public record TransportTaskResponse(
     }
 
     public static TransportTaskResponse from(TransportTask task) {
+        Placement placement = task.getDestinationSlotCode() == null ? null
+                : new Placement(task.getDestinationSlotCode(), task.getDestinationX(), task.getDestinationY(),
+                        task.getDestinationHeading(), task.getForkHeight());
         return new TransportTaskResponse(
-                task.getTaskCode(), task.getCargoId(), task.getMeasurementId(), task.getVehicleId(),
-                task.getStatus(),
-                new Placement(task.getDestinationSlotCode(), task.getDestinationX(), task.getDestinationY(),
-                        task.getDestinationHeading(), task.getForkHeight()),
+                task.getTaskCode(), task.getCargoId(), task.getMeasurementSessionId(),
+                task.getMeasurementId(), task.getVehicleId(),
+                task.getStatus(), placement,
                 task.getCreatedAt(), task.getAssignedAt(), task.getStartedAt(), task.getPickedUpAt(),
                 task.getCompletedAt(), task.getFailedAt());
     }

@@ -1,7 +1,7 @@
 package com.fast.backend.station.dto;
 
 /**
- * 측정 AI가 REST로 등록하거나 MQTT로 보내는 최종 측정 결과다. 두 경로는 같은 DTO를 사용한다.
+ * 측정 AI가 REST로 등록하는 최종 측정 결과다.
  *
  * <p>AI 내부 상세 결과를 통째로 받지 않고 백엔드가 저장하는 값만 camelCase로 받는다.
  *

@@ -19,6 +19,9 @@ public interface VehicleCommandMapper {
 
     Optional<VehicleCommand> findByCommandId(String commandId);
 
+    /** 명령 결과를 한 번만 처리하도록 해당 행을 트랜잭션 종료까지 잠근다. */
+    Optional<VehicleCommand> findByCommandIdForUpdate(String commandId);
+
     /** 차량별 최근 명령 목록(created_at 내림차순). */
     List<VehicleCommand> findRecentByVehicleId(
             @Param("vehicleId") String vehicleId,

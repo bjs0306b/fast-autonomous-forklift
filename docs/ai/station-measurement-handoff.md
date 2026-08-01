@@ -28,6 +28,7 @@
 >
 > | 백엔드 REST 필드 | 이 문서의 원본 필드 | 변환 |
 > |---|---|---|
+> | `sessionId` | 측정 요청의 `sessionId` | 백엔드 MQTT 요청값을 그대로 반환 |
 > | `measurementId` | `measurement_id` | 없음 |
 > | `status` | `status` | 없음(`dimensions_only` 포함 4값 지원) |
 > | **`cargoHeight`** | **`dimensions.height_cm`** | **cm ÷ 100 = m** — 데스크탑이 변환 |
@@ -37,11 +38,11 @@
 >
 > ```
 > POST /api/stations/measurements   Content-Type: application/json
-> { "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
+> { "sessionId": "...", "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
 >   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
 > ```
 >
-> **`sessionId`/`stationId`는 보내지 않는다** — 백엔드가 활성 세션을 조회해 붙인다.
+> **`sessionId`는 반드시 보낸다.** 백엔드가 `fast/station/measure_request`로 보낸 값을 그대로 사용해야 하며, 활성 세션과 다르면 늦게 도착한 이전 화물 결과로 판단해 거부한다. `stationId`는 보내지 않는다.
 > 나머지 필드(detection/distance/load_balance/box_measurements/miniature/total_height)는
 > **백엔드에 저장되지 않는다.** 전체 규격은 `docs/backend-message/communication-protocol.md`
 > §Measurement Station v2.0 (REST) 참고.

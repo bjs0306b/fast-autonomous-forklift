@@ -114,13 +114,14 @@ CREATE TABLE IF NOT EXISTS transport_task (
     id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '운반 작업 내부 식별자',
     task_code             VARCHAR(50)  NOT NULL COMMENT '외부 운반 작업 식별자',
     cargo_id              VARCHAR(50)  NOT NULL COMMENT '운반 대상 화물 식별자',
-    measurement_id        VARCHAR(100) NOT NULL COMMENT '배치 판단에 사용한 측정 결과',
+    measurement_session_id VARCHAR(100) NULL COMMENT '측정 위치 도착 후 발급된 세션 식별자',
+    measurement_id        VARCHAR(100) NULL COMMENT '측정 완료 후 연결되는 배치 판단 결과',
     vehicle_id            VARCHAR(50)  NULL COMMENT '배정된 차량 식별자',
-    destination_slot_code VARCHAR(50)  NOT NULL COMMENT '목적지 적재 위치',
-    destination_x         DOUBLE       NOT NULL COMMENT '목적지 X 좌표 스냅샷(m)',
-    destination_y         DOUBLE       NOT NULL COMMENT '목적지 Y 좌표 스냅샷(m)',
-    destination_heading   DOUBLE       NOT NULL COMMENT '목적지 방향 스냅샷(degree)',
-    fork_height           DOUBLE       NOT NULL COMMENT '목표 포크 높이 스냅샷(m)',
+    destination_slot_code VARCHAR(50)  NULL COMMENT '측정 완료 후 선택되는 목적지 적재 위치',
+    destination_x         DOUBLE       NULL COMMENT '목적지 X 좌표 스냅샷(m)',
+    destination_y         DOUBLE       NULL COMMENT '목적지 Y 좌표 스냅샷(m)',
+    destination_heading   DOUBLE       NULL COMMENT '목적지 방향 스냅샷(degree)',
+    fork_height           DOUBLE       NULL COMMENT '목표 포크 높이 스냅샷(m)',
     status                VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '운반 작업 상태',
     assigned_at           DATETIME(6)  NULL COMMENT '차량 배정 시각',
     started_at            DATETIME(6)  NULL COMMENT '운반 작업 시작 시각',
@@ -129,12 +130,31 @@ CREATE TABLE IF NOT EXISTS transport_task (
     failed_at             DATETIME(6)  NULL COMMENT '운반 작업 실패 시각',
     created_at            DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '운반 작업 생성 시각',
     CONSTRAINT uk_transport_task_code UNIQUE (task_code),
+    CONSTRAINT uk_transport_task_measurement_session UNIQUE (measurement_session_id),
+    CONSTRAINT uk_transport_task_measurement UNIQUE (measurement_id),
     CONSTRAINT chk_transport_task_status CHECK (status IN (
-        'PENDING', 'ASSIGNED', 'MOVING_TO_PICKUP', 'PICKING_UP',
+        'PENDING', 'ASSIGNED', 'MOVING_TO_PICKUP', 'MEASURING', 'PICKING_UP',
         'TRANSPORTING', 'PLACING', 'COMPLETED', 'FAILED', 'CANCELLED'
     )),
+    CONSTRAINT chk_transport_task_placement CHECK (
+        (measurement_id IS NULL
+            AND destination_slot_code IS NULL
+            AND destination_x IS NULL
+            AND destination_y IS NULL
+            AND destination_heading IS NULL
+            AND fork_height IS NULL)
+        OR
+        (measurement_id IS NOT NULL
+            AND destination_slot_code IS NOT NULL
+            AND destination_x IS NOT NULL
+            AND destination_y IS NOT NULL
+            AND destination_heading IS NOT NULL
+            AND fork_height IS NOT NULL)
+    ),
     CONSTRAINT fk_transport_task_cargo
         FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id),
+    CONSTRAINT fk_transport_task_measurement_session
+        FOREIGN KEY (measurement_session_id) REFERENCES station_session (session_id),
     CONSTRAINT fk_transport_task_measurement
         FOREIGN KEY (measurement_id) REFERENCES station_measurement (measurement_id),
     CONSTRAINT fk_transport_task_vehicle

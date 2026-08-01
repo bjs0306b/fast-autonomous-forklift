@@ -18,7 +18,8 @@ class TaskStatusTest {
         assertThatCode(() -> {
             TaskStatus.validateTransition(TaskStatus.PENDING, TaskStatus.ASSIGNED);
             TaskStatus.validateTransition(TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP);
-            TaskStatus.validateTransition(TaskStatus.MOVING_TO_PICKUP, TaskStatus.PICKING_UP);
+            TaskStatus.validateTransition(TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING);
+            TaskStatus.validateTransition(TaskStatus.MEASURING, TaskStatus.PICKING_UP);
             TaskStatus.validateTransition(TaskStatus.PICKING_UP, TaskStatus.TRANSPORTING);
             TaskStatus.validateTransition(TaskStatus.TRANSPORTING, TaskStatus.PLACING);
             TaskStatus.validateTransition(TaskStatus.PLACING, TaskStatus.COMPLETED);

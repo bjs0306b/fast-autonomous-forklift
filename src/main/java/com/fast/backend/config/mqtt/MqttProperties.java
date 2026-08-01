@@ -25,7 +25,7 @@ public record MqttProperties(
             String forkliftLocation,
             String forkliftPath,
             String forkliftCommandResult,
-            String stationMeasurement,
+            String stationMeasureRequest,
             String forkliftCommand
     ) {
     }

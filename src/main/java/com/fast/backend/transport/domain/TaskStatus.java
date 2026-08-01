@@ -14,13 +14,14 @@ import java.util.Set;
  *
  * <p>정상 흐름:
  * <pre>
- * PENDING → ASSIGNED → MOVING_TO_PICKUP → PICKING_UP → TRANSPORTING → PLACING → COMPLETED
+ * PENDING → ASSIGNED → MOVING_TO_PICKUP → MEASURING → PICKING_UP
+ *         → TRANSPORTING → PLACING → COMPLETED
  * </pre>
  * 실패·취소:
  * <pre>
  * PENDING   → CANCELLED
  * ASSIGNED  → CANCELLED | FAILED
- * MOVING_TO_PICKUP / PICKING_UP / TRANSPORTING / PLACING → FAILED
+ * MOVING_TO_PICKUP / MEASURING / PICKING_UP / TRANSPORTING / PLACING → FAILED
  * </pre>
  *
  * <p>{@link #COMPLETED}/{@link #FAILED}/{@link #CANCELLED}는 종료 상태이며 이후 어떤 전이도 허용하지 않는다.
@@ -33,6 +34,7 @@ public enum TaskStatus {
     PENDING,
     ASSIGNED,
     MOVING_TO_PICKUP,
+    MEASURING,
     PICKING_UP,
     TRANSPORTING,
     PLACING,
@@ -46,7 +48,8 @@ public enum TaskStatus {
         Map<TaskStatus, Set<TaskStatus>> map = new EnumMap<>(TaskStatus.class);
         map.put(PENDING, EnumSet.of(ASSIGNED, CANCELLED));
         map.put(ASSIGNED, EnumSet.of(MOVING_TO_PICKUP, CANCELLED, FAILED));
-        map.put(MOVING_TO_PICKUP, EnumSet.of(PICKING_UP, FAILED));
+        map.put(MOVING_TO_PICKUP, EnumSet.of(MEASURING, FAILED));
+        map.put(MEASURING, EnumSet.of(PICKING_UP, FAILED));
         map.put(PICKING_UP, EnumSet.of(TRANSPORTING, FAILED));
         map.put(TRANSPORTING, EnumSet.of(PLACING, FAILED));
         map.put(PLACING, EnumSet.of(COMPLETED, FAILED));

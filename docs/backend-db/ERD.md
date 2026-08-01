@@ -73,6 +73,7 @@ erDiagram
         bigint id PK
         varchar task_code UK
         varchar cargo_id FK
+        varchar measurement_session_id FK,UK
         varchar measurement_id FK
         varchar vehicle_id FK
         varchar destination_slot_code FK
@@ -104,6 +105,7 @@ erDiagram
     cargo ||--o{ station_session : measured_for
     station_session o|--o| station_state : active
     station_session ||--o| station_measurement : produces
+    station_session o|--o| transport_task : measures_for
 
     vehicle ||--o| vehicle_current_status : has
     vehicle o|--o{ transport_task : assigned

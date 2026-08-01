@@ -16,6 +16,7 @@ import com.fast.backend.station.mapper.StationSessionMapper;
 import com.fast.backend.station.websocket.StationMeasurementBroadcaster;
 import com.fast.backend.storage.domain.Cargo;
 import com.fast.backend.storage.mapper.CargoMapper;
+import com.fast.backend.transport.service.TransportTaskMeasurementService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -28,8 +29,7 @@ import java.util.UUID;
 /**
  * 측정 세션과 측정 결과의 수신·검증·저장·조회·브로드캐스트.
  *
- * <p>측정 결과는 REST 또는 백엔드 MQTT 수신 경계로 들어올 수 있다. 두 경로 모두 같은 요청 DTO와
- * 이 서비스를 사용하므로 검증·저장 방식은 동일하다.
+ * <p>측정 결과는 REST로 들어오며 이 서비스가 세션 검증·저장을 담당한다.
  *
  * <p><b>세션 규칙</b>
  * <ol>
@@ -60,6 +60,7 @@ public class StationMeasurementService {
     private final StationMeasurementBroadcaster broadcaster;
     private final CargoMapper cargoMapper;
     private final StationSessionProperties sessionProperties;
+    private final TransportTaskMeasurementService transportTaskMeasurementService;
     private final Clock clock;
 
     public StationMeasurementService(StationMeasurementMapper measurementMapper,
@@ -69,6 +70,7 @@ public class StationMeasurementService {
             StationMeasurementBroadcaster broadcaster,
             CargoMapper cargoMapper,
             StationSessionProperties sessionProperties,
+            TransportTaskMeasurementService transportTaskMeasurementService,
             Clock clock) {
         this.measurementMapper = measurementMapper;
         this.sessionMapper = sessionMapper;
@@ -77,6 +79,7 @@ public class StationMeasurementService {
         this.broadcaster = broadcaster;
         this.cargoMapper = cargoMapper;
         this.sessionProperties = sessionProperties;
+        this.transportTaskMeasurementService = transportTaskMeasurementService;
         this.clock = clock;
     }
 
@@ -177,7 +180,7 @@ public class StationMeasurementService {
     // ── 결과 저장 ───────────────────────────────────────────────────────────
 
     /**
-     * REST 또는 MQTT 경로로 받은 측정 결과를 저장하고 활성 세션을 해제한다.
+     * REST로 받은 측정 결과를 저장하고 활성 세션을 해제한다.
      *
      * <p>저장(INSERT)과 "세션이 측정 완료 상태가 됨"은 <b>같은 트랜잭션</b>이다 — 완료 여부를 별도
      * 상태 컬럼이 아니라 <b>측정 행의 존재</b>로 표현하기 때문에 INSERT 하나가 곧 상태 전이다.
@@ -261,6 +264,7 @@ public class StationMeasurementService {
         }
 
         boolean eligible = placementEligibility.isEligible(entity);
+        transportTaskMeasurementService.complete(session, entity);
         log.info("Station measurement accepted: measurementId={}, sessionId={}, cargoId={}, status={}, "
                         + "cargoHeightM={}, tippingLevel={}, overhangRatio={}, placementEligible={}",
                 entity.getMeasurementId(), session.getSessionId(), session.getCargoId(), status,

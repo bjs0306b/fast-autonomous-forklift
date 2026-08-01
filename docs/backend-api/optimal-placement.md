@@ -2,7 +2,7 @@
 
 ## 목적
 
-측정이 끝난 화물에 대해 안전 조건과 높이 조건을 확인하고, 적합한 빈 적재 위치를 선택해 운반 작업을 생성한다. 현재 MVP는 통제된 창고 환경과 사전 등록된 적재 위치를 전제로 한다.
+측정 전 운반 작업을 생성하고 차량이 고정 측정 위치에 도착하면 화물을 측정한다. 안전 조건과 높이 조건을 만족하는 최종 결과에 대해 빈 적재 위치를 선택·예약한다. 현재 MVP는 통제된 창고 환경과 사전 등록된 적재 위치를 전제로 한다.
 
 ## 입력 계약
 
@@ -66,24 +66,27 @@ heightRemaining = usableHeight - (cargoHeight + palletHeight)
 
 ## 작업 생성과 예약
 
-적재 위치가 선택되면 백엔드는 다음을 하나의 트랜잭션으로 처리한다.
+운반 작업은 `cargoId`만으로 먼저 생성하며 이 시점의 `measurementId`, 목적지, 포크 높이는 null이다. 차량 배정 후 `taskId`가 연결된 MOVE 명령이 성공하면 백엔드가 측정 세션과 MQTT 요청을 생성한다.
 
-1. 최신 측정 결과와 화물의 일치 여부 확인
-2. `transport_task` 생성
-3. 선택 시점의 목적지 좌표·방향·포크 높이를 작업에 스냅샷으로 저장
-4. `storage_slot`을 `EMPTY`에서 `RESERVED`로 조건부 갱신
+최종 측정 결과가 적합하면 백엔드는 다음을 하나의 트랜잭션으로 처리한다.
+
+1. `measurement_session_id`로 측정 결과와 운반 작업의 일치 여부 확인
+2. 높이·전복 위험·돌출률 조건 검증
+3. `storage_slot`을 `EMPTY`에서 `RESERVED`로 조건부 갱신
+4. 측정 결과와 목적지 좌표·방향·포크 높이를 작업에 저장
 
 동시에 다른 작업이 먼저 예약하면 조건부 갱신이 실패하고 전체 트랜잭션을 롤백한다.
 
 ## 상태 변경
 
 ```text
-PENDING → ASSIGNED → MOVING_TO_PICKUP → PICKING_UP
+PENDING → ASSIGNED → MOVING_TO_PICKUP → MEASURING → PICKING_UP
         → TRANSPORTING → PLACING → COMPLETED
 ```
 
 - `COMPLETED`: 예약 위치를 `OCCUPIED`로 바꾸고 `stored_cargo_id`를 기록한다.
-- `FAILED` 또는 `CANCELLED`: 예약 위치를 다시 `EMPTY`로 돌린다.
+- 측정 전 `FAILED` 또는 `CANCELLED`: 예약된 위치가 없으므로 작업만 종료한다.
+- 목적지 예약 후 `FAILED` 또는 `CANCELLED`: 예약 위치를 다시 `EMPTY`로 돌린다.
 - 한 차량에는 동시에 하나의 활성 작업만 배정한다.
 - 차량이 `active=true`이고 현재 상태가 `IDLE`일 때만 배정한다.
 
@@ -97,6 +100,6 @@ PENDING → ASSIGNED → MOVING_TO_PICKUP → PICKING_UP
 ## MVP 이후 보강 사항
 
 - Nav2 경로 거리 공급자 연결
-- `transport_task` 기반 `vehicle_command` 자동 생성과 `task_id` 연결
+- 측정 위치 MOVE 이후 실제 포크·적재 명령의 자동 연계
 - 필요 시 화물·적재 위치 폭과 길이를 추가해 평면 적합성 판단
 - `WARNING`을 관제 승인 후 진행하는 정책과 승인 이력

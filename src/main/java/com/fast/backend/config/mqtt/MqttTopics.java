@@ -26,7 +26,7 @@ public class MqttTopics {
     public String forkliftLocationSubscribeTopic() { return topics.forkliftLocation(); }
     public String forkliftPathSubscribeTopic() { return topics.forkliftPath(); }
     public String forkliftCommandResultSubscribeTopic() { return topics.forkliftCommandResult(); }
-    public String stationMeasurementSubscribeTopic() { return topics.stationMeasurement(); }
+    public String stationMeasureRequest() { return topics.stationMeasureRequest(); }
 
     public String vehicleCommand(String vehicleId) {
         if (vehicleId == null || vehicleId.isBlank()) {
@@ -39,10 +39,6 @@ public class MqttTopics {
     public boolean isForkliftLocationTopic(String topic) { return matches(locationPattern, topic); }
     public boolean isForkliftPathTopic(String topic) { return matches(pathPattern, topic); }
     public boolean isForkliftCommandResultTopic(String topic) { return matches(commandResultPattern, topic); }
-    public boolean isStationMeasurementTopic(String topic) {
-        return topic != null && topic.equals(topics.stationMeasurement());
-    }
-
     public String extractForkliftId(String topic) {
         for (Pattern pattern : new Pattern[] {statusPattern, locationPattern, pathPattern, commandResultPattern}) {
             Matcher matcher = pattern.matcher(topic == null ? "" : topic);

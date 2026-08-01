@@ -5,6 +5,7 @@
         <id property="id" column="id"/>
         <result property="taskCode" column="task_code"/>
         <result property="cargoId" column="cargo_id"/>
+        <result property="measurementSessionId" column="measurement_session_id"/>
         <result property="measurementId" column="measurement_id"/>
         <result property="vehicleId" column="vehicle_id"/>
         <result property="destinationSlotCode" column="destination_slot_code"/>
@@ -21,20 +22,20 @@
         <result property="createdAt" column="created_at"/>
     </resultMap>
     <sql id="columns">
-        id, task_code, cargo_id, measurement_id, vehicle_id, destination_slot_code,
+        id, task_code, cargo_id, measurement_session_id, measurement_id, vehicle_id, destination_slot_code,
         destination_x, destination_y, destination_heading, fork_height, status,
         assigned_at, started_at, picked_up_at, completed_at, failed_at, created_at
     </sql>
-    <sql id="activeStatuses">('ASSIGNED','MOVING_TO_PICKUP','PICKING_UP','TRANSPORTING','PLACING')</sql>
+    <sql id="activeStatuses">('ASSIGNED','MOVING_TO_PICKUP','MEASURING','PICKING_UP','TRANSPORTING','PLACING')</sql>
 
     <insert id="insert" parameterType="com.fast.backend.transport.domain.TransportTask"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO transport_task
-            (task_code, cargo_id, measurement_id, vehicle_id, destination_slot_code,
+            (task_code, cargo_id, measurement_session_id, measurement_id, vehicle_id, destination_slot_code,
              destination_x, destination_y, destination_heading, fork_height, status,
              assigned_at, started_at, picked_up_at, completed_at, failed_at, created_at)
         VALUES
-            (#{taskCode}, #{cargoId}, #{measurementId}, #{vehicleId}, #{destinationSlotCode},
+            (#{taskCode}, #{cargoId}, #{measurementSessionId}, #{measurementId}, #{vehicleId}, #{destinationSlotCode},
              #{destinationX}, #{destinationY}, #{destinationHeading}, #{forkHeight}, #{status},
              #{assignedAt}, #{startedAt}, #{pickedUpAt}, #{completedAt}, #{failedAt}, #{createdAt})
     </insert>
@@ -79,6 +80,41 @@
         task_code=task_code
         WHERE task_code=#{taskCode}
     </update>
+    <update id="updateStatusIfCurrent">
+        UPDATE transport_task SET status=#{targetStatus},
+        <if test="startedAt != null">started_at=#{startedAt},</if>
+        <if test="pickedUpAt != null">picked_up_at=#{pickedUpAt},</if>
+        <if test="failedAt != null">failed_at=#{failedAt},</if>
+        task_code=task_code
+        WHERE id=#{id} AND status=#{expectedStatus}
+    </update>
+    <update id="completeMeasurement">
+        UPDATE transport_task
+        SET measurement_id=#{measurementId},
+            destination_slot_code=#{destinationSlotCode},
+            destination_x=#{destinationX},
+            destination_y=#{destinationY},
+            destination_heading=#{destinationHeading},
+            fork_height=#{forkHeight},
+            status='PICKING_UP'
+        WHERE id=#{id} AND status='MEASURING' AND measurement_id IS NULL
+    </update>
+    <update id="startMeasurement">
+        UPDATE transport_task
+        SET measurement_session_id=#{sessionId}, status='MEASURING'
+        WHERE id=#{id} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
+    </update>
+    <select id="findByMeasurementSessionId" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE measurement_session_id=#{sessionId}
+    </select>
+    <select id="lockMeasurementLane" resultType="int">
+        SELECT singleton_id FROM station_state WHERE singleton_id=1 FOR UPDATE
+    </select>
+    <select id="existsMeasurementLaneBusy" resultType="boolean">
+        SELECT COUNT(*) &gt; 0 FROM transport_task
+        WHERE status IN ('MOVING_TO_PICKUP','MEASURING')
+    </select>
     <select id="existsActiveTaskByVehicleId" resultType="boolean">
         SELECT COUNT(*) > 0 FROM transport_task WHERE vehicle_id=#{vehicleId} AND status IN <include refid="activeStatuses"/>
     </select>

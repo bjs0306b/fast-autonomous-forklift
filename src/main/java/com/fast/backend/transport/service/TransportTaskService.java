@@ -2,15 +2,8 @@ package com.fast.backend.transport.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
-import com.fast.backend.station.domain.StationMeasurement;
-import com.fast.backend.station.mapper.StationMeasurementMapper;
-import com.fast.backend.station.service.StationMeasurementPlacementEligibility;
 import com.fast.backend.storage.mapper.CargoMapper;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
-import com.fast.backend.storage.mapper.StorageSlotPlacementRow;
-import com.fast.backend.storage.placement.PlacementCandidate;
-import com.fast.backend.storage.placement.PlacementRecommendation;
-import com.fast.backend.storage.placement.PlacementService;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.dto.TransportTaskCreateRequest;
@@ -29,34 +22,25 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-/** 저장된 측정 결과를 바탕으로 높이 기반 운반 작업을 생성하고 상태를 전이한다. */
+/** 측정 전부터 운반 작업을 만들고 차량 배정과 작업 상태를 관리한다. */
 @Service
 public class TransportTaskService {
 
     private final CargoMapper cargoMapper;
-    private final StationMeasurementMapper stationMeasurementMapper;
-    private final StationMeasurementPlacementEligibility placementEligibility;
     private final StorageSlotMapper storageSlotMapper;
     private final TransportTaskMapper transportTaskMapper;
-    private final PlacementService placementService;
     private final VehicleMapper vehicleMapper;
     private final VehicleCurrentStatusMapper vehicleCurrentStatusMapper;
 
     public TransportTaskService(
             CargoMapper cargoMapper,
-            StationMeasurementMapper stationMeasurementMapper,
-            StationMeasurementPlacementEligibility placementEligibility,
             StorageSlotMapper storageSlotMapper,
             TransportTaskMapper transportTaskMapper,
-            PlacementService placementService,
             VehicleMapper vehicleMapper,
             VehicleCurrentStatusMapper vehicleCurrentStatusMapper) {
         this.cargoMapper = cargoMapper;
-        this.stationMeasurementMapper = stationMeasurementMapper;
-        this.placementEligibility = placementEligibility;
         this.storageSlotMapper = storageSlotMapper;
         this.transportTaskMapper = transportTaskMapper;
-        this.placementService = placementService;
         this.vehicleMapper = vehicleMapper;
         this.vehicleCurrentStatusMapper = vehicleCurrentStatusMapper;
     }
@@ -71,31 +55,12 @@ public class TransportTaskService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "이미 진행 중인 운반 작업이 있습니다: " + cargoId);
         }
 
-        StationMeasurement measurement = stationMeasurementMapper.findLatestByCargoId(cargoId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.STATION_MEASUREMENT_NOT_FOUND, "화물의 측정 결과가 없습니다: " + cargoId));
-        placementEligibility.requireEligible(measurement);
-
-        PlacementRecommendation recommendation = placementService.recommend(
-                measurement.getCargoHeight(), loadEmptyCandidates());
-
         TransportTask task = new TransportTask();
         task.setTaskCode("TASK-" + UUID.randomUUID());
         task.setCargoId(cargoId);
-        task.setMeasurementId(measurement.getMeasurementId());
-        task.setDestinationSlotCode(recommendation.slotCode());
-        task.setDestinationX(recommendation.destinationX());
-        task.setDestinationY(recommendation.destinationY());
-        task.setDestinationHeading(recommendation.destinationHeading());
-        task.setForkHeight(recommendation.forkHeight());
         task.setStatus(TaskStatus.PENDING);
         task.setCreatedAt(LocalDateTime.now());
         transportTaskMapper.insert(task);
-
-        if (storageSlotMapper.reserveIfEmpty(recommendation.slotCode(), task.getId()) != 1) {
-            throw new BusinessException(ErrorCode.STORAGE_SLOT_ALREADY_RESERVED,
-                    "다른 작업이 먼저 적재 위치를 예약했습니다: " + recommendation.slotCode());
-        }
         return TransportTaskResponse.from(task);
     }
 
@@ -142,6 +107,12 @@ public class TransportTaskService {
     public TransportTaskResponse changeStatus(String taskCode, String rawStatus) {
         TransportTask task = getTaskOrThrow(taskCode);
         TaskStatus target = parseStatus(rawStatus);
+        if (target == TaskStatus.MOVING_TO_PICKUP
+                || target == TaskStatus.MEASURING
+                || target == TaskStatus.PICKING_UP) {
+            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION,
+                    "MOVING_TO_PICKUP, MEASURING, PICKING_UP 상태는 명령·측정 결과로 자동 전이됩니다.");
+        }
         TaskStatus.validateTransition(task.getStatus(), target);
 
         LocalDateTime now = LocalDateTime.now();
@@ -159,6 +130,7 @@ public class TransportTaskService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "예약된 적재 위치를 점유 처리하지 못했습니다.");
         }
         if ((target == TaskStatus.FAILED || target == TaskStatus.CANCELLED)
+                && task.getDestinationSlotCode() != null
                 && storageSlotMapper.releaseReservation(task.getDestinationSlotCode(), task.getId()) != 1) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "적재 위치 예약을 해제하지 못했습니다.");
         }
@@ -176,21 +148,6 @@ public class TransportTaskService {
     }
 
     @Transactional
-    public void driveToCompleted(String taskCode) {
-        List<TaskStatus> path = List.of(
-                TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP, TaskStatus.PICKING_UP,
-                TaskStatus.TRANSPORTING, TaskStatus.PLACING, TaskStatus.COMPLETED);
-        TaskStatus current = getTaskOrThrow(taskCode).getStatus();
-        int index = path.indexOf(current);
-        if (index < 0) {
-            throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION);
-        }
-        for (int i = index + 1; i < path.size(); i++) {
-            changeStatus(taskCode, path.get(i).name());
-        }
-    }
-
-    @Transactional
     public void driveToFailed(String taskCode) {
         changeStatus(taskCode, TaskStatus.FAILED.name());
     }
@@ -201,19 +158,6 @@ public class TransportTaskService {
             throw new BusinessException(ErrorCode.VEHICLE_NOT_AVAILABLE,
                     "IDLE 상태 차량만 배정할 수 있습니다: " + vehicleId);
         }
-    }
-
-    private List<PlacementCandidate> loadEmptyCandidates() {
-        return storageSlotMapper.findAllEmptySlotsForPlacement().stream()
-                .map(this::toCandidate)
-                .toList();
-    }
-
-    private PlacementCandidate toCandidate(StorageSlotPlacementRow row) {
-        return new PlacementCandidate(
-                row.getSlotCode(), row.getUsableHeight(), row.getForkHeight(),
-                row.getDestinationX(), row.getDestinationY(), row.getDestinationHeading(),
-                null, row.getStatus());
     }
 
     private TransportTask getTaskOrThrow(String taskCode) {

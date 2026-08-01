@@ -10,6 +10,7 @@ import com.fast.backend.command.mapper.VehicleCommandMapper;
 import com.fast.backend.command.websocket.VehicleCommandResultEventData;
 import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
+import com.fast.backend.station.service.StationMeasurementRequestWorkflow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,10 +24,15 @@ public class VehicleCommandResultService {
 
     private final VehicleCommandMapper commandMapper;
     private final VehicleWebSocketBroadcaster broadcaster;
+    private final StationMeasurementRequestWorkflow measurementRequestWorkflow;
 
-    public VehicleCommandResultService(VehicleCommandMapper commandMapper, VehicleWebSocketBroadcaster broadcaster) {
+    public VehicleCommandResultService(
+            VehicleCommandMapper commandMapper,
+            VehicleWebSocketBroadcaster broadcaster,
+            StationMeasurementRequestWorkflow measurementRequestWorkflow) {
         this.commandMapper = commandMapper;
         this.broadcaster = broadcaster;
+        this.measurementRequestWorkflow = measurementRequestWorkflow;
     }
 
     @Transactional
@@ -34,7 +40,7 @@ public class VehicleCommandResultService {
         if (!hasRequiredFields(message)) {
             return;
         }
-        VehicleCommand existing = commandMapper.findByCommandId(message.commandId()).orElse(null);
+        VehicleCommand existing = commandMapper.findByCommandIdForUpdate(message.commandId()).orElse(null);
         if (existing == null) {
             log.warn("Command result ignored: unknown commandId={}", message.commandId());
             return;
@@ -69,6 +75,9 @@ public class VehicleCommandResultService {
         existing.setCompletedAt(nextStatus.isCompleted()
                 ? CommunicationTime.toLocal(message.completedAt()) : null);
         commandMapper.update(existing);
+        if (nextStatus.isCompleted()) {
+            measurementRequestWorkflow.handleMoveResult(existing, nextStatus);
+        }
 
         broadcaster.broadcastCommandResult(existing.getVehicleId(), new VehicleCommandResultEventData(
                 message.commandId(), message.vehicleId(), message.targetSystem(), message.commandCategory(),

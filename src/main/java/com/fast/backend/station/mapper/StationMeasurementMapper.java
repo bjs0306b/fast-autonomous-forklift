@@ -27,6 +27,4 @@ public interface StationMeasurementMapper {
     /** 세션의 최신 측정 결과 1건. 세션당 1건 정책이라 사실상 그 세션의 유일한 결과다. */
     Optional<StationMeasurement> findLatestBySessionId(String sessionId);
 
-    /** 화물의 가장 최근 측정 결과. 운반 작업 생성 시 측정 근거를 고정한다. */
-    Optional<StationMeasurement> findLatestByCargoId(String cargoId);
 }
