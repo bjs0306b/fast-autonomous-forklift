@@ -1,179 +1,69 @@
 package com.fast.backend.config.mqtt;
 
 import org.springframework.stereotype.Component;
-
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * MQTT 토픽 문자열을 중앙에서 관리한다. 토픽 패턴은 {@link MqttProperties.Topics}에서 가져오며,
- * 다른 클래스는 이 클래스를 통해서만 토픽을 생성/판별해야 한다(토픽 문자열 직접 작성 금지).
- */
+/** 백엔드 MQTT 경계에서 사용하는 토픽을 한 곳에서 관리한다. */
 @Component
 public class MqttTopics {
 
     private final MqttProperties.Topics topics;
-    private final Pattern statusTopicPattern;
-    private final Pattern locationTopicPattern;
-    private final Pattern pathTopicPattern;
-    private final Pattern commandResultTopicPattern;
-    private final Pattern forkStatusTopicPattern;
-    private final Pattern errorTopicPattern;
-    private final Pattern loadSafetyTopicPattern;
+    private final Pattern statusPattern;
+    private final Pattern locationPattern;
+    private final Pattern pathPattern;
+    private final Pattern commandResultPattern;
 
-    public MqttTopics(MqttProperties mqttProperties) {
-        this.topics = mqttProperties.topics();
-        this.statusTopicPattern = toSubscribePattern(topics.forkliftStatus());
-        this.locationTopicPattern = toSubscribePattern(topics.forkliftLocation());
-        this.pathTopicPattern = toSubscribePattern(topics.forkliftPath());
-        this.commandResultTopicPattern = toSubscribePattern(topics.forkliftCommandResult());
-        this.forkStatusTopicPattern = toSubscribePattern(topics.forkliftForkStatus());
-        this.errorTopicPattern = toSubscribePattern(topics.forkliftError());
-        this.loadSafetyTopicPattern = toSubscribePattern(topics.forkliftLoadSafety());
+    public MqttTopics(MqttProperties properties) {
+        this.topics = properties.topics();
+        this.statusPattern = toPattern(topics.forkliftStatus());
+        this.locationPattern = toPattern(topics.forkliftLocation());
+        this.pathPattern = toPattern(topics.forkliftPath());
+        this.commandResultPattern = toPattern(topics.forkliftCommandResult());
     }
 
-    public String forkliftStatusSubscribeTopic() {
-        return topics.forkliftStatus();
-    }
+    public String forkliftStatusSubscribeTopic() { return topics.forkliftStatus(); }
+    public String forkliftLocationSubscribeTopic() { return topics.forkliftLocation(); }
+    public String forkliftPathSubscribeTopic() { return topics.forkliftPath(); }
+    public String forkliftCommandResultSubscribeTopic() { return topics.forkliftCommandResult(); }
+    public String stationMeasurementSubscribeTopic() { return topics.stationMeasurement(); }
 
-    public String forkliftLocationSubscribeTopic() {
-        return topics.forkliftLocation();
-    }
-
-    public String forkliftPathSubscribeTopic() {
-        return topics.forkliftPath();
-    }
-
-    public String forkliftCommandResultSubscribeTopic() {
-        return topics.forkliftCommandResult();
-    }
-
-    public String forkliftForkStatusSubscribeTopic() {
-        return topics.forkliftForkStatus();
-    }
-
-    public String forkliftErrorSubscribeTopic() {
-        return topics.forkliftError();
-    }
-
-    public String cargoDetectedTopic() {
-        return topics.cargoDetected();
-    }
-
-    /** 적재 화물 안전 상태 구독 토픽 {@code forklift/+/load-safety}(prompt63.md 4장). */
-    public String forkliftLoadSafetySubscribeTopic() {
-        return topics.forkliftLoadSafety();
-    }
-
-    /**
-     * 차량 명령 발행 토픽 {@code forklift/{vehicleId}/command}를 만든다.
-     *
-     * <p>이동(ROS2)·포크/적재(임베디드)·비상정지(ALL) <b>모든 명령이 이 토픽 하나</b>를 쓴다
-     * (prompt32.md 1장 7번 확정). 수신 측은 payload의 {@code targetSystem}/{@code commandCategory}로
-     * 자기 명령인지 판별한다.
-     *
-     * <p>구 {@code forkliftEmergency(...)}(= {@code forklift/{id}/emergency})는 제거됐다 —
-     * 근거는 {@link MqttProperties.Topics} Javadoc 참고.
-     */
     public String vehicleCommand(String vehicleId) {
-        return String.format(topics.forkliftCommand(), requireForkliftId(vehicleId));
+        if (vehicleId == null || vehicleId.isBlank()) {
+            throw new IllegalArgumentException("vehicleId must not be blank");
+        }
+        return String.format(topics.forkliftCommand(), vehicleId);
     }
 
-    public boolean isForkliftStatusTopic(String topic) {
-        return topic != null && statusTopicPattern.matcher(topic).matches();
-    }
-
-    public boolean isForkliftLocationTopic(String topic) {
-        return topic != null && locationTopicPattern.matcher(topic).matches();
-    }
-
-    public boolean isForkliftPathTopic(String topic) {
-        return topic != null && pathTopicPattern.matcher(topic).matches();
-    }
-
-    public boolean isForkliftCommandResultTopic(String topic) {
-        return topic != null && commandResultTopicPattern.matcher(topic).matches();
-    }
-
-    public boolean isForkliftForkStatusTopic(String topic) {
-        return topic != null && forkStatusTopicPattern.matcher(topic).matches();
-    }
-
-    public boolean isForkliftErrorTopic(String topic) {
-        return topic != null && errorTopicPattern.matcher(topic).matches();
-    }
-
-    public boolean isCargoDetectedTopic(String topic) {
-        return topics.cargoDetected().equals(topic);
-    }
-
-    public boolean isForkliftLoadSafetyTopic(String topic) {
-        return topic != null && loadSafetyTopicPattern.matcher(topic).matches();
+    public boolean isForkliftStatusTopic(String topic) { return matches(statusPattern, topic); }
+    public boolean isForkliftLocationTopic(String topic) { return matches(locationPattern, topic); }
+    public boolean isForkliftPathTopic(String topic) { return matches(pathPattern, topic); }
+    public boolean isForkliftCommandResultTopic(String topic) { return matches(commandResultPattern, topic); }
+    public boolean isStationMeasurementTopic(String topic) {
+        return topic != null && topic.equals(topics.stationMeasurement());
     }
 
     public String extractForkliftId(String topic) {
-        if (topic == null) {
-            throw new IllegalArgumentException("topic must not be null");
+        for (Pattern pattern : new Pattern[] {statusPattern, locationPattern, pathPattern, commandResultPattern}) {
+            Matcher matcher = pattern.matcher(topic == null ? "" : topic);
+            if (matcher.matches()) {
+                return matcher.group(1);
+            }
         }
-        Matcher statusMatcher = statusTopicPattern.matcher(topic);
-        if (statusMatcher.matches()) {
-            return statusMatcher.group(1);
-        }
-        Matcher locationMatcher = locationTopicPattern.matcher(topic);
-        if (locationMatcher.matches()) {
-            return locationMatcher.group(1);
-        }
-        Matcher pathMatcher = pathTopicPattern.matcher(topic);
-        if (pathMatcher.matches()) {
-            return pathMatcher.group(1);
-        }
-        Matcher commandResultMatcher = commandResultTopicPattern.matcher(topic);
-        if (commandResultMatcher.matches()) {
-            return commandResultMatcher.group(1);
-        }
-        Matcher forkStatusMatcher = forkStatusTopicPattern.matcher(topic);
-        if (forkStatusMatcher.matches()) {
-            return forkStatusMatcher.group(1);
-        }
-        Matcher errorMatcher = errorTopicPattern.matcher(topic);
-        if (errorMatcher.matches()) {
-            return errorMatcher.group(1);
-        }
-        Matcher loadSafetyMatcher = loadSafetyTopicPattern.matcher(topic);
-        if (loadSafetyMatcher.matches()) {
-            return loadSafetyMatcher.group(1);
-        }
-        throw new IllegalArgumentException("Cannot extract forkliftId from topic: " + topic);
+        throw new IllegalArgumentException("Cannot extract vehicleId from topic: " + topic);
     }
 
-    private String requireForkliftId(String forkliftId) {
-        if (forkliftId == null || forkliftId.isBlank()) {
-            throw new IllegalArgumentException("forkliftId must not be null or blank");
-        }
-        return forkliftId;
+    private static boolean matches(Pattern pattern, String topic) {
+        return topic != null && pattern.matcher(topic).matches();
     }
 
-    /**
-     * "forklift/+/status" 같은 MQTT 구독 와일드카드 패턴을,
-     * 실제 수신 토픽("forklift/F01/status")과 정확히 매칭하기 위한 정규식으로 변환한다.
-     * '+' 세그먼트만 캡처 그룹으로 바꾸고 나머지는 리터럴로 고정해, 단순 contains가 아닌
-     * 세그먼트 단위의 정확한 구조 비교를 수행한다.
-     */
-    private static Pattern toSubscribePattern(String mqttWildcardTopic) {
-        String[] segments = mqttWildcardTopic.split("/");
+    private static Pattern toPattern(String mqttTopic) {
         StringBuilder regex = new StringBuilder("^");
+        String[] segments = mqttTopic.split("/");
         for (int i = 0; i < segments.length; i++) {
-            if (i > 0) {
-                regex.append('/');
-            }
-            String segment = segments[i];
-            if ("+".equals(segment)) {
-                regex.append("([^/]+)");
-            } else {
-                regex.append(Pattern.quote(segment));
-            }
+            if (i > 0) regex.append('/');
+            regex.append("+".equals(segments[i]) ? "([^/]+)" : Pattern.quote(segments[i]));
         }
-        regex.append('$');
-        return Pattern.compile(regex.toString());
+        return Pattern.compile(regex.append('$').toString());
     }
 }

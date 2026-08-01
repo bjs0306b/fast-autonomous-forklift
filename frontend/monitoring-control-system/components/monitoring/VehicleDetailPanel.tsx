@@ -4,9 +4,7 @@ import { Ban, OctagonAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatClockTime, formatNumber } from "@/lib/format"
 import type { DashboardVehicle } from "@/types/monitoring"
-import type { LoadSafetyState } from "@/types/loadSafety"
 import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL, isAlertStatus } from "./vehicle-status"
-import { LoadSafetyPanel } from "./LoadSafetyPanel"
 
 /**
  * VehicleDetailPanel
@@ -29,15 +27,12 @@ export function VehicleDetailPanel({
   vehicle,
   onEmergencyStop,
   emergencyStopPending = false,
-  loadSafety = null,
   className,
 }: {
   vehicle: DashboardVehicle | null
   onEmergencyStop?: (vehicleId: string) => void
   /** 이 차량의 비상정지 요청이 진행 중인지(중복 클릭 방지) */
   emergencyStopPending?: boolean
-  /** 이 차량의 최신 적재 안전 상태(prompt63.md 3장 4번). 미수신이면 null */
-  loadSafety?: LoadSafetyState | null
   className?: string
 }) {
   return (
@@ -58,7 +53,6 @@ export function VehicleDetailPanel({
           vehicle={vehicle}
           onEmergencyStop={onEmergencyStop}
           emergencyStopPending={emergencyStopPending}
-          loadSafety={loadSafety}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -75,12 +69,10 @@ function VehicleDetailContent({
   vehicle,
   onEmergencyStop,
   emergencyStopPending,
-  loadSafety,
 }: {
   vehicle: DashboardVehicle
   onEmergencyStop?: (vehicleId: string) => void
   emergencyStopPending: boolean
-  loadSafety: LoadSafetyState | null
 }) {
   const color = VEHICLE_STATUS_COLOR[vehicle.status] ?? VEHICLE_STATUS_COLOR.UNKNOWN
   const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? vehicle.status
@@ -99,23 +91,13 @@ function VehicleDetailContent({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-      {/* 헤더: 차량명 + source */}
+      {/* 차량명 */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-white">{vehicle.name}</div>
           <div className="truncate font-mono text-[11px] text-slate-400">{vehicle.vehicleId}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <span
-            className={cn(
-              "rounded px-1.5 py-0.5 text-[10px] font-semibold",
-              vehicle.source === "REAL"
-                ? "bg-emerald-500/15 text-emerald-300"
-                : "bg-sky-500/15 text-sky-300",
-            )}
-          >
-            {vehicle.source}
-          </span>
           {!vehicle.active ? (
             <span className="rounded bg-slate-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300">
               비활성
@@ -155,7 +137,7 @@ function VehicleDetailContent({
           <span className="text-[10px] font-medium tracking-wide text-slate-400 uppercase">위치</span>
           {loc ? (
             <span className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[9px] text-slate-400">
-              {loc.source} · {loc.frameId ?? "—"}
+              {loc.frameId ?? "—"}
             </span>
           ) : null}
         </div>
@@ -184,9 +166,6 @@ function VehicleDetailContent({
         )}
       </div>
 
-      {/* 적재 화물 안전 (prompt63.md 3장 4번) */}
-      <LoadSafetyPanel loadSafety={loadSafety} />
-
       {/* 현재 작업 */}
       <div>
         <div className="mb-1 text-[10px] font-medium tracking-wide text-slate-400 uppercase">
@@ -196,7 +175,6 @@ function VehicleDetailContent({
           <dl className="grid grid-cols-2 gap-2 text-xs">
             <DetailField label="Task" value={task.taskId} mono className="col-span-2" />
             <DetailField label="작업 상태" value={task.status} />
-            <DetailField label="명령 상태" value={task.commandStatus ?? "—"} />
           </dl>
         ) : (
           <p className="rounded-md bg-white/5 px-2.5 py-2 text-xs text-slate-400">

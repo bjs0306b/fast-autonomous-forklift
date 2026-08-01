@@ -1,26 +1,15 @@
 package com.fast.backend.station.dto;
 
-import java.time.OffsetDateTime;
-
 /**
- * 측정 데스크탑이 {@code POST /api/stations/measurements}로 보내는 측정 결과(prompt95.md 5장).
+ * 측정 AI가 REST로 등록하거나 MQTT로 보내는 최종 측정 결과다. 두 경로는 같은 DTO를 사용한다.
  *
- * <p><b>MQTT용 DTO를 재사용하지 않는다.</b> 옛 {@code StationMeasurementMessage}는 snake_case 원본
- * (detection/distance/miniature/loadBalance 상세)을 통째로 받았지만, 그중 저장되는 값은 네 개뿐이었다.
- * 이 DTO는 <b>저장되는 값만</b> camelCase로 받는다 — 받아서 버리는 필드를 계약에 남기지 않는다.
+ * <p>AI 내부 상세 결과를 통째로 받지 않고 백엔드가 저장하는 값만 camelCase로 받는다.
  *
- * <p><b>{@code sessionId} 는 필수다(prompt107).</b> 예전에는 받지 않고 백엔드가 활성 세션을 조회해
- * 붙였는데, 그러면 세션 A 가 TTL·force 로 해제되고 세션 B 가 열린 뒤 도착한 A 의 늦은 측정이
- * <b>B 에 잘못 귀속</b>된다. 요청이 자기 출처 세션을 밝혀야 백엔드가 그것을 걸러낼 수 있다.
- *
- * <p><b>받지 않는 필드와 그 이유</b>
- * <ul>
- *   <li>{@code stationId} — FR-202 스키마에서 컬럼이 사라졌다(측정 설비는 하나뿐이다).</li>
- *   <li>{@code schemaVersion} — REST 계약은 URL·DTO로 버전을 표현한다. 페이로드 안에 또 둘 이유가 없다.</li>
- * </ul>
+ * <p>{@code sessionId}는 필수다. 세션 A가 해제된 후 도착한 A의 결과를 새 세션 B에 잘못
+ * 연결하지 않도록 백엔드가 현재 활성 세션과 비교한다.
  *
  * <p>검증은 이 record가 아니라 {@code StationMeasurementService}가 한다 — status에 따라 어떤 필드가
- * 필수/null 이어야 하는지가 달라서(15장) Bean Validation 애너테이션 하나로는 표현되지 않는다.
+ * 필수/null 이어야 하는지가 달라 Bean Validation 애너테이션 하나로는 표현되지 않는다.
  *
  * @param sessionId     이 측정이 속한 세션. 세션 생성 응답으로 받은 값을 그대로 보낸다.
  *                      현재 활성 세션과 다르면 409 {@code STATION_SESSION_MISMATCH} 로 거부된다 —
@@ -30,11 +19,9 @@ import java.time.OffsetDateTime;
  * @param status        {@code ok} / {@code dimensions_only} / {@code no_detection} / {@code unreliable}.
  *                      대소문자는 {@code StationMeasurementStatus#fromRaw}가 흡수한다.
  * @param cargoHeight   <b>화물만의 높이, 단위 meter</b>(팔레트 제외). 예: 72.3cm → {@code 0.723}.
- *                      백엔드는 cm/m를 추측해 변환하지 않는다 — 데스크탑이 m로 보내야 한다.
+ *                      백엔드는 cm/m를 추측해 변환하지 않는다 — AI 발행 경계에서 m로 보내야 한다.
  * @param tippingLevel  전복 위험 등급. 소문자({@code safe}) 입력을 허용하고 대문자로 정규화해 저장한다.
  * @param overhangRatio 팔레트 폭 대비 한쪽 최대 돌출 비율(무차원, 0 이상). 백엔드는 재계산하지 않는다.
- * @param measuredAt    장비 측정 시각(오프셋 포함). <b>현재 DB에 저장 컬럼이 없어 검증 후 버려진다</b> —
- *                      {@code created_at}(수신 시각)만 남는다. 컬럼 추가는 이번 범위 밖(5장).
  */
 public record StationMeasurementCreateRequest(
         String sessionId,
@@ -42,7 +29,6 @@ public record StationMeasurementCreateRequest(
         String status,
         Double cargoHeight,
         String tippingLevel,
-        Double overhangRatio,
-        OffsetDateTime measuredAt
+        Double overhangRatio
 ) {
 }

@@ -8,10 +8,8 @@ import java.util.Optional;
 @Mapper
 public interface CargoMapper {
 
-    /** insert 후 XML의 useGeneratedKeys로 cargo.id가 채워진다. */
     int insert(Cargo cargo);
-
-    Optional<Cargo> findById(Long id);
+    int insertIfAbsent(Cargo cargo);
 
     Optional<Cargo> findByCargoId(String cargoId);
 

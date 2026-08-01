@@ -2,6 +2,7 @@ package com.fast.backend.vehicle.mapper;
 
 import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,17 @@ public interface VehicleCurrentStatusMapper {
      * 수행한다 — SQL에서 비교하면 실패를 조용히 무시한 것인지 실제로 갱신된 것인지 구분하기 어렵기 때문이다.
      */
     void upsert(VehicleCurrentStatus status);
+
+    /** 원본 발생 시각이 기존 값보다 새로운 위치만 원자적으로 저장한다. */
+    int updateLocationIfNewer(
+            @Param("vehicleId") String vehicleId,
+            @Param("positionX") Double positionX,
+            @Param("positionY") Double positionY,
+            @Param("positionFrame") String positionFrame,
+            @Param("heading") Double heading,
+            @Param("speed") Double speed,
+            @Param("messageAt") java.time.LocalDateTime messageAt,
+            @Param("receivedAt") java.time.LocalDateTime receivedAt);
 
     /**
      * 활성 차량만 대상으로 상태별 차량 수를 집계한다. 상태 이력이 아예 없는(vehicle_current_status에

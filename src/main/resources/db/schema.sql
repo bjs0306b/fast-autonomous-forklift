@@ -1,561 +1,175 @@
--- FR-501-1 다중 차량 등록·상태 집계: vehicle / vehicle_current_status DDL
--- (prompt16.md 7장 "실행 가능한 MySQL DDL")
---
--- 이 파일은 두 용도로 쓰인다.
---   1) 팀 EC2/로컬 MySQL에 실제 테이블을 만들 때 이 SQL을 그대로 복사해 실행한다(수동 실행 전제,
---      Spring Boot가 이 파일을 자동으로 실 MySQL에 실행하도록 설정하지 않았다 — 팀이 공유하는 DB에
---      애플리케이션 기동만으로 스키마가 바뀌는 것을 막기 위한 의도적 설계. answer15.md 5장 참고).
---   2) application-test.yml에서 spring.sql.init.schema-locations로 지정해, mvnw test 실행 시
---      임베디드 H2(MySQL 호환 모드)에 자동 적용된다 — 이 DDL이 실제로 실행 가능한지 매 테스트마다
---      검증된다.
---
--- ENGINE=InnoDB, DEFAULT CHARSET=utf8mb4 같은 MySQL 전용 절은 일부러 넣지 않았다. AWS RDS/MySQL 8
--- 기본값이 이미 InnoDB·utf8mb4이고, 이 절을 빼면 H2에서도 그대로 실행할 수 있어 테스트로 실제 검증이
--- 가능하기 때문이다. 팀 MySQL 서버의 기본 엔진/문자셋이 다르면 CREATE TABLE 뒤에 팀이 별도로
--- ALTER TABLE ... ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 등을 추가하면 된다.
--- USE fast_backend;
---   H2(MySQL 호환 모드)는 USE 를 지원하지 않아 스키마 초기화가 통째로 실패한다. 이 파일은 위 주석대로
---   테스트에서 H2 에도 적용되므로 주석 처리했다. 실 MySQL 에 수동으로 붙여 넣을 때는 접속 시
---   데이터베이스를 선택하거나(예: mysql -D fast_backend) 이 줄의 주석을 풀고 실행하면 된다.
+-- F.A.S.T. MVP 백엔드 스키마
+-- 기준 문서: docs/backend-api/optimal-placement.md
+-- 길이와 지도 좌표는 m, 방향은 [0, 360) 범위의 degree를 사용한다.
+-- 신규 데이터베이스 생성용 파일이며 운영 데이터 마이그레이션은 범위에서 제외한다.
 
-
-CREATE TABLE IF NOT EXISTS vehicle (
-    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    vehicle_id   VARCHAR(50)  NOT NULL,
-    name         VARCHAR(100) NOT NULL,
-    source       VARCHAR(20)  NOT NULL,
-    vehicle_type VARCHAR(30)  NULL,
-    active       BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at   DATETIME     NOT NULL,
-    updated_at   DATETIME     NOT NULL,
-    CONSTRAINT uk_vehicle_vehicle_id UNIQUE (vehicle_id)
+CREATE TABLE IF NOT EXISTS cargo (
+    cargo_id   VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '화물 고유 식별자',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '화물 등록 시각'
 );
 
--- 차량당 최신 상태 한 행만 유지(vehicle_id가 PK). 상태 이력 테이블(vehicle_status_history)은
--- 이번 FR-501-1 범위에 포함하지 않는다 — 필요해지면 후속 Story로 분리한다(prompt16.md 7장 조건,
--- answer15.md 15장 참고).
--- Isaac 확장 필드(fork_height/has_cargo/cargo_id/footprint_length/footprint_width)는 prompt32.md 1장
--- 4번 확정에 따라 추가했다. Isaac 상태 메시지에만 들어오는 값이라 전부 nullable이며, ROS2 상태 메시지가
--- 이 컬럼들을 null로 덮어쓰지 않도록 VehicleStatusService가 "기존 값 보존" 정책으로 병합한다
--- (그 클래스 Javadoc의 "Isaac 확장 필드 병합 정책" 참고).
+CREATE TABLE IF NOT EXISTS station_session (
+    session_id VARCHAR(100) NOT NULL PRIMARY KEY COMMENT '측정 세션 식별자',
+    cargo_id   VARCHAR(50)  NOT NULL COMMENT '측정 대상 화물 식별자',
+    CONSTRAINT fk_station_session_cargo
+        FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
+);
+
+CREATE TABLE IF NOT EXISTS station_state (
+    singleton_id      INT          NOT NULL PRIMARY KEY COMMENT '단일 행을 보장하는 고정값 1',
+    active_session_id VARCHAR(100) NULL COMMENT '현재 활성 측정 세션',
+    acquired_at       DATETIME(6)  NULL COMMENT '측정 설비 점유 시작 시각',
+    CONSTRAINT chk_station_state_singleton CHECK (singleton_id = 1),
+    CONSTRAINT chk_station_state_occupancy CHECK (
+        (active_session_id IS NULL AND acquired_at IS NULL)
+        OR (active_session_id IS NOT NULL AND acquired_at IS NOT NULL)
+    ),
+    CONSTRAINT fk_station_state_session
+        FOREIGN KEY (active_session_id) REFERENCES station_session (session_id)
+);
+
+INSERT INTO station_state (singleton_id, active_session_id, acquired_at)
+SELECT 1, NULL, NULL
+WHERE NOT EXISTS (SELECT 1 FROM station_state WHERE singleton_id = 1);
+
+CREATE TABLE IF NOT EXISTS station_measurement (
+    sequence_no    BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '백엔드 측정 결과 수신 순서',
+    measurement_id VARCHAR(100) NOT NULL COMMENT '측정 결과 중복 방지 식별자',
+    session_id     VARCHAR(100) NOT NULL COMMENT '측정 세션 식별자',
+    status         VARCHAR(30)  NOT NULL COMMENT '측정 처리 상태',
+    cargo_height   DOUBLE       NULL COMMENT '팔레트를 제외한 화물 높이(m)',
+    tipping_level  VARCHAR(20)  NULL COMMENT '전복 위험 등급(SAFE, WARNING, DANGER)',
+    overhang_ratio DOUBLE       NULL COMMENT '팔레트 대비 화물 돌출 비율',
+    created_at     DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '백엔드 저장 시각',
+    CONSTRAINT uk_station_measurement_id UNIQUE (measurement_id),
+    CONSTRAINT uk_station_measurement_session UNIQUE (session_id),
+    CONSTRAINT chk_station_measurement_status
+        CHECK (status IN ('OK', 'DIMENSIONS_ONLY', 'NO_DETECTION', 'UNRELIABLE')),
+    CONSTRAINT chk_station_measurement_height
+        CHECK (cargo_height IS NULL OR cargo_height > 0),
+    CONSTRAINT chk_station_measurement_tipping
+        CHECK (tipping_level IS NULL OR tipping_level IN ('SAFE', 'WARNING', 'DANGER')),
+    CONSTRAINT chk_station_measurement_overhang
+        CHECK (overhang_ratio IS NULL OR overhang_ratio >= 0),
+    CONSTRAINT fk_station_measurement_session
+        FOREIGN KEY (session_id) REFERENCES station_session (session_id)
+);
+
+CREATE TABLE IF NOT EXISTS vehicle (
+    vehicle_id VARCHAR(50)  NOT NULL PRIMARY KEY COMMENT '차량 고유 식별자',
+    name       VARCHAR(100) NOT NULL COMMENT '차량 표시 이름',
+    active     BOOLEAN      NOT NULL DEFAULT TRUE COMMENT '차량 사용 가능 여부',
+    created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '차량 등록 시각',
+    updated_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '차량 정보 수정 시각'
+);
+
 CREATE TABLE IF NOT EXISTS vehicle_current_status (
-    vehicle_id       VARCHAR(50)  NOT NULL PRIMARY KEY,
-    status           VARCHAR(20)  NOT NULL DEFAULT 'UNKNOWN',
-    battery          INT          NULL,
-    position_x       DOUBLE       NULL,
-    position_y       DOUBLE       NULL,
-    heading          DOUBLE       NULL,
-    speed            DOUBLE       NULL,
-    fork_height      DOUBLE       NULL,
-    has_cargo        BOOLEAN      NULL,
-    cargo_id         VARCHAR(50)  NULL,
-    footprint_length DOUBLE       NULL,
-    footprint_width  DOUBLE       NULL,
-    message_at       DATETIME     NULL,
-    received_at      DATETIME     NOT NULL,
-    updated_at       DATETIME     NOT NULL,
+    vehicle_id      VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '상태 대상 차량 식별자',
+    status          VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN' COMMENT '차량 주행 상태',
+    battery         INT         NULL COMMENT '배터리 잔량(%)',
+    position_x      DOUBLE      NULL COMMENT '지도 X 좌표(m)',
+    position_y      DOUBLE      NULL COMMENT '지도 Y 좌표(m)',
+    position_frame  VARCHAR(10) NULL COMMENT '좌표계(map 또는 odom)',
+    heading         DOUBLE      NULL COMMENT '차량 진행 방향(degree)',
+    speed           DOUBLE      NULL COMMENT '차량 속도(m/s)',
+    fork_height     DOUBLE      NULL COMMENT '현재 포크 높이(m)',
+    fork_state      VARCHAR(20) NULL COMMENT '포크 동작 상태',
+    fork_error_code VARCHAR(50) NULL COMMENT '포크 오류 코드',
+    has_cargo       BOOLEAN     NULL COMMENT '화물 적재 여부',
+    cargo_id        VARCHAR(50) NULL COMMENT '차량이 보고한 화물 식별자',
+    message_at      DATETIME(6) NULL COMMENT '최신 위치 메시지 원본 발생 시각',
+    received_at     DATETIME(6) NOT NULL COMMENT '최신 상태 수신 시각',
+    CONSTRAINT chk_vehicle_status_battery CHECK (battery IS NULL OR battery BETWEEN 0 AND 100),
+    CONSTRAINT chk_vehicle_status_frame CHECK (position_frame IS NULL OR position_frame IN ('map', 'odom')),
+    CONSTRAINT chk_vehicle_status_heading CHECK (heading IS NULL OR (heading >= 0 AND heading < 360)),
     CONSTRAINT fk_vehicle_current_status_vehicle
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id)
 );
 
--- 차량 상태 변경 이력(FR-504, prompt22.md). vehicle_current_status는 차량당 최신 상태 1행만 유지하므로,
--- 상태가 바뀌어 온 과정을 그대로 남기기 위해 별도 테이블에 누적 저장한다. 위치 전용(MQTT 위치 메시지)
--- 이력 저장은 이번 범위에서 제외하고, 필요해지면 vehicle_location_history로 별도 분리한다(prompt22.md 4장).
--- 조회 인덱스(vehicle_id, message_at DESC)는 별도 CREATE INDEX 문 대신 CREATE TABLE에 인라인으로
--- 넣었다. MySQL은 CREATE INDEX에 IF NOT EXISTS를 지원하지 않는데, 테스트에서 같은 임베디드 H2
--- 인스턴스에 대해 이 schema.sql이 Spring 컨텍스트마다 다시 실행될 수 있어(mode=always) 별도 문으로
--- 두면 "인덱스가 이미 존재함" 오류로 두 번째 컨텍스트 기동이 실패한다. 인라인으로 두면 테이블
--- 전체가 CREATE TABLE IF NOT EXISTS 하나로 함께 보호된다.
-CREATE TABLE IF NOT EXISTS vehicle_status_history (
-    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
-    vehicle_id       VARCHAR(50) NOT NULL,
-    status           VARCHAR(20) NOT NULL,
-    battery          INT NULL,
-    position_x       DOUBLE NULL,
-    position_y       DOUBLE NULL,
-    heading          DOUBLE NULL,
-    speed            DOUBLE NULL,
-    fork_height      DOUBLE NULL,
-    has_cargo        BOOLEAN NULL,
-    cargo_id         VARCHAR(50) NULL,
-    footprint_length DOUBLE NULL,
-    footprint_width  DOUBLE NULL,
-    message_at       DATETIME NULL,
-    received_at      DATETIME NOT NULL,
-    created_at       DATETIME NOT NULL,
-    CONSTRAINT fk_vehicle_status_history_vehicle
-        FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
-    INDEX idx_vehicle_status_history_vehicle_message (vehicle_id, message_at DESC)
-);
-
--- AI 화물·파렛트 인식 결과(prompt26.md). analysis_id는 AI가 채번한 고유 식별자로 중복 저장을 막는다
--- (UNIQUE). vehicle_id/cargo_id는 이 저장소에 아직 cargo/pallet/task 도메인 테이블이 없어(전부 새로
--- 확인한 결과 존재하지 않음) FK로 강제하지 않고 느슨한 문자열로만 보관한다 — vehicle_id도 동일하게
--- FK를 걸지 않았다(answer26.md 3장에 이 결정을 문서화).
---
--- load_direction은 loadBalance.direction 배열(예: ["left","front"])을 쉼표로 이어붙인 문자열로
--- 저장한다(answer26.md 9.3장 근거: JSON 컬럼 타입은 이 프로젝트에서 한 번도 쓰인 적이 없어 H2/MySQL
--- 호환성 문제를 새로 만들지 않기 위해 피했고, 별도 자식 테이블을 두기엔 원소가 최대 2개뿐이라 과함).
-CREATE TABLE IF NOT EXISTS ai_cargo_analysis (
-    id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-    analysis_id        VARCHAR(100) NOT NULL,
-    schema_version     VARCHAR(20) NOT NULL,
-    vehicle_id         VARCHAR(50) NULL,
-    cargo_id           VARCHAR(50) NULL,
-    status             VARCHAR(30) NOT NULL,
-    distance_cm        DOUBLE NULL,
-    distance_std_cm    DOUBLE NULL,
-    width_cm           DOUBLE NULL,
-    height_cm          DOUBLE NULL,
-    depth_cm           DOUBLE NULL,
-    volume_cm3         DOUBLE NULL,
-    dimension_scale    VARCHAR(20) NULL,
-    load_direction     VARCHAR(50) NULL,
-    load_message       VARCHAR(500) NULL,
-    ratio_horizontal   DOUBLE NULL,
-    ratio_vertical     DOUBLE NULL,
-    message            VARCHAR(500) NULL,
-    captured_at        DATETIME NULL,
-    processed_at       DATETIME NOT NULL,
-    received_at        DATETIME NOT NULL,
-    created_at         DATETIME NOT NULL,
-    CONSTRAINT uk_ai_cargo_analysis_analysis_id UNIQUE (analysis_id),
-    INDEX idx_ai_cargo_analysis_cargo_processed (cargo_id, processed_at DESC)
-);
-
--- 다중 박스 감지 결과. 분석 결과 1건에 박스 0~N개가 붙는다(9.4장: 같은 트랜잭션에서 처리, 박스 insert
--- 실패 시 분석 결과 insert도 함께 롤백).
-CREATE TABLE IF NOT EXISTS ai_cargo_detection_box (
-    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-    analysis_id    BIGINT NOT NULL,
-    class_name     VARCHAR(50) NOT NULL,
-    confidence     DOUBLE NULL,
-    bbox_x         INT NOT NULL,
-    bbox_y         INT NOT NULL,
-    bbox_width     INT NOT NULL,
-    bbox_height    INT NOT NULL,
-    created_at     DATETIME NOT NULL,
-    CONSTRAINT fk_detection_box_analysis
-        FOREIGN KEY (analysis_id) REFERENCES ai_cargo_analysis (id)
-);
-
--- 측정 스테이션 측정 결과 v1.1 (prompt16.md, MR !36, FR-101-5). 스테이션 PC가 추론·판정을 마친 결과를
--- fast/station/{station_id}/measurement 토픽으로 발행하고 백엔드는 결과만 저장한다. 기존
--- ai_cargo_analysis(cargo/detected)와 규격(snake_case 키, OffsetDateTime, pallet 별도 의미, miniature/
--- eccentric/magnitude/threshold 등)이 달라 무리하게 확장하지 않고 별도 도메인 테이블로 분리했다.
---
--- measured_at 오프셋 보존: MySQL/H2 공용 DATETIME은 타임존을 담지 못하므로, UTC 변환 시각
--- (measured_at_utc)과 오프셋 분(measured_at_offset_minutes, 예: +09:00 → 540)을 분리 저장해 응답 시
--- 원래 OffsetDateTime을 손실 없이 복원한다. depth_cm은 정책상 항상 null이지만(정면 단일 카메라) 컬럼은
-CREATE TABLE IF NOT EXISTS cargo (
-    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    cargo_id   VARCHAR(50)  NOT NULL,
-    width      DOUBLE       NOT NULL,
-    length     DOUBLE       NOT NULL,
-    height     DOUBLE       NOT NULL,
-    volume     DOUBLE       NOT NULL,
-    created_at DATETIME     NOT NULL,
-    updated_at DATETIME     NOT NULL,
-    CONSTRAINT uk_cargo_cargo_id UNIQUE (cargo_id)
-);
-
--- =============================================================================
--- 측정 세션 (prompt96) — 단일 설비 점유와 측정 결과 귀속
--- =============================================================================
---
--- 스테이션 설비는 하나뿐이라 동시에 한 세션만 활성화할 수 있다. "지금 어느 화물을 재는 중인가"를
--- station_state 한 행으로 표현하고, 측정 결과(station_measurement)는 그 세션에 귀속된다.
--- 측정 결과를 REST 로 받을 때 요청은 session_id 를 보내지 않고 백엔드가 활성 세션을 찾아 붙인다.
-
-CREATE TABLE IF NOT EXISTS station_session (
-    session_id VARCHAR(100) NOT NULL PRIMARY KEY COMMENT '측정 세션 고유 식별자',
-    cargo_id   VARCHAR(50)  NOT NULL COMMENT '측정 대상 화물 식별자',
-    created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '세션 시작 시각',
-    CONSTRAINT fk_station_session_cargo
-        FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT
-);
-
--- session_id 는 백엔드가 UUIDv4 로 생성하며 종료된 세션도 보존한다(측정 결과가 FK 로 참조한다).
-
-CREATE TABLE IF NOT EXISTS station_state (
-    singleton_id      INT          NOT NULL PRIMARY KEY COMMENT '단일 스테이션 행 고정값',
-    active_session_id VARCHAR(100) NULL COMMENT '현재 점유 중인 측정 세션. NULL 이면 유휴',
-    -- 점유 시각(prompt106). TTL 자동 해제의 기준이다. 측정 데스크탑이 kill -9/전원차단으로
-    -- 죽으면 세션 종료 요청이 오지 않아 잠금이 영구히 남는데, 이 값으로 경과 시간을 판정해
-    -- 다음 openSession 이 스스로 회수한다(별도 스케줄러를 두지 않는다).
-    -- active_session_id 와 항상 함께 세팅/해제된다. 유휴 상태면 둘 다 NULL 이다.
-    acquired_at       DATETIME(6)  NULL COMMENT '현재 세션을 점유한 시각. TTL 만료 판정 기준',
-
-    CONSTRAINT chk_station_state_singleton
-        CHECK (singleton_id = 1),
-    CONSTRAINT fk_station_state_active_session
-        FOREIGN KEY (active_session_id) REFERENCES station_session (session_id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT
-);
-
--- 재실행 시 PK 중복으로 기동이 실패하지 않도록 INSERT IGNORE 를 쓴다.
-INSERT IGNORE INTO station_state (singleton_id, active_session_id) VALUES (1, NULL);
-
--- 유지한다. pallet은 detection box와 의미가 달라(적재 파렛트) 부모의 단일 컬럼 세트로 보존한다.
-CREATE TABLE IF NOT EXISTS station_measurement (
-    id                         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    measurement_id             VARCHAR(100) NOT NULL,
-    -- 측정 세션 귀속과 REST 계약 컬럼(prompt96). 위쪽 MQTT 규격 컬럼(height_cm/tipping_*)은 레거시로
-    -- 남기고, REST 로 들어오는 값은 아래 세 컬럼에 저장한다 — 단위가 다르기 때문이다(height_cm 은 cm,
-    -- cargo_height 는 m). 기존 행과 섞이지 않도록 전부 nullable 이다.
-    session_id                 VARCHAR(100) NULL COMMENT '측정 결과가 속한 세션',
-    cargo_height               DOUBLE       NULL COMMENT '팔레트를 제외한 화물 높이(meter)',
-    overhang_ratio             DOUBLE       NULL COMMENT '팔레트 기준 화물 돌출 비율(무차원)',
-    -- prompt96: REST 로 들어오는 행은 station_id/schema_version 이 없고(설비 1대, 버전은 URL 로 표현)
-    -- measured_at 도 선택이라 네 컬럼 모두 nullable 로 완화했다. MQTT 시절 행은 값이 그대로 남는다.
-    station_id                 VARCHAR(50)  NULL,
-    schema_version             VARCHAR(20)  NULL,
-    measured_at_utc            DATETIME     NULL,
-    measured_at_offset_minutes INT          NULL,
-    status                     VARCHAR(20)  NOT NULL,
-    box_count                  INT          NULL,
-    pallet_bbox_x              INT          NULL,
-    pallet_bbox_y              INT          NULL,
-    pallet_bbox_width          INT          NULL,
-    pallet_bbox_height         INT          NULL,
-    pallet_score               DOUBLE       NULL,
-    front_cm                   DOUBLE       NULL,
-    distance_std_cm            DOUBLE       NULL,
-    frames_used                INT          NULL,
-    height_cm                  DOUBLE       NULL,
-    width_cm                   DOUBLE       NULL,
-    depth_cm                   DOUBLE       NULL,
-    miniature_scale            INT          NULL,
-    miniature_height_mm        DOUBLE       NULL,
-    miniature_width_mm         DOUBLE       NULL,
-    eccentric                  BOOLEAN      NULL,
-    load_direction             VARCHAR(50)  NULL,
-    ratio_x                    DOUBLE       NULL,
-    ratio_y                    DOUBLE       NULL,
-    magnitude                  DOUBLE       NULL,
-    threshold                  DOUBLE       NULL,
-    load_message               VARCHAR(500) NULL,
-    -- 전복 위험(tipping, FR-103) — 규격 v1.1에서 추가. 편하중(load_balance)과 다른 질문에
-    -- 답한다: 편하중은 "무게중심이 치우쳤나", 전복은 "무게중심이 지지면(파렛트)을 벗어났나".
-    -- 컬럼에 tipping_ 접두사를 붙이는 이유는 direction/message가 위 load_* 와 이름이 겹치기
-    -- 때문이다. 전 컬럼 nullable — status가 dimensions_only면 판정 자체를 못 한다.
-    tipping_assessable         BOOLEAN      NULL,
-    tipping_level              VARCHAR(20)  NULL,  -- SAFE | WARNING | DANGER (REST 입력은 대문자 정규화)
-    tipping_static_stable      BOOLEAN      NULL,  -- 정지 상태에서 넘어지는가(등급과 구분)
-    tipping_support_offset     DOUBLE       NULL,  -- 1.0 = 무게중심이 파렛트 끝(물리적 한계)
-    tipping_margin             DOUBLE       NULL,
-    tipping_direction          VARCHAR(20)  NULL,  -- left | right | null
-    tipping_aspect_ratio       DOUBLE       NULL,
-    tipping_overhang           DOUBLE       NULL,  -- 화물이 파렛트 밖으로 나간 비율
-    tipping_message            VARCHAR(500) NULL,
-    received_at                DATETIME     NULL,
-    created_at                 DATETIME     NOT NULL,
-    CONSTRAINT uk_station_measurement_measurement_id UNIQUE (measurement_id),
-    CONSTRAINT fk_station_measurement_session
-        FOREIGN KEY (session_id) REFERENCES station_session (session_id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_station_measurement_cargo_height
-        CHECK (cargo_height IS NULL OR cargo_height > 0),
-    CONSTRAINT chk_station_measurement_overhang_ratio
-        CHECK (overhang_ratio IS NULL OR overhang_ratio >= 0),
-    INDEX idx_station_measurement_station_measured (station_id, measured_at_utc DESC),
-    -- 세션당 최종 측정 결과는 1건이다(prompt96 5장). UNIQUE 로 강제하면 동시 요청에서도
-    -- 두 번째 INSERT 가 DB 레벨에서 막힌다 — Service 의 사전 확인만으로는 경합을 막을 수 없다.
-    CONSTRAINT uk_station_measurement_session UNIQUE (session_id)
-);
-
--- 다중 detection box(1:N). box_order로 payload 배열 순서를 보존한다. bbox 좌표는 nullable(관제 오버레이
--- 미사용 시 bbox_px 생략 가능, 정책 7번). pallet은 부모 테이블에 별도 보관하므로 이 테이블에는 넣지 않는다.
-CREATE TABLE IF NOT EXISTS station_measurement_box (
-    id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
-    station_measurement_id BIGINT NOT NULL,
-    box_order              INT    NOT NULL,
-    bbox_x                 INT    NULL,
-    bbox_y                 INT    NULL,
-    bbox_width             INT    NULL,
-    bbox_height            INT    NULL,
-    score                  DOUBLE NULL,
-    created_at             DATETIME NOT NULL,
-    CONSTRAINT fk_station_measurement_box_measurement
-        FOREIGN KEY (station_measurement_id) REFERENCES station_measurement (id)
-);
-
--- 차량 제어 명령 통합 테이블(prompt29.md 17장 → prompt32.md 1장 7~11번, 3장 3번으로 확장).
--- command_id는 REST 응답·MQTT 결과 연결의 유일한 키라 UNIQUE로 이중 방어한다(애플리케이션 사전 확인 +
--- DB 제약). stopped_actions는 loadBalance.direction(prompt26.md)과 동일하게 쉼표 구분 문자열로 저장한다
--- (JSON 컬럼 미사용 원칙 유지, 원소가 최대 3개뿐이라 자식 테이블도 과함).
---
--- prompt32.md 확정으로 추가된 컬럼:
---   target_system    ROS2 / EMBEDDED / ALL
---   command_category MOVE / FORK / LOAD / SAFETY
---   payload_json     명령별로 구조가 다른 payload를 JSON "문자열"로 보관. MySQL JSON 컬럼 타입을 쓰지
---                    않은 이유는 이 프로젝트가 한 번도 JSON 컬럼을 쓴 적이 없고(load_direction/
---                    stopped_actions 모두 문자열), 테스트가 도는 H2와의 호환 문제를 새로 만들지 않기
---                    위해서다(prompt32.md 3장 4번 "H2 테스트 호환성을 고려해 안전한 방식을 선택").
---
--- 테이블/컬럼 이름은 embedded_vehicle_command · forklift_id를 그대로 유지한다(prompt32.md 3장 3번이
--- 허용한 "기존 forklift_id 유지 정책"). 이름을 바꾸면 운영 DB 마이그레이션과 기존 데이터 이관 위험이
--- 커지는 데 비해 얻는 게 이름 일관성뿐이기 때문이다. 애플리케이션 계층(Domain/DTO/JSON)에서는 확정
--- 규격대로 vehicleId를 쓰고, Mapper XML이 forklift_id 컬럼과 매핑한다.
-CREATE TABLE IF NOT EXISTS embedded_vehicle_command (
-    id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
-    command_id               VARCHAR(100) NOT NULL,
-    forklift_id              VARCHAR(50) NOT NULL,
-    command                  VARCHAR(30) NOT NULL,
-    target_system            VARCHAR(20) NOT NULL,
-    command_category         VARCHAR(20) NOT NULL,
-    payload_json             VARCHAR(1000) NULL,
-    reason                   VARCHAR(100) NULL,
-    status                   VARCHAR(20) NOT NULL,
-    issued_at                DATETIME NOT NULL,
-    published_at             DATETIME NULL,
-    completed_at             DATETIME NULL,
-    error_code               VARCHAR(50) NULL,
-    result_message           VARCHAR(500) NULL,
-    stopped_actions          VARCHAR(100) NULL,
-    emergency_stop_applied   BOOLEAN NULL,
-    requires_reset           BOOLEAN NULL,
-    created_at               DATETIME NOT NULL,
-    updated_at               DATETIME NOT NULL,
-    CONSTRAINT uk_embedded_vehicle_command_command_id UNIQUE (command_id),
-    INDEX idx_embedded_vehicle_command_forklift_issued (forklift_id, issued_at DESC)
-);
-
--- 실물 포크 현재 상태 1행/차량(prompt29.md 17장). GET /api/vehicles/{forkliftId}/fork-status 조회를
--- WebSocket 없이도 서빙하기 위해 최소 현재값만 유지한다. 포크 높이·limitTop 컬럼은 절대 추가하지 않는다
--- (작업 원칙 12·13번).
-CREATE TABLE IF NOT EXISTS vehicle_fork_current_status (
-    forklift_id   VARCHAR(50) NOT NULL PRIMARY KEY,
-    fork_state    VARCHAR(20) NOT NULL,
-    limit_bottom  BOOLEAN NOT NULL,
-    error_code    VARCHAR(50) NULL,
-    message_at    DATETIME NOT NULL,
-    received_at   DATETIME NOT NULL,
-    updated_at    DATETIME NOT NULL
-);
-
--- 적재 화물 안전 상태 1행/차량(prompt63.md 3장). vehicle_fork_current_status와 같은 "차량당 최신 1행"
--- upsert 구조다 — 관제 화면이 필요로 하는 것은 "지금 이 차량의 적재가 안전한가"이며, prompt63.md는
--- 이력 보관을 요구하지 않았다(필요해지면 vehicle_status_history 패턴으로 별도 이력 테이블을 만든다).
---
--- 측정값 컬럼이 전부 NULL 허용인 이유: 비전이 화물을 찾지 못했거나 IMU가 없는 차량도 "위험 아님"을
--- 보고할 수 있어야 한다. 값이 없다는 사실을 0으로 위조하지 않는다.
--- roll/pitch는 단위를 컬럼명에 드러내고 예약어 충돌도 피하려고 roll_deg/pitch_deg로 둔다.
--- risk_level은 백엔드가 계산하지 않는다 — 비전·센서가 판정해 보낸 값을 그대로 저장한다.
-CREATE TABLE IF NOT EXISTS vehicle_load_safety (
-    vehicle_id     VARCHAR(50)  NOT NULL PRIMARY KEY,
-    cargo_id       VARCHAR(50)  NULL,
-    fork_height    DOUBLE       NULL,
-    cargo_height   DOUBLE       NULL,
-    roll_deg       DOUBLE       NULL,
-    pitch_deg      DOUBLE       NULL,
-    load_offset_x  DOUBLE       NULL,
-    load_offset_y  DOUBLE       NULL,
-    risk_level     VARCHAR(20)  NOT NULL,
-    risk_code      VARCHAR(50)  NULL,
-    message        VARCHAR(255) NULL,
-    source         VARCHAR(20)  NOT NULL,
-    detected_at    DATETIME     NOT NULL,
-    received_at    DATETIME     NOT NULL,
-    updated_at     DATETIME     NOT NULL,
-    INDEX idx_vehicle_load_safety_risk (risk_level)
-);
-
--- 실물 임베디드 오류 이력(prompt29.md 17장). 상태처럼 누적 기록이 필요해 이력 테이블로 분리했다
--- (vehicle_status_history와 동일한 설계 패턴).
-CREATE TABLE IF NOT EXISTS embedded_error_history (
-    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-    forklift_id    VARCHAR(50) NOT NULL,
-    error_code     VARCHAR(50) NOT NULL,
-    error_source   VARCHAR(20) NOT NULL,
-    severity       VARCHAR(20) NOT NULL,
-    message        VARCHAR(500) NULL,
-    occurred_at    DATETIME NOT NULL,
-    received_at    DATETIME NOT NULL,
-    created_at     DATETIME NOT NULL,
-    INDEX idx_embedded_error_history_forklift_occurred (forklift_id, occurred_at DESC)
-);
-
--- =====================================================================================
--- 화물 크기 기반 적재 위치 추천 및 운반 작업(prompt46.md 핵심 로직 → prompt47.md 영속 슬라이스).
--- 좌표·크기 단위는 m, heading은 degree로 기존 차량 위치 규격(prompt32.md 1장 5번)과 동일하다.
--- 기존 방식과 동일하게 ENGINE/CHARSET 절은 넣지 않고(H2 MySQL 호환 모드에서 그대로 실행 가능),
--- 인덱스는 CREATE TABLE 인라인으로 둔다(mode=always 재실행 시 "이미 존재" 오류 방지).
--- =====================================================================================
-
-
-
-
-CREATE TABLE IF NOT EXISTS pallet (
-    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-    pallet_id      VARCHAR(50) NOT NULL,
-    cargo_id       VARCHAR(50) NOT NULL,
-    pickup_x       DOUBLE      NULL,
-    pickup_y       DOUBLE      NULL,
-    pickup_heading DOUBLE      NULL,
-    status         VARCHAR(20) NOT NULL,
-    created_at     DATETIME    NOT NULL,
-    updated_at     DATETIME    NOT NULL,
-    CONSTRAINT uk_pallet_pallet_id UNIQUE (pallet_id),
-    CONSTRAINT fk_pallet_cargo FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
-);
-
-CREATE TABLE IF NOT EXISTS rack (
-    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rack_code  VARCHAR(50)  NOT NULL,
-    rack_name  VARCHAR(100) NULL,
-    position_x DOUBLE       NULL,
-    position_y DOUBLE       NULL,
-    created_at DATETIME     NOT NULL,
-    updated_at DATETIME     NOT NULL,
-    CONSTRAINT uk_rack_rack_code UNIQUE (rack_code)
-);
-
-CREATE TABLE IF NOT EXISTS rack_level (
-    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rack_id      BIGINT   NOT NULL,
-    level_number INT      NOT NULL,
-    clear_width  DOUBLE   NOT NULL,
-    clear_length DOUBLE   NOT NULL,
-    clear_height DOUBLE   NOT NULL,
-    fork_height  DOUBLE   NULL,
-    created_at   DATETIME NOT NULL,
-    updated_at   DATETIME NOT NULL,
-    CONSTRAINT uk_rack_level_rack_level UNIQUE (rack_id, level_number),
-    CONSTRAINT fk_rack_level_rack FOREIGN KEY (rack_id) REFERENCES rack (id)
-);
-
 CREATE TABLE IF NOT EXISTS storage_slot (
-    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
-    slot_code           VARCHAR(50) NOT NULL,
-    rack_level_id       BIGINT      NOT NULL,
-    width               DOUBLE      NOT NULL,
-    length              DOUBLE      NOT NULL,
-    height              DOUBLE      NOT NULL,
-    destination_x       DOUBLE      NULL,
-    destination_y       DOUBLE      NULL,
-    destination_heading DOUBLE      NULL,
-    status              VARCHAR(20) NOT NULL DEFAULT 'EMPTY',
-    reserved_task_id    VARCHAR(50) NULL,
-    stored_cargo_id     VARCHAR(50) NULL,
-    created_at          DATETIME    NOT NULL,
-    updated_at          DATETIME    NOT NULL,
-    CONSTRAINT uk_storage_slot_slot_code UNIQUE (slot_code),
-    CONSTRAINT fk_storage_slot_rack_level FOREIGN KEY (rack_level_id) REFERENCES rack_level (id),
+    slot_code           VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '적재 위치 식별자',
+    usable_height       DOUBLE      NOT NULL COMMENT '수직 가용 높이(m)',
+    fork_height         DOUBLE      NOT NULL COMMENT '목표 포크 높이(m)',
+    destination_x       DOUBLE      NOT NULL COMMENT '적재 위치 접근 X 좌표(m)',
+    destination_y       DOUBLE      NOT NULL COMMENT '적재 위치 접근 Y 좌표(m)',
+    destination_heading DOUBLE      NOT NULL COMMENT '적재 위치 접근 방향(degree)',
+    status              VARCHAR(20) NOT NULL DEFAULT 'EMPTY' COMMENT '적재 위치 상태(EMPTY, RESERVED, OCCUPIED, BLOCKED)',
+    reserved_task_id    BIGINT      NULL COMMENT '현재 적재 위치를 예약한 운반 작업',
+    stored_cargo_id     VARCHAR(50) NULL COMMENT '현재 적재된 화물 식별자',
+    CONSTRAINT uk_storage_slot_cargo UNIQUE (stored_cargo_id),
+    CONSTRAINT chk_storage_slot_geometry CHECK (usable_height > 0 AND fork_height >= 0),
+    CONSTRAINT chk_storage_slot_status CHECK (status IN ('EMPTY', 'RESERVED', 'OCCUPIED', 'BLOCKED')),
+    CONSTRAINT chk_storage_slot_state CHECK (
+        (status IN ('EMPTY', 'BLOCKED') AND reserved_task_id IS NULL AND stored_cargo_id IS NULL)
+        OR (status = 'RESERVED' AND reserved_task_id IS NOT NULL AND stored_cargo_id IS NULL)
+        OR (status = 'OCCUPIED' AND reserved_task_id IS NULL AND stored_cargo_id IS NOT NULL)
+    ),
+    CONSTRAINT fk_storage_slot_cargo
+        FOREIGN KEY (stored_cargo_id) REFERENCES cargo (cargo_id),
     INDEX idx_storage_slot_status (status),
-    INDEX idx_storage_slot_rack_level (rack_level_id),
     INDEX idx_storage_slot_reserved_task (reserved_task_id)
 );
 
 CREATE TABLE IF NOT EXISTS transport_task (
-    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
-    task_code           VARCHAR(50) NOT NULL,
-    cargo_id            VARCHAR(50) NOT NULL,
-    pallet_id           VARCHAR(50) NOT NULL,
-    vehicle_id          VARCHAR(50) NULL,
-    source_x            DOUBLE      NULL,
-    source_y            DOUBLE      NULL,
-    source_heading      DOUBLE      NULL,
-    destination_slot_id BIGINT      NULL,
-    destination_x       DOUBLE      NULL,
-    destination_y       DOUBLE      NULL,
-    destination_heading DOUBLE      NULL,
-    fork_height         DOUBLE      NULL,
-    cargo_orientation   VARCHAR(20) NULL,
-    status              VARCHAR(20) NOT NULL,
-    assigned_at         DATETIME    NULL,
-    started_at          DATETIME    NULL,
-    picked_up_at        DATETIME    NULL,
-    completed_at        DATETIME    NULL,
-    failed_at           DATETIME    NULL,
-    created_at          DATETIME    NOT NULL,
-    updated_at          DATETIME    NOT NULL,
-    CONSTRAINT uk_transport_task_task_code UNIQUE (task_code),
-    CONSTRAINT fk_transport_task_cargo FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id),
-    CONSTRAINT fk_transport_task_pallet FOREIGN KEY (pallet_id) REFERENCES pallet (pallet_id),
-    CONSTRAINT fk_transport_task_slot FOREIGN KEY (destination_slot_id) REFERENCES storage_slot (id),
+    id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '운반 작업 내부 식별자',
+    task_code             VARCHAR(50)  NOT NULL COMMENT '외부 운반 작업 식별자',
+    cargo_id              VARCHAR(50)  NOT NULL COMMENT '운반 대상 화물 식별자',
+    measurement_id        VARCHAR(100) NOT NULL COMMENT '배치 판단에 사용한 측정 결과',
+    vehicle_id            VARCHAR(50)  NULL COMMENT '배정된 차량 식별자',
+    destination_slot_code VARCHAR(50)  NOT NULL COMMENT '목적지 적재 위치',
+    destination_x         DOUBLE       NOT NULL COMMENT '목적지 X 좌표 스냅샷(m)',
+    destination_y         DOUBLE       NOT NULL COMMENT '목적지 Y 좌표 스냅샷(m)',
+    destination_heading   DOUBLE       NOT NULL COMMENT '목적지 방향 스냅샷(degree)',
+    fork_height           DOUBLE       NOT NULL COMMENT '목표 포크 높이 스냅샷(m)',
+    status                VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '운반 작업 상태',
+    assigned_at           DATETIME(6)  NULL COMMENT '차량 배정 시각',
+    started_at            DATETIME(6)  NULL COMMENT '운반 작업 시작 시각',
+    picked_up_at          DATETIME(6)  NULL COMMENT '화물 픽업 완료 시각',
+    completed_at          DATETIME(6)  NULL COMMENT '운반 작업 완료 시각',
+    failed_at             DATETIME(6)  NULL COMMENT '운반 작업 실패 시각',
+    created_at            DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '운반 작업 생성 시각',
+    CONSTRAINT uk_transport_task_code UNIQUE (task_code),
+    CONSTRAINT chk_transport_task_status CHECK (status IN (
+        'PENDING', 'ASSIGNED', 'MOVING_TO_PICKUP', 'PICKING_UP',
+        'TRANSPORTING', 'PLACING', 'COMPLETED', 'FAILED', 'CANCELLED'
+    )),
+    CONSTRAINT fk_transport_task_cargo
+        FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id),
+    CONSTRAINT fk_transport_task_measurement
+        FOREIGN KEY (measurement_id) REFERENCES station_measurement (measurement_id),
+    CONSTRAINT fk_transport_task_vehicle
+        FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
+    CONSTRAINT fk_transport_task_slot
+        FOREIGN KEY (destination_slot_code) REFERENCES storage_slot (slot_code),
     INDEX idx_transport_task_status (status),
     INDEX idx_transport_task_vehicle (vehicle_id),
-    INDEX idx_transport_task_pallet (pallet_id),
-    INDEX idx_transport_task_slot (destination_slot_id),
-    INDEX idx_transport_task_created (created_at DESC)
+    INDEX idx_transport_task_cargo_status (cargo_id, status),
+    INDEX idx_transport_task_slot (destination_slot_code)
 );
 
--- 차량에 실제 발행한 MQTT 운반 명령 단위(prompt48.md 3·5장). TransportTask(업무 단위) 1 : N TransportCommand.
--- 하나의 Task에 재시도로 여러 command가 붙을 수 있어 Task와 분리한다. command_id로 command-result를 역추적한다.
--- task_id(BIGINT)와 task_code(VARCHAR)를 함께 보관해 조회 편의를 준다. stage는 ROS2가 단계 결과를 줄 때만
--- 채워지며(현재 규격 미확정) nullable로 두고 강제하지 않는다.
-CREATE TABLE IF NOT EXISTS transport_command (
-    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-    command_id      VARCHAR(50)   NOT NULL,
-    task_id         BIGINT        NOT NULL,
-    task_code       VARCHAR(50)   NOT NULL,
-    vehicle_id      VARCHAR(50)   NOT NULL,
-    command_type    VARCHAR(30)   NOT NULL,
-    stage           VARCHAR(30)   NULL,
-    status          VARCHAR(20)   NOT NULL,
-    payload         VARCHAR(2000) NULL,
-    failure_reason  VARCHAR(500)  NULL,
-    published_at    DATETIME      NULL,
-    acknowledged_at DATETIME      NULL,
-    completed_at    DATETIME      NULL,
-    created_at      DATETIME      NOT NULL,
-    updated_at      DATETIME      NOT NULL,
-    CONSTRAINT uk_transport_command_command_id UNIQUE (command_id),
-    CONSTRAINT fk_transport_command_task FOREIGN KEY (task_id) REFERENCES transport_task (id),
-    INDEX idx_transport_command_task (task_id),
-    INDEX idx_transport_command_vehicle (vehicle_id),
-    INDEX idx_transport_command_status (status),
-    INDEX idx_transport_command_created (created_at DESC)
-);
+-- storage_slot과 transport_task의 상호 생성 순환을 피하려고 reserved_task_id에는 FK를 두지 않는다.
+-- 예약 상태 변경은 애플리케이션의 조건부 UPDATE로 동시성을 보호한다.
 
--- USE fast_backend;
---   H2(MySQL 호환 모드)는 USE 를 지원하지 않아 스키마 초기화가 통째로 실패한다. 이 파일은 위 주석대로
---   테스트에서 H2 에도 적용되므로 주석 처리했다. 실 MySQL 에 수동으로 붙여 넣을 때는 접속 시
---   데이터베이스를 선택하거나(예: mysql -D fast_backend) 이 줄의 주석을 풀고 실행하면 된다.
--- =============================================================================
--- 아래는 DDL 이 아니라 **MySQL 운영자용 확인·계정 스크립트**다 — 전부 주석 처리했다.
---
--- 이유: 이 파일은 application-test.yml 의 spring.sql.init.schema-locations 로 지정돼 매 테스트마다
--- H2(MySQL 호환 모드)에 통째로 실행된다. SHOW TABLES / mysql.user 조회 / CREATE USER / GRANT /
--- FLUSH PRIVILEGES 는 H2 에 존재하지 않아 스키마 초기화가 여기서 실패하고, 그러면 테이블이 다 만들어진
--- 뒤라도 **모든 통합 테스트가 컨텍스트 로딩 단계에서 죽는다**.
---
--- 실 MySQL 에서 계정을 만들거나 상태를 확인할 때는 이 블록의 주석을 풀어 수동 실행하면 된다.
--- (비밀번호가 평문으로 들어 있으므로 실제 운영 계정 생성에 그대로 쓰지 말 것.)
--- =============================================================================
--- SHOW TABLES;
---
--- SHOW TABLES LIKE '%vehicle%';
---
--- SELECT user, host
--- FROM mysql.user
--- WHERE user = 'fastbackend';
---
--- SELECT user, host
--- FROM mysql.user
--- WHERE user = 'fastbackend';
---
--- ALTER USER ''@'localhost'
---     IDENTIFIED BY '1234';
---
--- GRANT ALL PRIVILEGES
---     ON fast_backend.*
---     TO 'fastbackend'@'localhost';
---
--- FLUSH PRIVILEGES;
---
--- SELECT USER(), CURRENT_USER();
---
--- CREATE USER IF NOT EXISTS 'fastbackend'@'localhost'
---     IDENTIFIED BY '1234';
---
--- ALTER USER 'fastbackend'@'localhost'
---     IDENTIFIED BY '1234';
---
--- GRANT ALL PRIVILEGES
---     ON fast_backend.*
---     TO 'fastbackend'@'localhost';
---
--- FLUSH PRIVILEGES;
+CREATE TABLE IF NOT EXISTS vehicle_command (
+    command_id     VARCHAR(100) NOT NULL PRIMARY KEY COMMENT '차량 명령 고유 식별자',
+    task_id        BIGINT       NULL COMMENT '연결된 운반 작업 식별자',
+    vehicle_id     VARCHAR(50)  NOT NULL COMMENT '명령 대상 차량 식별자',
+    command        VARCHAR(30)  NOT NULL COMMENT '실행할 명령 이름',
+    target_system  VARCHAR(20)  NOT NULL COMMENT '명령 대상 시스템(ROS2, EMBEDDED, ALL)',
+    status         VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '명령 처리 상태',
+    result_message VARCHAR(500) NULL COMMENT '명령 처리 결과 또는 실패 상세',
+    completed_at   DATETIME(6)  NULL COMMENT '명령 완료 시각',
+    created_at     DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '명령 생성 시각',
+    CONSTRAINT chk_vehicle_command_target CHECK (target_system IN ('ROS2', 'EMBEDDED', 'ALL')),
+    CONSTRAINT chk_vehicle_command_status CHECK (status IN (
+        'PENDING', 'PUBLISHED', 'PUBLISH_FAILED', 'ACCEPTED', 'IN_PROGRESS',
+        'SUCCESS', 'FAILED', 'REJECTED', 'CANCELLED'
+    )),
+    CONSTRAINT fk_vehicle_command_task
+        FOREIGN KEY (task_id) REFERENCES transport_task (id),
+    CONSTRAINT fk_vehicle_command_vehicle
+        FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
+    INDEX idx_vehicle_command_task (task_id),
+    INDEX idx_vehicle_command_vehicle (vehicle_id),
+    INDEX idx_vehicle_command_status (status)
+);

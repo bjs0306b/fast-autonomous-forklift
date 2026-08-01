@@ -5,10 +5,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.time.Duration;
 
 /**
- * 측정 세션 점유 정책 설정(prompt106).
+ * 측정 세션 점유 정책 설정.
  *
- * <p>{@code ttlSeconds}: 세션 점유가 유효한 시간(초, 기본 600 = 10분). 측정 데스크탑이 정상 종료
- * 없이 죽으면(kill -9·전원 차단·블루스크린·네트워크 단절) 세션 종료 요청이 오지 않아 단일 설비
+ * <p>{@code ttlSeconds}: 세션 점유가 유효한 시간(초, 기본 600 = 10분). 측정 작업자가 정상 결과를
+ * 보내지 못한 채 종료되면 세션 해제가 일어나지 않아 단일 설비
  * 잠금이 <b>영구히</b> 남는다. 이 시간이 지난 점유는 다음 {@code openSession} 이 회수한다.
  *
  * <p>값을 코드에 박지 않는 이유는 현장마다 한 번의 측정에 걸리는 시간이 다르기 때문이다. 너무 짧으면

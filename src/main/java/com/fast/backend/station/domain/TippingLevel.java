@@ -5,16 +5,16 @@ import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Optional;
 
 /**
- * 화물 전복 위험 등급(FR-103 판정 결과, prompt95.md 9장).
+ * 화물 전복 위험 등급.
  *
- * <p><b>대소문자를 여기서 흡수한다.</b> 비전(측정 데스크탑)은 소문자
+ * <p><b>대소문자를 여기서 흡수한다.</b> 측정 AI는 소문자
  * ({@code safe}/{@code warning}/{@code danger})로 판정 결과를 내는데
  * ({@code docs/ai/station-measurement-handoff.md}), DB CHECK 제약은 대문자
  * ({@code 'SAFE','WARNING','DANGER'}, {@code schema.sql})만 허용한다. 소문자를 그대로 INSERT 하면
- * 제약 위반으로 실패하므로, REST 입력 경계에서 {@link #fromRaw(String)}로 정규화하고
+ * 제약 위반으로 실패하므로, 메시지 입력 경계에서 {@link #fromRaw(String)}로 정규화하고
  * {@link #name()}(대문자)을 저장한다.
  *
- * <p><b>백엔드는 등급을 계산하지 않는다.</b> 판정은 측정 데스크탑이 하고 백엔드는 받은 값을 검증·정규화해
+ * <p><b>백엔드는 등급을 계산하지 않는다.</b> 판정은 측정 AI가 하고 백엔드는 받은 값을 검증·정규화해
  * 보관만 한다 — 알 수 없는 값이 오면 {@code null}로 바꿔 삼키지 않고 오류로 거부한다(없는 판정을
  * 지어내지 않는다).
  */

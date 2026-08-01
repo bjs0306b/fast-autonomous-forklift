@@ -16,8 +16,7 @@ import java.time.ZoneOffset;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 수신 측(ROS2 브리지 / 임베디드 펌웨어)이 실제로 받는 명령 JSON이 확정 규격(prompt32.md 1장 8~11번)과
- * 정확히 일치하는지 검증한다. 이 JSON 모양이 곧 팀 간 계약이다.
+ * 수신 측(ROS2 브리지 / 임베디드 펌웨어)이 실제로 받는 명령 JSON 계약을 검증한다.
  */
 class VehicleCommandMessageTest {
 
@@ -40,7 +39,7 @@ class VehicleCommandMessageTest {
                 "CMD-001", "SIM-F01", VehicleCommandTargetSystem.ROS2, VehicleCommandCategory.MOVE,
                 VehicleCommandType.MOVE,
                 VehicleCommandPayload.ofDestination(new VehicleCommandDestination(5.0, 6.0, 180.0, "map")),
-                null, TIMESTAMP);
+                TIMESTAMP);
 
         JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(message));
 
@@ -53,7 +52,7 @@ class VehicleCommandMessageTest {
         assertThat(node.get("payload").get("destination").get("y").asDouble()).isEqualTo(6.0);
         assertThat(node.get("payload").get("destination").get("heading").asDouble()).isEqualTo(180.0);
         assertThat(node.get("payload").get("destination").get("frameId").asText()).isEqualTo("map");
-        assertThat(node.get("reason").isNull()).isTrue();
+        assertThat(node.has("reason")).isFalse();
         assertThat(node.get("timestamp").asText()).isEqualTo("2026-07-23T11:20:27+09:00");
     }
 
@@ -62,21 +61,20 @@ class VehicleCommandMessageTest {
         // 수신 측이 payload 키의 존재 여부를 분기하지 않고 항상 같은 모양으로 읽을 수 있어야 한다.
         VehicleCommandMessage message = new VehicleCommandMessage(
                 "CMD-002", "REAL-F01", VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.FORK,
-                VehicleCommandType.FORK_UP, VehicleCommandPayload.empty(), "적재 준비", TIMESTAMP);
+                VehicleCommandType.FORK_UP, VehicleCommandPayload.empty(), TIMESTAMP);
 
         JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(message));
 
         assertThat(node.get("payload").isObject()).isTrue();
         assertThat(node.get("payload").size()).isZero();
-        assertThat(node.get("reason").asText()).isEqualTo("적재 준비");
+        assertThat(node.has("reason")).isFalse();
     }
 
     @Test
     void serialize_emergencyStop_carriesTheThreeFieldsReceiversBranchOn() throws Exception {
         VehicleCommandMessage message = new VehicleCommandMessage(
                 "CMD-003", "REAL-F01", VehicleCommandTargetSystem.ALL, VehicleCommandCategory.SAFETY,
-                VehicleCommandType.EMERGENCY_STOP, VehicleCommandPayload.empty(),
-                "관제 사용자 비상 정지", TIMESTAMP);
+                VehicleCommandType.EMERGENCY_STOP, VehicleCommandPayload.empty(), TIMESTAMP);
 
         JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(message));
 
@@ -89,7 +87,7 @@ class VehicleCommandMessageTest {
     void serialize_timestamp_alwaysKeepsTheSeoulOffset() throws Exception {
         VehicleCommandMessage message = new VehicleCommandMessage(
                 "CMD-004", "REAL-F01", VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.SAFETY,
-                VehicleCommandType.STOP, VehicleCommandPayload.empty(), null, TIMESTAMP);
+                VehicleCommandType.STOP, VehicleCommandPayload.empty(), TIMESTAMP);
 
         String json = objectMapper.writeValueAsString(message);
 

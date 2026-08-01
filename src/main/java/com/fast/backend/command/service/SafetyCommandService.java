@@ -1,7 +1,6 @@
 package com.fast.backend.command.service;
 
 import com.fast.backend.command.dto.EmergencyStopAllResponse;
-import com.fast.backend.command.dto.SafetyCommandRequest;
 import com.fast.backend.command.dto.VehicleCommandRequest;
 import com.fast.backend.command.dto.VehicleCommandResponse;
 import com.fast.backend.command.websocket.SafetyCommandBroadcaster;
@@ -17,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 차량 안전 제어(STOP/EMERGENCY_STOP) 조율(prompt53.md 7·8·9장).
+ * 차량 안전 제어(STOP/EMERGENCY_STOP) 조율.
  *
  * <p><b>기존 {@link VehicleCommandService}를 재사용</b>한다(§6 "기존 VehicleCommand 영속 구조가 있으면 반드시
  * 재사용"). 단건 STOP/EMERGENCY_STOP의 저장·발행·상태(PUBLISHED/PUBLISH_FAILED)·commandId 생성·결과 반영은
@@ -47,51 +46,29 @@ public class SafetyCommandService {
         this.broadcaster = broadcaster;
     }
 
-    public VehicleCommandResponse stop(String vehicleId, SafetyCommandRequest request) {
-        return issueSafety(vehicleId, STOP, request);
+    public VehicleCommandResponse stop(String vehicleId) {
+        return issueSafety(vehicleId, STOP);
     }
 
-    public VehicleCommandResponse emergencyStop(String vehicleId, SafetyCommandRequest request) {
-        return issueSafety(vehicleId, EMERGENCY_STOP, request);
+    public VehicleCommandResponse emergencyStop(String vehicleId) {
+        return issueSafety(vehicleId, EMERGENCY_STOP);
     }
 
-    private VehicleCommandResponse issueSafety(String vehicleId, String command, SafetyCommandRequest request) {
+    private VehicleCommandResponse issueSafety(String vehicleId, String command) {
         validateVehicleId(vehicleId);
         requireActiveVehicle(vehicleId);
-        String reason = request == null ? null : request.reasonOrNull();
         VehicleCommandResponse response = vehicleCommandService.issueCommand(
-                vehicleId, new VehicleCommandRequest(command, null, null, null, reason));
-        if (request != null && request.requestedBy() != null) {
-            // requestedBy는 재사용 테이블에 컬럼이 없어 영속되지 않는다 — 감사 로그로만 남긴다(제한사항).
-            log.info("Safety command issued: command={}, vehicleId={}, commandId={}, requestedBy={}",
-                    command, vehicleId, response.commandId(), request.requestedBy());
-        }
+                vehicleId, new VehicleCommandRequest(command, null, null, null));
         broadcaster.broadcastPublish(command, response);
         return response;
     }
 
-    /** 요청 바디 없이 전체 비상정지(기존 호출 계약 유지). {@link #emergencyStopAll(SafetyCommandRequest)}에 위임한다. */
-    public EmergencyStopAllResponse emergencyStopAll() {
-        return emergencyStopAll(null);
-    }
-
     /**
-     * 활성 차량 전체에 EMERGENCY_STOP을 차량별로 개별 발행한다(§9). 차량마다 별도 commandId·DB 레코드가
+     * 활성 차량 전체에 EMERGENCY_STOP을 차량별로 개별 발행한다. 차량마다 별도 commandId·DB 레코드가
      * 생성되며(issueCommand 재사용), 한 차량의 발행 실패가 다음 차량 처리를 막지 않는다.
-     *
-     * <p><b>요청 바디 반영(prompt56.md 11장)</b>: 이전에는 Controller가 {@code SafetyCommandRequest}를 받고도
-     * Service에 전달하지 않아 {@code reason}/{@code requestedBy}가 조용히 버려졌다. 이제 {@code reason}을
-     * <b>차량별 명령 각각에</b> 동일하게 실어 보내 어느 차량 기록을 열어도 정지 사유를 알 수 있게 한다.
-     * {@code requestedBy}는 재사용 테이블에 컬럼이 없어 단건 STOP/ESTOP과 <b>동일하게 감사 로그로만</b>
-     * 남긴다 — 이 화면 하나 때문에 DB를 확장하지 않는다.
-     *
-     * <p>{@code request}가 null이면(바디 생략) 기존과 완전히 동일하게 동작한다 — 바디를 생략할 수 있는
-     * 기존 API 계약은 그대로다.
      */
-    public EmergencyStopAllResponse emergencyStopAll(SafetyCommandRequest request) {
+    public EmergencyStopAllResponse emergencyStopAll() {
         List<Vehicle> activeVehicles = vehicleMapper.findAllActive(); // 활성·미삭제 차량, vehicleId 오름차순
-        String reason = request == null ? null : request.reasonOrNull();
-        String requestedBy = request == null ? null : request.requestedBy();
         List<EmergencyStopAllResponse.Item> results = new ArrayList<>();
         int published = 0;
         int failed = 0;
@@ -100,7 +77,7 @@ public class SafetyCommandService {
             String vehicleId = vehicle.getVehicleId();
             try {
                 VehicleCommandResponse response = vehicleCommandService.issueCommand(
-                        vehicleId, new VehicleCommandRequest(EMERGENCY_STOP, null, null, null, reason));
+                        vehicleId, new VehicleCommandRequest(EMERGENCY_STOP, null, null, null));
                 broadcaster.broadcastPublish(EMERGENCY_STOP, response);
                 boolean ok = "PUBLISHED".equals(response.status());
                 if (ok) {
@@ -122,11 +99,6 @@ public class SafetyCommandService {
         }
 
         broadcaster.broadcastGlobalSummary(activeVehicles.size(), published, failed);
-        if (requestedBy != null) {
-            // 단건 안전 명령과 동일한 감사 로그 방식(영속되지 않는 값이라 로그로만 남긴다).
-            log.info("Emergency-stop-all issued: requested={}, published={}, failed={}, requestedBy={}",
-                    activeVehicles.size(), published, failed, requestedBy);
-        }
         log.info("Emergency-stop-all: requested={}, published={}, failed={}",
                 activeVehicles.size(), published, failed);
         return new EmergencyStopAllResponse(activeVehicles.size(), published, failed, results);

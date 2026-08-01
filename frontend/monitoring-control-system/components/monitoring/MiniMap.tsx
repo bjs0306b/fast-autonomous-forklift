@@ -3,7 +3,6 @@
 import { cn } from "@/lib/utils"
 import { worldToPercent, type WorldBounds } from "@/lib/coordinate"
 import type { DashboardVehicle } from "@/types/monitoring"
-import type { LoadSafetyState } from "@/types/loadSafety"
 import { MiniMapVehicleMarker } from "./MiniMapVehicleMarker"
 
 /** 미니맵에 그릴 수 있는 차량(위치 객체와 x/y가 모두 있는 차량)인지 판별한다. */
@@ -33,15 +32,12 @@ export function MiniMap({
   vehicles,
   selectedVehicleId,
   onSelectVehicle,
-  loadSafetyByVehicleId,
   bounds,
   className,
 }: {
   vehicles: DashboardVehicle[]
   selectedVehicleId?: string | null
   onSelectVehicle?: (vehicleId: string) => void
-  /** 차량별 최신 적재 안전 상태. 없는 차량은 기본 마커로 그린다. */
-  loadSafetyByVehicleId?: Record<string, LoadSafetyState>
   bounds?: WorldBounds
   className?: string
 }) {
@@ -90,7 +86,6 @@ export function MiniMap({
                 left={pos.left}
                 top={pos.top}
                 selected={vehicle.vehicleId === selectedVehicleId}
-                loadSafety={loadSafetyByVehicleId?.[vehicle.vehicleId] ?? null}
                 onSelect={onSelectVehicle}
               />
             )

@@ -14,6 +14,8 @@ import com.fast.backend.station.mapper.StationMeasurementMapper;
 import com.fast.backend.station.mapper.StationMeasurementResponseMapper;
 import com.fast.backend.station.mapper.StationSessionMapper;
 import com.fast.backend.station.websocket.StationMeasurementBroadcaster;
+import com.fast.backend.storage.domain.Cargo;
+import com.fast.backend.storage.mapper.CargoMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,25 +23,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
- * 측정 세션과 측정 결과의 수신·검증·저장·조회·브로드캐스트(prompt95, prompt96).
+ * 측정 세션과 측정 결과의 수신·검증·저장·조회·브로드캐스트.
  *
- * <p><b>수신 경로는 REST 뿐이다.</b> 옛 {@code fast/station/{station_id}/measurement} MQTT 구독은
- * 제거됐다. MQTT 시절에는 발행자에게 응답할 방법이 없어 검증 실패를 내부에서 삼키고 로그만 남겼지만,
- * REST 는 호출자(측정 데스크탑)가 결과를 알아야 재전송·재측정을 판단할 수 있으므로
- * {@link BusinessException}을 <b>삼키지 않고</b> 그대로 던져 {@code GlobalExceptionHandler}가
- * HTTP 상태로 옮기게 한다.
+ * <p>측정 결과는 REST 또는 백엔드 MQTT 수신 경계로 들어올 수 있다. 두 경로 모두 같은 요청 DTO와
+ * 이 서비스를 사용하므로 검증·저장 방식은 동일하다.
  *
- * <p><b>세션 규칙(prompt96)</b>
+ * <p><b>세션 규칙</b>
  * <ol>
  *   <li>설비는 하나뿐이라 <b>동시에 활성 세션은 1개</b>다.</li>
  *   <li>한 세션에 저장되는 <b>최종 측정 결과는 1건</b>이다.</li>
- *   <li>측정 결과가 저장되기 <b>전에는 세션을 종료할 수 없다</b>. 저장된 뒤에는 status 와
- *       무관하게(DIMENSIONS_ONLY/NO_DETECTION/UNRELIABLE 포함) 종료할 수 있다 —
- *       <b>세션 종료 조건과 적재 추천 조건은 별개다.</b></li>
+ *   <li>최종 결과를 저장하는 트랜잭션 안에서 세션을 자동 해제한다.</li>
  * </ol>
  *
  * <p><b>백엔드는 판정하지 않는다.</b> 전복 등급·돌출률은 측정 데스크탑이 계산해 보낸 값을 검증·정규화해
@@ -62,6 +58,7 @@ public class StationMeasurementService {
     private final StationMeasurementResponseMapper responseMapper;
     private final StationMeasurementPlacementEligibility placementEligibility;
     private final StationMeasurementBroadcaster broadcaster;
+    private final CargoMapper cargoMapper;
     private final StationSessionProperties sessionProperties;
     private final Clock clock;
 
@@ -70,6 +67,7 @@ public class StationMeasurementService {
             StationMeasurementResponseMapper responseMapper,
             StationMeasurementPlacementEligibility placementEligibility,
             StationMeasurementBroadcaster broadcaster,
+            CargoMapper cargoMapper,
             StationSessionProperties sessionProperties,
             Clock clock) {
         this.measurementMapper = measurementMapper;
@@ -77,6 +75,7 @@ public class StationMeasurementService {
         this.responseMapper = responseMapper;
         this.placementEligibility = placementEligibility;
         this.broadcaster = broadcaster;
+        this.cargoMapper = cargoMapper;
         this.sessionProperties = sessionProperties;
         this.clock = clock;
     }
@@ -103,6 +102,11 @@ public class StationMeasurementService {
         // 판정은 아래 조건부 UPDATE 가 단독으로 한다(이 조회와 UPDATE 사이에 상태가 바뀌어도 안전).
         StationState before = sessionMapper.findState().orElse(null);
 
+        Cargo cargo = new Cargo();
+        cargo.setCargoId(cargoId);
+        cargo.setCreatedAt(now);
+        cargoMapper.insertIfAbsent(cargo);
+
         String sessionId = UUID.randomUUID().toString();
         sessionMapper.insert(new StationSession(sessionId, cargoId));
 
@@ -126,12 +130,7 @@ public class StationMeasurementService {
     }
 
     /**
-     * 운영자 강제 해제(prompt106). <b>측정 결과 존재 여부와 무관하게</b> 잠금을 푼다.
-     *
-     * <p>{@link #closeSession} 은 측정이 저장된 뒤에만 종료를 허용한다 — 정상 흐름에서 측정을
-     * 빠뜨린 채 세션이 닫히는 것을 막기 위해서다. 그런데 측정 데스크탑이 측정을 보내기 전에 죽으면
-     * 그 조건 때문에 <b>정상 종료 요청조차 거부되어</b> 잠금이 남는다. 이 API 는 그 상황의 복구
-     * 경로이며, 그래서 EXISTS 조건이 없다.
+     * 운영자 강제 해제. <b>측정 결과 존재 여부와 무관하게</b> 잠금을 푼다.
      *
      * <p><b>가짜 측정 행을 만들지 않는다.</b> 기존 우회책(desktop 의 {@code --abandon})은 잠금을 풀려고
      * unreliable 측정 행을 남겨 DB 를 오염시켰다. 여기서는 {@code station_state} 만 비운다.
@@ -168,32 +167,6 @@ public class StationMeasurementService {
                 before == null ? null : before.getAcquiredAt());
     }
 
-    /**
-     * 세션을 종료한다 — <b>측정 결과가 저장된 뒤에만</b> 가능하다.
-     *
-     * <p>판정과 해제를 조건부 UPDATE 한 문장으로 묶는다("존재 확인 → 해제"로 나누면 그 사이에 상태가
-     * 바뀔 수 있다). 영향 행이 0이면 그때 원인을 조회해 구분한다 — 전부 NOT_FOUND 로 뭉개지 않는다.
-     * 종료에 실패하면 활성 세션은 <b>그대로 유지</b>된다.
-     *
-     * <p>세션 행 자체는 지우지 않는다 — 측정 결과가 FK 로 참조한다.
-     */
-    @Transactional
-    public void closeSession(String sessionId) {
-        if (sessionMapper.releaseStationIfMeasurementExists(sessionId) == 1) {
-            log.info("Station session closed: sessionId={}", sessionId);
-            return;
-        }
-
-        // 여기부터는 실패 원인 규명 전용이다 — 상태를 바꾸지 않는다.
-        StationSession active = sessionMapper.findActiveSession().orElse(null);
-        if (active == null || !active.getSessionId().equals(sessionId)) {
-            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
-                    "활성 세션이 아닙니다: " + sessionId);
-        }
-        throw new BusinessException(ErrorCode.STATION_MEASUREMENT_NOT_COMPLETED,
-                "측정 결과가 저장되지 않아 세션을 종료할 수 없습니다: sessionId=" + sessionId);
-    }
-
     @Transactional(readOnly = true)
     public StationSession findActiveSession() {
         return sessionMapper.findActiveSession()
@@ -201,10 +174,10 @@ public class StationMeasurementService {
                         "활성화된 측정 세션이 없습니다."));
     }
 
-    // ── REST 저장 ───────────────────────────────────────────────────────────
+    // ── 결과 저장 ───────────────────────────────────────────────────────────
 
     /**
-     * 측정 데스크탑이 보낸 측정 결과를 저장한다({@code POST /api/stations/measurements}).
+     * REST 또는 MQTT 경로로 받은 측정 결과를 저장하고 활성 세션을 해제한다.
      *
      * <p>저장(INSERT)과 "세션이 측정 완료 상태가 됨"은 <b>같은 트랜잭션</b>이다 — 완료 여부를 별도
      * 상태 컬럼이 아니라 <b>측정 행의 존재</b>로 표현하기 때문에 INSERT 하나가 곧 상태 전이다.
@@ -230,7 +203,7 @@ public class StationMeasurementService {
                     "이미 저장된 measurement_id 입니다: " + measurementId);
         }
 
-        // 점유 상태를 행 잠금과 함께 읽는다(prompt107). 여기부터 커밋까지 acquireStation/
+        // 점유 상태를 행 잠금과 함께 읽는다. 여기부터 커밋까지 acquireStation/
         // releaseStation/forceReleaseStation 이 대기하므로, "검증 통과 후 INSERT 전에 세션이
         // 바뀌는" TOCTOU 가 발생하지 않는다.
         StationState state = sessionMapper.findStateForUpdate()
@@ -280,14 +253,12 @@ public class StationMeasurementService {
         entity.setTippingLevel(tippingLevel == null ? null : tippingLevel.name());
         entity.setOverhangRatio(request.overhangRatio());
         entity.setCreatedAt(receivedAt);
-        entity.setReceivedAt(receivedAt);
-        if (request.measuredAt() != null) {
-            // 장비 측정 시각을 UTC + 오프셋 분으로 나눠 보존한다(DATETIME 은 타임존을 못 담는다).
-            entity.setMeasuredAtUtc(
-                    request.measuredAt().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime());
-            entity.setMeasuredAtOffsetMinutes(request.measuredAt().getOffset().getTotalSeconds() / 60);
-        }
         measurementMapper.insert(entity);
+
+        if (sessionMapper.releaseStation(requestedSessionId) != 1) {
+            throw new IllegalStateException(
+                    "Failed to release the station session after saving measurement: " + requestedSessionId);
+        }
 
         boolean eligible = placementEligibility.isEligible(entity);
         log.info("Station measurement accepted: measurementId={}, sessionId={}, cargoId={}, status={}, "
@@ -319,15 +290,6 @@ public class StationMeasurementService {
         return toResponse(m);
     }
 
-    /** MQTT 시절에 저장된 행 조회용 레거시 경로. REST 로 저장된 행은 station_id 가 없다. */
-    @Transactional(readOnly = true)
-    public StationMeasurementResponse findLatestByStationId(String stationId) {
-        StationMeasurement m = measurementMapper.findLatestByStationId(stationId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.STATION_MEASUREMENT_NOT_FOUND,
-                        "스테이션의 측정 결과가 없습니다: " + stationId));
-        return toResponse(m);
-    }
-
     /**
      * 적재 추천에 쓸 측정 결과를 꺼낸다 — <b>안전 조건을 만족할 때만</b> 돌려준다.
      *
@@ -354,7 +316,7 @@ public class StationMeasurementService {
     // ── 검증 ────────────────────────────────────────────────────────────────
 
     /**
-     * 요청 sessionId 검증(prompt107). 누락·공백은 400 이다 — 구버전 클라이언트를 위해 값을
+     * 요청 sessionId 검증. 누락·공백은 400 이다 — 구버전 클라이언트를 위해 값을
      * 추측하거나 활성 세션으로 대체하지 않는다. 그렇게 하면 막으려던 오귀속이 그대로 발생한다.
      */
     private String validateSessionId(String sessionId) {

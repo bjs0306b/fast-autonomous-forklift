@@ -42,10 +42,6 @@ public class VehicleStatusTestController {
         VehicleStatusUpdateCommand command = new VehicleStatusUpdateCommand(
                 request.status(),
                 request.battery(),
-                request.positionX(),
-                request.positionY(),
-                request.heading(),
-                request.speed(),
                 request.messageAt());
 
         VehicleStatusResponse response = vehicleStatusService.updateCurrentStatus(vehicleId, command);

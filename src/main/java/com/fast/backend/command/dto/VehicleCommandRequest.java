@@ -26,7 +26,6 @@ public record VehicleCommandRequest(
         @NotBlank String command,
         String targetSystem,
         String commandCategory,
-        VehicleCommandDestination destination,
-        String reason
+        VehicleCommandDestination destination
 ) {
 }

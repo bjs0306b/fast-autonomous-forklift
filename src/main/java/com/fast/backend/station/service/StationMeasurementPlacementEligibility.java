@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 import java.util.Optional;
 
 /**
- * 측정 결과가 적재 추천을 실행해도 되는 상태인지 판정한다(prompt96.md 7·8·11·12·13장).
+ * 측정 결과가 적재 추천을 실행해도 되는 상태인지 판정한다.
  *
  * <p><b>왜 별도 클래스인가</b>: 이 조건은 두 경로에서 필요하다 — 측정 저장 직후 자동 추천과,
  * 프론트가 따로 호출하는 추천 API. 같은 판정을 두 벌 복사하면 한쪽만 고쳐져 조용히 어긋난다.

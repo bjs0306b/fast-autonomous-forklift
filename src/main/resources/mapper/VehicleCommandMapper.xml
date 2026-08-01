@@ -1,94 +1,42 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<!--
-    통합 차량 명령 Mapper(구 EmbeddedVehicleCommandMapper.xml 이관, prompt32.md 1장 7~12번).
-
-    도메인 필드 vehicleId ↔ 컬럼 forklift_id 매핑에 주의할 것. 테이블/컬럼 이름을 그대로 둔 근거는
-    VehicleCommand Javadoc과 schema.sql 주석 참고(운영 DB 이관 위험 회피, prompt32.md 3장 3번 허용).
-    이 매핑 때문에 SELECT는 * 대신 컬럼을 명시하고 forklift_id를 vehicle_id로 alias 하지 않는다 —
-    resultMap이 컬럼명을 그대로 property에 연결한다.
--->
 <mapper namespace="com.fast.backend.command.mapper.VehicleCommandMapper">
-
-    <resultMap id="vehicleCommandResultMap" type="com.fast.backend.command.domain.VehicleCommand">
-        <id property="id" column="id"/>
-        <result property="commandId" column="command_id"/>
-        <result property="vehicleId" column="forklift_id"/>
+    <resultMap id="result" type="com.fast.backend.command.domain.VehicleCommand">
+        <id property="commandId" column="command_id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="vehicleId" column="vehicle_id"/>
         <result property="command" column="command"/>
         <result property="targetSystem" column="target_system"/>
-        <result property="commandCategory" column="command_category"/>
-        <result property="payloadJson" column="payload_json"/>
-        <result property="reason" column="reason"/>
         <result property="status" column="status"/>
-        <result property="issuedAt" column="issued_at"/>
-        <result property="publishedAt" column="published_at"/>
-        <result property="completedAt" column="completed_at"/>
-        <result property="errorCode" column="error_code"/>
         <result property="resultMessage" column="result_message"/>
-        <result property="stoppedActions" column="stopped_actions"/>
-        <result property="emergencyStopApplied" column="emergency_stop_applied"/>
-        <result property="requiresReset" column="requires_reset"/>
+        <result property="completedAt" column="completed_at"/>
         <result property="createdAt" column="created_at"/>
-        <result property="updatedAt" column="updated_at"/>
     </resultMap>
-
-    <sql id="commandColumns">
-        id, command_id, forklift_id, command, target_system, command_category, payload_json,
-        reason, status, issued_at, published_at, completed_at, error_code, result_message,
-        stopped_actions, emergency_stop_applied, requires_reset, created_at, updated_at
+    <sql id="columns">
+        command_id, task_id, vehicle_id, command, target_system, status,
+        result_message, completed_at, created_at
     </sql>
-
-    <insert id="insert" parameterType="com.fast.backend.command.domain.VehicleCommand"
-            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
-        INSERT INTO embedded_vehicle_command (
-            command_id, forklift_id, command, target_system, command_category, payload_json,
-            reason, status, issued_at, created_at, updated_at
-        )
-        VALUES (
-            #{commandId}, #{vehicleId}, #{command}, #{targetSystem}, #{commandCategory}, #{payloadJson},
-            #{reason}, #{status}, #{issuedAt}, #{createdAt}, #{updatedAt}
-        )
+    <insert id="insert" parameterType="com.fast.backend.command.domain.VehicleCommand">
+        INSERT INTO vehicle_command
+            (command_id, task_id, vehicle_id, command, target_system, status, created_at)
+        VALUES
+            (#{commandId}, #{taskId}, #{vehicleId}, #{command}, #{targetSystem}, #{status}, #{createdAt})
     </insert>
-
     <update id="update" parameterType="com.fast.backend.command.domain.VehicleCommand">
-        UPDATE embedded_vehicle_command
-        SET status = #{status},
-            published_at = #{publishedAt},
-            completed_at = #{completedAt},
-            error_code = #{errorCode},
-            result_message = #{resultMessage},
-            stopped_actions = #{stoppedActions},
-            emergency_stop_applied = #{emergencyStopApplied},
-            requires_reset = #{requiresReset},
-            updated_at = #{updatedAt}
-        WHERE command_id = #{commandId}
+        UPDATE vehicle_command
+        SET status=#{status}, result_message=#{resultMessage}, completed_at=#{completedAt}
+        WHERE command_id=#{commandId}
     </update>
-
     <select id="existsByCommandId" resultType="boolean">
-        SELECT COUNT(*) > 0
-        FROM embedded_vehicle_command
-        WHERE command_id = #{commandId}
+        SELECT COUNT(*) &gt; 0 FROM vehicle_command WHERE command_id=#{commandId}
     </select>
-
-    <select id="findByCommandId" resultMap="vehicleCommandResultMap">
-        SELECT <include refid="commandColumns"/>
-        FROM embedded_vehicle_command
-        WHERE command_id = #{commandId}
+    <select id="findByCommandId" resultMap="result">
+        SELECT <include refid="columns"/> FROM vehicle_command WHERE command_id=#{commandId}
     </select>
-
-    <!--
-        commandCategory는 선택 필터다(prompt56.md 12장 A안). null이면 조건 자체가 붙지 않아 기존 동작
-        (전체 분류 조회)이 그대로 유지되므로, 이 파라미터 추가는 하위 호환을 깨지 않는다.
-    -->
-    <select id="findRecentByVehicleId" resultMap="vehicleCommandResultMap">
-        SELECT <include refid="commandColumns"/>
-        FROM embedded_vehicle_command
-        WHERE forklift_id = #{vehicleId}
-        <if test="commandCategory != null">
-            AND command_category = #{commandCategory}
-        </if>
-        ORDER BY issued_at DESC, id DESC
+    <select id="findRecentByVehicleId" resultMap="result">
+        SELECT <include refid="columns"/> FROM vehicle_command
+        WHERE vehicle_id=#{vehicleId}
+        ORDER BY created_at DESC, command_id DESC
         LIMIT #{limit}
     </select>
-
 </mapper>

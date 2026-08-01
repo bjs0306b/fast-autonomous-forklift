@@ -13,10 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
-/**
- * 화물 등록·조회(prompt47.md 7장). 크기 검증·volume 계산은 도메인 {@link Cargo#create}가 담당하고,
- * 이 Service는 중복 검사·시각 세팅·저장 책임만 갖는다(기존 VehicleService와 동일한 역할 분담).
- */
+/** 화물 식별자를 등록하고 조회한다. 치수는 측정 결과에만 저장한다. */
 @Service
 public class CargoService {
 
@@ -34,12 +31,12 @@ public class CargoService {
             throw new BusinessException(ErrorCode.CARGO_ID_DUPLICATED,
                     "이미 등록된 cargoId입니다: " + request.cargoId());
         }
-        Cargo cargo = Cargo.create(request.cargoId(), request.width(), request.length(), request.height());
+        Cargo cargo = new Cargo();
+        cargo.setCargoId(request.cargoId());
         LocalDateTime now = LocalDateTime.now();
         cargo.setCreatedAt(now);
-        cargo.setUpdatedAt(now);
         cargoMapper.insert(cargo);
-        log.info("Cargo registered: cargoId={}, volume={}", cargo.getCargoId(), cargo.getVolume());
+        log.info("Cargo registered: cargoId={}", cargo.getCargoId());
         return CargoResponse.from(cargo);
     }
 

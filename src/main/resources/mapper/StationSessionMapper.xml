@@ -67,31 +67,6 @@
     </update>
 
     <!--
-        측정 결과가 저장된 뒤에만 세션을 종료한다(prompt96 3·20장).
-
-        "measurement 존재 확인 → 해제" 를 두 문장으로 나누면 그 사이에 상태가 바뀔 수 있다.
-        EXISTS 를 WHERE 절에 넣어 **한 문장**으로 판정·해제하면 그 틈이 없다. 영향 행 수가
-        0 이면 호출자가 원인(활성 세션 불일치 / 측정 미완료)을 따로 조회해 구분한다 —
-        전부 SESSION_NOT_FOUND 로 뭉개지 않는다.
-
-        MySQL 은 UPDATE 대상 테이블을 서브쿼리에서 다시 읽는 것을 막지만, 여기서 EXISTS 가
-        읽는 테이블은 station_measurement 로 UPDATE 대상(station_state)과 다르므로 문제없다.
-        H2 MySQL 호환 모드에서도 동일하게 동작한다.
-    -->
-    <update id="releaseStationIfMeasurementExists">
-        UPDATE station_state
-        SET active_session_id = NULL,
-            acquired_at = NULL
-        WHERE singleton_id = 1
-          AND active_session_id = #{sessionId}
-          AND EXISTS (
-              SELECT 1
-              FROM station_measurement
-              WHERE session_id = #{sessionId}
-          )
-    </update>
-
-    <!--
         현재 점유 상태를 그대로 읽는다. 만료 여부 판정·로그에 acquired_at 이 필요해서 두었다.
         findActiveSession 은 station_session 과 JOIN 하므로 점유 세션이 없으면 행 자체가 없지만,
         이 조회는 station_state 한 행을 항상 돌려준다(유휴면 컬럼이 NULL).

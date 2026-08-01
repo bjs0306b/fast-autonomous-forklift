@@ -2,66 +2,22 @@ spring:
   application:
     name: fast-backend
   profiles:
-    active: local
+    active: ${SPRING_PROFILES_ACTIVE:local}
   jackson:
     default-property-inclusion: always
     deserialization:
-      # OffsetDateTime의 원본 오프셋을 UTC로 변환하지 않고 그대로 보존한다 — 측정 스테이션
-      # measured_at의 +09:00 오프셋을 손실 없이 수신하기 위함(prompt16.md 정책 9번). LocalDateTime을
-      # 쓰는 기존 도메인(차량/포크리프트/AI 등)은 오프셋 자체가 없어 이 설정의 영향을 받지 않는다.
       adjust-dates-to-context-time-zone: false
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
-# 적재 위치 추천 설정(prompt46.md 6장, prompt95.md 2장).
-#
-# height-clearance
-#   단위: meter. 화물+팔레트 위에 추가로 확보할 안전 여유 높이.
-#   값을 지정하지 않으면 0(여유 없음)이며, 실제 운영 여유값은 팀 협의 대상이다(prompt46.md 20장).
-#   환경변수: STORAGE_PLACEMENT_HEIGHT_CLEARANCE
-#
-# pallet-height-m
-#   단위: meter.
-#   의미: T-11 팔레트 실물 높이(1100×1100mm 규격, 높이 0.12m).
-#   DB 반영: station_measurement.cargo_height 에는 **포함되지 않는다**(화물만의 높이).
-#   사용처: 적재 높이 판정에서 PlacementService 가 **정확히 한 번만** 더한다.
-#           requiredHeight = cargoHeight + pallet-height-m + height-clearance
-#   환경변수: STORAGE_PLACEMENT_PALLET_HEIGHT_M
-#   제약: null 불가(미지정 시 0.12), finite, 0 초과.
-# 적재 위치 추천 설정(prompt46.md 6장, prompt95.md 2장, prompt96.md 24장).
-#
-# height-clearance
-#   단위: meter. 화물+팔레트 위에 추가로 확보할 안전 여유 높이.
-#   환경변수: STORAGE_PLACEMENT_HEIGHT_CLEARANCE
-#
-# pallet-height-m
-#   단위: meter. T-11 팔레트 실물 높이.
-#   station_measurement.cargo_height 에는 **포함되지 않는다**(화물만의 높이).
-#   적재 높이 판정에서 **정확히 한 번만** 더한다:
-#     requiredHeight = cargoHeight + pallet-height-m + height-clearance
-#   환경변수: STORAGE_PLACEMENT_PALLET_HEIGHT_M / 제약: finite, 0 초과
-#
-# max-overhang-ratio-exclusive
-#   단위: 없음(무차원 비율). 적재를 허용하는 화물 돌출률 상한.
-#   **경계값 미포함** — overhangRatio < 이 값 일 때만 추천한다.
-#   따라서 값이 0.05 이면 0.05 는 차단이고 0.049999 는 허용이다.
-#   환경변수: STORAGE_PLACEMENT_MAX_OVERHANG_RATIO_EXCLUSIVE / 제약: finite, 0 초과 1.0 이하
 storage:
   placement:
-    height-clearance: 0.05
-    pallet-height-m: 0.12
-    max-overhang-ratio-exclusive: 0.05
+    # 단위는 m이며 화물 높이에는 팔레트 높이를 포함하지 않는다.
+    height-clearance: ${STORAGE_PLACEMENT_HEIGHT_CLEARANCE:0.25}
+    pallet-height-m: ${STORAGE_PLACEMENT_PALLET_HEIGHT_M:0.12}
+    max-overhang-ratio-exclusive: ${STORAGE_PLACEMENT_MAX_OVERHANG_RATIO_EXCLUSIVE:0.05}
 
-# 측정 세션 점유 정책(prompt106).
-#
-# ttl-seconds
-#   단위: 초. 세션 점유가 유효한 시간(기본 600 = 10분).
-#   측정 데스크탑이 정상 종료 없이 죽으면(kill -9·전원 차단·네트워크 단절) 세션 종료 요청이 오지
-#   않아 단일 설비 잠금이 영구히 남는다. 이 시간이 지난 점유는 **다음 openSession 이 회수**한다
-#   (별도 스케줄러 없음).
-#   너무 짧으면 정상 측정 중인 세션을 빼앗고, 너무 길면 복구가 늦어진다 — 현장 측정 소요시간에 맞춘다.
-#   환경변수: STATION_SESSION_TTL_SECONDS / 제약: 0 초과 86400 이하
 station:
   session:
     ttl-seconds: ${STATION_SESSION_TTL_SECONDS:600}

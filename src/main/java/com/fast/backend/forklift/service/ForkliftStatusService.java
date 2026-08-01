@@ -41,7 +41,7 @@ public class ForkliftStatusService {
                 message.forkliftId(), message.status(), message.battery(), message.timestamp());
 
         VehicleStatusUpdateCommand command = new VehicleStatusUpdateCommand(
-                message.status(), message.battery(), null, null, null, null, message.timestamp());
+                message.status(), message.battery(), message.timestamp());
 
         try {
             vehicleStatusService.updateCurrentStatus(message.forkliftId(), command);

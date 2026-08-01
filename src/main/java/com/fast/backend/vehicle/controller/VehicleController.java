@@ -6,9 +6,7 @@ import com.fast.backend.vehicle.dto.VehicleCreateRequest;
 import com.fast.backend.vehicle.dto.VehicleDetailResponse;
 import com.fast.backend.vehicle.dto.VehicleResponse;
 import com.fast.backend.vehicle.dto.VehicleStatusCountResponse;
-import com.fast.backend.vehicle.dto.VehicleStatusHistoryResponse;
 import com.fast.backend.vehicle.service.VehicleService;
-import com.fast.backend.vehicle.service.VehicleStatusHistoryService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +16,6 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -33,11 +30,8 @@ import java.util.List;
 public class VehicleController {
 
     private final VehicleService vehicleService;
-    private final VehicleStatusHistoryService vehicleStatusHistoryService;
-
-    public VehicleController(VehicleService vehicleService, VehicleStatusHistoryService vehicleStatusHistoryService) {
+    public VehicleController(VehicleService vehicleService) {
         this.vehicleService = vehicleService;
-        this.vehicleStatusHistoryService = vehicleStatusHistoryService;
     }
 
     @PostMapping
@@ -74,14 +68,4 @@ public class VehicleController {
         return ApiResponse.success(vehicleService.updateActive(vehicleId, request.active()));
     }
 
-    /**
-     * 차량별 상태 이력 조회(FR-504, prompt22.md). limit 기본값 50, 허용 범위 1~200이며 범위 검증은
-     * {@link VehicleStatusHistoryService}가 담당한다.
-     */
-    @GetMapping("/{vehicleId}/status-history")
-    public ApiResponse<List<VehicleStatusHistoryResponse>> statusHistory(
-            @PathVariable String vehicleId,
-            @RequestParam(defaultValue = "50") int limit) {
-        return ApiResponse.success(vehicleStatusHistoryService.findRecentHistory(vehicleId, limit));
-    }
 }

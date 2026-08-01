@@ -9,15 +9,11 @@ import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
 export function SelectedVehicleOverlay({ vehicle }: { vehicle: SelectedVehicleSummary }) {
   const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? vehicle.status
   const color = VEHICLE_STATUS_COLOR[vehicle.status]
-  const sourceLabel = vehicle.source === "REAL" ? "REAL" : "SIM"
 
   return (
     <div className="pointer-events-none w-52 rounded-md bg-slate-900/80 p-2.5 shadow-lg ring-1 ring-white/10 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">선택 차량</span>
-        <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold text-slate-200">
-          {sourceLabel}
-        </span>
       </div>
 
       <div className="mt-1 font-mono text-sm font-semibold text-white">{vehicle.vehicleId}</div>

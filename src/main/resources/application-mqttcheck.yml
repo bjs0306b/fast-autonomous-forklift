@@ -74,11 +74,8 @@ mqtt:
     forklift-location: forklift/+/location
     forklift-path: forklift/+/path
     forklift-command-result: forklift/+/command-result
-    forklift-fork-status: forklift/+/fork-status
-    forklift-error: forklift/+/error
-    cargo-detected: cargo/detected
+    station-measurement: fast/station/measurement
     forklift-command: forklift/%s/command
-    forklift-load-safety: forklift/+/load-safety
 
 vehicle:
   auto-registration-enabled: false

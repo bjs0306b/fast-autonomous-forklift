@@ -7,7 +7,6 @@ import { MiniMap } from "@/components/monitoring/MiniMap"
 import { VehicleDetailPanel } from "@/components/monitoring/VehicleDetailPanel"
 import { GlobalEmergencyStopBar } from "@/components/monitoring/GlobalEmergencyStopBar"
 import { CommandNotice, type CommandNoticeState } from "@/components/monitoring/CommandNotice"
-import { LoadSafetyOverlay } from "@/components/monitoring/LoadSafetyOverlay"
 import { useMonitoringDashboard } from "@/hooks/useMonitoringDashboard"
 import { useMonitoringSocket } from "@/hooks/useMonitoringSocket"
 import { emergencyStopAll, emergencyStopVehicle } from "@/lib/api/commandApi"
@@ -25,9 +24,6 @@ export default function MonitoringPage() {
     loadDashboard,
     applyStatusEvent,
     applyLocationEvent,
-    selectedLoadSafety,
-    loadSafetyByVehicleId,
-    applyLoadSafetyEvent,
   } = useMonitoringDashboard()
 
   /**
@@ -98,7 +94,6 @@ export default function MonitoringPage() {
     enabled: loadState !== "error",
     onStatusEvent: applyStatusEvent,
     onLocationEvent: applyLocationEvent,
-    onLoadSafetyEvent: applyLoadSafetyEvent,
     onConnected: handleSocketConnected,
   })
 
@@ -131,7 +126,7 @@ export default function MonitoringPage() {
       setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: "EMERGENCY_STOP" }))
       setNotice(null)
       try {
-        // reason 입력 UI 가 없으므로 임의의 기본 reason 을 만들지 않고 body 없이 보낸다.
+        // 안전 명령 API는 요청 본문 없이 호출한다.
         const response = await emergencyStopVehicle(vehicleId)
 
         if (response.status === "PUBLISHED") {
@@ -228,7 +223,6 @@ export default function MonitoringPage() {
     return {
       vehicleId: selectedVehicle.vehicleId,
       name: selectedVehicle.name,
-      source: selectedVehicle.source,
       status: selectedVehicle.status,
       currentTask: selectedVehicle.currentTask?.taskId ?? null,
     }
@@ -279,13 +273,6 @@ export default function MonitoringPage() {
             onRetryConnection={reconnectStream}
             selectedVehicle={selectedSummary}
             realtimeStatus={realtimeStatus}
-            // 적재 위험 경고는 WARNING/DANGER 일 때만 스스로 렌더된다(정상이면 null).
-            overlay={
-              <LoadSafetyOverlay
-                loadSafety={selectedLoadSafety}
-                vehicleLabel={selectedVehicle?.name ?? selectedVehicleId}
-              />
-            }
           />
         </div>
 
@@ -302,7 +289,6 @@ export default function MonitoringPage() {
               emergencyStopPending={
                 selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] != null : false
               }
-              loadSafety={selectedLoadSafety}
             />
           )}
 
@@ -315,8 +301,6 @@ export default function MonitoringPage() {
               vehicles={vehicles}
               selectedVehicleId={selectedVehicleId}
               onSelectVehicle={setSelectedVehicleId}
-              // 선택하지 않은 차량의 적재 위험도 마커로 인지할 수 있게 한다.
-              loadSafetyByVehicleId={loadSafetyByVehicleId}
             />
           )}
         </div>

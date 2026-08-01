@@ -1,6 +1,5 @@
 import type {
   EmergencyStopAllResponse,
-  SafetyCommandRequest,
   VehicleCommandResponse,
 } from "@/types/command"
 import { postJson } from "./httpClient"
@@ -20,12 +19,11 @@ import { postJson } from "./httpClient"
  */
 export async function emergencyStopVehicle(
   vehicleId: string,
-  request?: SafetyCommandRequest,
   signal?: AbortSignal,
 ): Promise<VehicleCommandResponse> {
   return postJson<VehicleCommandResponse>(
     `/api/vehicles/${encodeURIComponent(vehicleId)}/commands/emergency-stop`,
-    request,
+    undefined,
     signal,
   )
 }
@@ -39,12 +37,11 @@ export async function emergencyStopVehicle(
  * 부분 실패도 HTTP 201 이므로 `publishedCount` / `failedCount` 로 판단해야 한다.
  */
 export async function emergencyStopAll(
-  request?: SafetyCommandRequest,
   signal?: AbortSignal,
 ): Promise<EmergencyStopAllResponse> {
   return postJson<EmergencyStopAllResponse>(
     "/api/vehicles/commands/emergency-stop-all",
-    request,
+    undefined,
     signal,
   )
 }
