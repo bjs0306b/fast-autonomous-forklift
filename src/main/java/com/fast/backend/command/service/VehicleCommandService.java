@@ -191,12 +191,10 @@ public class VehicleCommandService {
             throw new BusinessException(ErrorCode.COMMAND_DESTINATION_INVALID);
         }
         Double heading = destination.heading();
-        if (heading != null && !Double.isFinite(heading)) {
+        if (heading == null || !Double.isFinite(heading)) {
             throw new BusinessException(ErrorCode.COMMAND_DESTINATION_INVALID);
         }
-        if (heading != null) {
-            heading = ((heading % 360.0) + 360.0) % 360.0;
-        }
+        heading = ((heading % 360.0) + 360.0) % 360.0;
         return VehicleCommandPayload.ofDestination(
                 new VehicleCommandDestination(destination.x(), destination.y(), heading, frame));
     }

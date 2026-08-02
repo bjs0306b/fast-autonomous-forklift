@@ -8,6 +8,7 @@ import com.fast.backend.command.service.VehicleCommandResultService;
 import com.fast.backend.config.mqtt.MqttTopics;
 import com.fast.backend.forklift.dto.ForkliftLocationMessage;
 import com.fast.backend.forklift.dto.ForkliftStatusMessage;
+import com.fast.backend.forklift.dto.LegacyIsaacLocationMessage;
 import com.fast.backend.forklift.service.ForkliftLocationService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.dto.IsaacForkliftPathMessage;
@@ -26,6 +27,7 @@ public class MqttMessageRouter {
     private final MqttTopics topics;
     private final ForkliftStatusService statusService;
     private final ForkliftLocationService locationService;
+    private final VehicleLocationMessageAdapter locationMessageAdapter;
     private final IsaacForkliftPathService pathService;
     private final VehicleCommandResultService commandResultService;
 
@@ -34,12 +36,14 @@ public class MqttMessageRouter {
             MqttTopics topics,
             ForkliftStatusService statusService,
             ForkliftLocationService locationService,
+            VehicleLocationMessageAdapter locationMessageAdapter,
             IsaacForkliftPathService pathService,
             VehicleCommandResultService commandResultService) {
         this.objectMapper = objectMapper;
         this.topics = topics;
         this.statusService = statusService;
         this.locationService = locationService;
+        this.locationMessageAdapter = locationMessageAdapter;
         this.pathService = pathService;
         this.commandResultService = commandResultService;
     }
@@ -63,8 +67,7 @@ public class MqttMessageRouter {
                 ForkliftStatusMessage message = objectMapper.treeToValue(root, ForkliftStatusMessage.class);
                 if (matchesTopicVehicle(topic, message.forkliftId())) statusService.handleStatus(message);
             } else if (topics.isForkliftLocationTopic(topic)) {
-                ForkliftLocationMessage message = objectMapper.treeToValue(root, ForkliftLocationMessage.class);
-                if (matchesTopicVehicle(topic, message.vehicleId())) locationService.handleLocation(message);
+                routeLocation(topic, root);
             } else if (topics.isForkliftPathTopic(topic)) {
                 IsaacForkliftPathMessage message = objectMapper.treeToValue(root, IsaacForkliftPathMessage.class);
                 if (matchesTopicVehicle(topic, message.forkliftId())) pathService.handlePath(message);
@@ -78,6 +81,24 @@ public class MqttMessageRouter {
             log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
         } catch (RuntimeException e) {
             log.error("MQTT message processing failed and was isolated: topic={}, error={}", topic, e.getMessage());
+        }
+    }
+
+    private void routeLocation(String topic, JsonNode root) throws JsonProcessingException {
+        ForkliftLocationMessage message;
+        if (root.hasNonNull("vehicleId")) {
+            message = objectMapper.treeToValue(root, ForkliftLocationMessage.class);
+        } else if (root.hasNonNull("forkliftId")) {
+            LegacyIsaacLocationMessage legacyMessage =
+                    objectMapper.treeToValue(root, LegacyIsaacLocationMessage.class);
+            message = locationMessageAdapter.fromLegacyIsaac(legacyMessage);
+        } else {
+            log.warn("Vehicle location discarded: topic={}, reason=vehicle identifier missing", topic);
+            return;
+        }
+
+        if (matchesTopicVehicle(topic, message.vehicleId())) {
+            locationService.handleLocation(message);
         }
     }
 

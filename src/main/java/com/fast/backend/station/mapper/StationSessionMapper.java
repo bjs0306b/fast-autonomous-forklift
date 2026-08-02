@@ -47,10 +47,4 @@ public interface StationSessionMapper {
      */
     Optional<StationState> findStateForUpdate();
 
-    /**
-     * 운영자 강제 해제. <b>측정 행 존재 여부를 보지 않는다.</b> 측정을 저장하지 못한 채 죽은
-     * 세션을 푸는 것이 목적이다.
-     * 요청 sessionId 가 실제 점유 세션과 같을 때만 해제한다(0 이면 불일치 또는 이미 유휴).
-     */
-    int forceReleaseStation(@Param("sessionId") String sessionId);
 }

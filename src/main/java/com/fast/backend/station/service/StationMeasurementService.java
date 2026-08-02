@@ -177,60 +177,6 @@ public class StationMeasurementService {
         }
     }
 
-    /**
-     * 운영자 강제 해제. <b>측정 결과 존재 여부와 무관하게</b> 잠금을 푼다.
-     *
-     * <p><b>가짜 측정 행을 만들지 않는다.</b> 기존 우회책(desktop 의 {@code --abandon})은 잠금을 풀려고
-     * unreliable 측정 행을 남겨 DB 를 오염시켰다. 여기서는 연결 작업을 실패 처리하고
-     * {@code station_state}를 비운다.
-     *
-     * <p>요청 sessionId 가 실제 점유 세션과 다르면 해제하지 않는다 — 오래된 화면을 보고 누른 요청이
-     * 방금 시작된 정상 세션을 끊는 것을 막는다.
-     *
-     * <p>TODO(보안): 운영자 전용으로 보호해야 한다. 현재 이 저장소에는 인증·권한 체계가 없어
-     * 누구나 호출할 수 있다. Spring Security 도입 시 이 엔드포인트를 관리자 권한으로 제한할 것.
-     */
-    @Transactional
-    public void forceReleaseSession(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "sessionId 는 필수입니다.");
-        }
-
-        StationState before = sessionMapper.findStateForUpdate().orElse(null);
-        String occupiedSessionId = before == null ? null : before.getActiveSessionId();
-        if (before == null || !before.isOccupied() || !sessionId.equals(occupiedSessionId)) {
-            // 실패 원인 규명 전용 — 상태를 바꾸지 않는다. 이미 유휴인 경우와 다른 세션이 점유 중인
-            // 경우를 같은 코드로 돌려주되, 메시지로 구분한다(기존 closeSession 과 같은 정책).
-            log.warn("Station session force release rejected: requestedSessionId={}, "
-                            + "occupiedSessionId={}", sessionId, occupiedSessionId);
-            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
-                    occupiedSessionId == null
-                            ? "점유 중인 세션이 없습니다: " + sessionId
-                            : "요청한 세션이 현재 점유 세션과 다릅니다: requested=" + sessionId
-                                    + ", occupied=" + occupiedSessionId);
-        }
-
-        LocalDateTime failedAt = LocalDateTime.now(clock);
-        transportTaskMapper.findByMeasurementSessionId(sessionId).ifPresent(task -> {
-            int updated = transportTaskMapper.updateStatusIfCurrent(
-                    task.getId(), com.fast.backend.transport.domain.TaskStatus.MEASURING,
-                    com.fast.backend.transport.domain.TaskStatus.FAILED, null, failedAt);
-            if (updated == 1) {
-                log.warn("Transport task failed by station force release: taskId={}, sessionId={}",
-                        task.getTaskCode(), sessionId);
-            }
-        });
-
-        if (sessionMapper.forceReleaseStation(sessionId) == 0) {
-            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
-                    "강제 해제 중 세션 점유 상태가 변경됐습니다: " + sessionId);
-        }
-
-        log.warn("Station session force released: requestedSessionId={}, occupiedSessionId={}, "
-                        + "acquiredAt={}", sessionId, occupiedSessionId,
-                before == null ? null : before.getAcquiredAt());
-    }
-
     @Transactional(readOnly = true)
     public StationSession findActiveSession() {
         return sessionMapper.findActiveSession()
@@ -268,14 +214,14 @@ public class StationMeasurementService {
         }
 
         // 점유 상태를 행 잠금과 함께 읽는다. 여기부터 커밋까지 acquireStation/
-        // releaseStation/forceReleaseStation 이 대기하므로, "검증 통과 후 INSERT 전에 세션이
+        // acquireStation/releaseStation 이 대기하므로, "검증 통과 후 INSERT 전에 세션이
         // 바뀌는" TOCTOU 가 발생하지 않는다.
         StationState state = sessionMapper.findStateForUpdate()
                 .orElseThrow(() -> new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
                         "측정 설비 상태를 읽을 수 없습니다: measurementId=" + measurementId));
 
         if (!state.isOccupied()) {
-            // TTL 만료·강제 해제로 이미 풀렸거나 애초에 열린 적이 없다.
+            // TTL 만료로 이미 풀렸거나 애초에 열린 적이 없다.
             log.warn("Station measurement rejected: no active session — measurementId={}, "
                     + "requestedSessionId={}", measurementId, requestedSessionId);
             throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,

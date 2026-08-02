@@ -26,11 +26,19 @@
 | 토픽 | 방향 | 주요 payload |
 |---|---|---|
 | `forklift/{vehicleId}/status` | ROS2 → 백엔드 | `forkliftId`, `status`, `battery`, `timestamp` |
-| `forklift/{vehicleId}/location` | ROS2 → 백엔드 | `vehicleId`, `position{x,y,frameId}`, `heading`, `speed`, `messageAt` |
+| `forklift/{vehicleId}/location` | ROS2/Isaac → 백엔드 | ROS2 표준 위치 또는 Isaac 기존 평면 위치 |
 | `forklift/{vehicleId}/path` | ROS2/Isaac → 백엔드 | `forkliftId`, `waypoints[]`, `goal{x,y,heading}`, `timestamp` |
 | `forklift/{vehicleId}/command` | 백엔드 → ROS2 | 명령 envelope |
 | `forklift/{vehicleId}/command-result` | ROS2 → 백엔드 | `commandId`, `vehicleId`, `result`, `message`, `completedAt` |
 | `fast/station/measure_request` | 백엔드 → 측정 AI | `cargoId` |
+
+위치 메시지는 다음 두 형식을 수신한다.
+
+- ROS2 표준: `vehicleId`, `position{x,y,frameId}`, `heading`(degree), `speed`, `messageAt`
+- Isaac 호환: `forkliftId`, `x`, `y`, `direction`(radian), `speed`, `timestamp`
+
+Isaac 호환 형식은 MQTT 수신 경계에서 `frameId=map`인 표준 위치로 변환한다. 좌표는 이미 m 단위이므로
+배율을 다시 적용하지 않으며, `direction`만 degree로 변환해 기존 위치 저장·WebSocket 경로를 공유한다.
 
 ### 차량 명령
 
@@ -85,7 +93,6 @@ MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다
 |---|---|---|
 | `POST` | `/api/cargos` | 측정 전 화물 등록 |
 | `POST` | `/api/stations/sessions?cargoId=...` | 측정 세션 생성 |
-| `DELETE` | `/api/stations/sessions/{sessionId}/force` | 실패 후 남은 세션 강제 해제 |
 | `GET` | `/api/stations/sessions/active` | 현재 측정 중인 세션 조회 |
 | `GET` | `/api/stations/sessions/{sessionId}/measurements/latest` | 세션 측정 결과 조회 |
 | `POST` | `/api/stations/measurements` | 측정 결과 등록 |

@@ -12,7 +12,7 @@ import com.fasterxml.jackson.annotation.JsonAlias;
  * <p>단위·규격(1장 5번·9번 확정):
  * <ul>
  *   <li>{@code x}/{@code y} — <b>m</b>, 필수, finite</li>
- *   <li>{@code heading} — <b>degree</b>, [0,360)로 정규화해서 발행한다</li>
+ *   <li>{@code heading} — <b>degree</b>, 필수, finite, [0,360)로 정규화해서 발행한다</li>
  *   <li>{@code frameId} — {@code map} 또는 {@code odom}만 허용. 생략 시 기본값 {@code map}</li>
  * </ul>
  *

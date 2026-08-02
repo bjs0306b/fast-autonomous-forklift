@@ -82,10 +82,10 @@
     <!--
         점유 상태를 **행 잠금과 함께** 읽는다(prompt107 TOCTOU 방지).
 
-        측정 저장은 "활성 세션이 맞는지 확인 → INSERT" 두 단계다. 그 사이에 force release 나
-        TTL 회수가 끼어들면 **이미 해제된 세션의 측정이 저장된다.** SELECT ... FOR UPDATE 로
-        station_state 한 행을 잠그면, 같은 행을 UPDATE 하는 acquireStation/releaseStation/
-        forceReleaseStation 이 이 트랜잭션이 끝날 때까지 기다린다 — 검증과 INSERT 가 원자적으로 묶인다.
+        측정 저장은 "활성 세션이 맞는지 확인 → INSERT" 두 단계다. 그 사이에 TTL 회수가 끼어들면
+        **이미 해제된 세션의 측정이 저장된다.** SELECT ... FOR UPDATE 로 station_state 한 행을 잠그면,
+        같은 행을 UPDATE 하는 acquireStation/releaseStation 이 이 트랜잭션이 끝날 때까지 기다린다 —
+        검증과 INSERT 가 원자적으로 묶인다.
 
         잠그는 대상이 단일 행(singleton_id = 1)이라 경합 범위가 최소다.
         H2 MySQL 호환 모드와 MySQL 8 모두 FOR UPDATE 를 지원한다.
@@ -98,22 +98,5 @@
         WHERE singleton_id = 1
         FOR UPDATE
     </select>
-
-    <!--
-        운영자 강제 해제(prompt106). 측정 행 존재 여부를 보지 않는다는 점만 빼면
-        releaseStation 과 같다 — 측정을 저장하지 못한 채 죽은 세션을 푸는 것이 목적이라
-        EXISTS 조건이 있으면 애초에 풀 수가 없다.
-
-        요청한 sessionId 가 실제 점유 세션과 같을 때만 해제한다. 조건을 빼면 "지금 누가 점유했든
-        무조건 푼다"가 되어, 운영자가 오래된 화면을 보고 누른 요청이 방금 시작된 정상 세션을
-        끊어 버릴 수 있다.
-    -->
-    <update id="forceReleaseStation">
-        UPDATE station_state
-        SET active_session_id = NULL,
-            acquired_at = NULL
-        WHERE singleton_id = 1
-          AND active_session_id = #{sessionId}
-    </update>
 
 </mapper>

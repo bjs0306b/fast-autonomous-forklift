@@ -4,6 +4,8 @@ import com.fast.backend.command.domain.VehicleCommand;
 import com.fast.backend.command.dto.VehicleCommandDestination;
 import com.fast.backend.command.dto.VehicleCommandRequest;
 import com.fast.backend.command.mapper.VehicleCommandMapper;
+import com.fast.backend.common.exception.BusinessException;
+import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
@@ -16,6 +18,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -23,6 +26,28 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class VehicleCommandServiceTest {
+
+    @Test
+    void moveWithoutHeading_isRejected() {
+        VehicleMapper vehicleMapper = mock(VehicleMapper.class);
+        VehicleCommandMapper commandMapper = mock(VehicleCommandMapper.class);
+        VehicleCommandPublisher publisher = mock(VehicleCommandPublisher.class);
+        TransportTaskMapper taskMapper = mock(TransportTaskMapper.class);
+        VehicleCommandService service = new VehicleCommandService(
+                vehicleMapper, commandMapper, publisher, taskMapper);
+
+        Vehicle vehicle = new Vehicle();
+        vehicle.setVehicleId("FORKLIFT-01");
+        vehicle.setActive(true);
+        when(vehicleMapper.findByVehicleId("FORKLIFT-01")).thenReturn(Optional.of(vehicle));
+
+        assertThatThrownBy(() -> service.issueCommand("FORKLIFT-01", new VehicleCommandRequest(
+                "MOVE", null, null,
+                new VehicleCommandDestination(1.0, 2.0, null, "map"), null)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.COMMAND_DESTINATION_INVALID));
+    }
 
     @Test
     void taskLinkedMove_storesInternalTaskIdAndStartsPickupMove() {

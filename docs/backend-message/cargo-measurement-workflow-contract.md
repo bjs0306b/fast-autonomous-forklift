@@ -104,10 +104,13 @@ AI 측정 프로그램은 세션 생성 API에서 받은 `sessionId`를 그대�
 
 - 측정 시작 여부와 작업 상태를 판단하지 않는다.
 - 기존 WebRTC 화면 송출 구조를 유지한다.
-- 차량 이동 시각화가 필요하면 ROS2/백엔드가 제공하는 차량 위치를 소비한다.
+- 기존 `twin_bridge.py` 위치 형식(`forkliftId`, `x`, `y`, `direction`, `timestamp`)을 유지한다.
+- 백엔드가 Isaac 위치를 ROS2 표준 위치 형식으로 변환해 DB와 관제 WebSocket에 반영한다.
 - 실물 미니어처 AMCL `map` 좌표가 기준이며, 현실 스케일 모델의 배율 변환은 Isaac Sim 내부에서 처리한다.
 
-현재 WebRTC 및 시각화 코드는 유지한다. Isaac Sim이 `fast/station/measure_request`를 직접 발행하던 구조가 있다면 제거하고 ROS2의 MOVE 결과만 사용한다.
+현재 WebRTC 및 시각화 코드는 유지한다. Isaac Sim은 이동 완료 `command-result`를 발행하지 않고,
+ROS2가 Nav2 실행 결과를 백엔드에 반환한다. Isaac Sim이 `fast/station/measure_request`를 직접 발행하던
+구조가 있다면 제거하고 ROS2의 MOVE 결과만 사용한다.
 
 ## Embedded 담당 계약
 

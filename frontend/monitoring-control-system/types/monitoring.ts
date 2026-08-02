@@ -14,6 +14,7 @@ export type TaskStatus =
   | "PENDING"
   | "ASSIGNED"
   | "MOVING_TO_PICKUP"
+  | "MEASURING"
   | "PICKING_UP"
   | "TRANSPORTING"
   | "PLACING"

@@ -28,7 +28,7 @@
 >
 > | 백엔드 REST 필드 | 이 문서의 원본 필드 | 변환 |
 > |---|---|---|
-> | `sessionId` | 측정 요청의 `sessionId` | 백엔드 MQTT 요청값을 그대로 반환 |
+> | `sessionId` | 세션 생성 API 응답의 `sessionId` | AI가 생성한 측정 세션 값을 그대로 전송 |
 > | `measurementId` | `measurement_id` | 없음 |
 > | `status` | `status` | 없음(`dimensions_only` 포함 4값 지원) |
 > | **`cargoHeight`** | **`dimensions.height_cm`** | **cm ÷ 100 = m** — 데스크탑이 변환 |
@@ -42,7 +42,9 @@
 >   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
 > ```
 >
-> **`sessionId`는 반드시 보낸다.** 백엔드가 `fast/station/measure_request`로 보낸 값을 그대로 사용해야 하며, 활성 세션과 다르면 늦게 도착한 이전 화물 결과로 판단해 거부한다. `stationId`는 보내지 않는다.
+> 백엔드 MQTT 측정 요청에는 `cargoId`만 들어온다. AI가
+> `POST /api/stations/sessions?cargoId=...`로 세션을 생성한 뒤, 응답으로 받은 **`sessionId`를 반드시 보낸다.**
+> 활성 세션과 다르면 백엔드는 늦게 도착한 이전 화물 결과로 판단해 거부한다. `stationId`는 보내지 않는다.
 > 나머지 필드(detection/distance/load_balance/box_measurements/miniature/total_height)는
 > **백엔드에 저장되지 않는다.** 전체 규격은 `docs/backend-message/communication-protocol.md`
 > §Measurement Station v2.0 (REST) 참고.
@@ -271,11 +273,11 @@ STATION_API_BASE=http://70.12.246.250:8080 \
 
 ```bash
 python src/station/serve.py --release-session            # 조회 후 종료 시도
-python src/station/serve.py --release-session --abandon  # 측정 없는 세션 강제 해제
+python src/station/serve.py --release-session --abandon  # 측정 실패를 기록하고 세션 종료
 ```
 
 `--abandon`은 `unreliable` 측정을 하나 남겨 잠금을 푼다. **없는 측정을 지어내는 것이
 아니라 "이 세션은 측정에 실패했다"를 기록하는 것**이다.
 
-> **백엔드에 요청할 것**: 세션 TTL(예: 10분 무활동 시 자동 해제) 또는 강제 해제
-> 엔드포인트. 지금은 클라이언트가 아무리 조심해도 `kill -9` 한 번이면 설비가 잠긴다.
+> 백엔드는 측정 요청·활성 세션에 TTL을 적용한다. 클라이언트가 `kill -9` 또는 전원 차단으로
+> 종료돼도 TTL이 지나면 세션과 연결 작업을 자동 정리하므로 별도 강제 해제 API는 사용하지 않는다.
