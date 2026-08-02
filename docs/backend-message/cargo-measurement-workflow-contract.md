@@ -68,11 +68,14 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 
 ### TTL 실패 처리
 
+- 백엔드가 측정 위치 MOVE 명령을 발행한 뒤 300초 안에 최종 결과를 받지 못하면 작업을
+  `FAILED`로 종료한다. 기준 시각은 `transport_task.started_at`이다.
 - 백엔드가 측정 요청을 발행하면 `transport_task.measurement_requested_at`을 기록한다.
 - 설정된 TTL 안에 AI가 세션을 열지 않으면 작업을 `FAILED`로 종료한다.
 - AI가 세션을 열었지만 TTL 안에 최종 결과를 저장하지 못해도 세션을 자동 해제하고 작업을 `FAILED`로 종료한다.
 - 실패한 작업은 재측정하지 않으며 다음 대기 작업이 측정 차선을 사용할 수 있다.
-- 정리 주기는 `STATION_SESSION_CLEANUP_INTERVAL_MS`(기본 5초), TTL은
+- 정리 주기는 `STATION_SESSION_CLEANUP_INTERVAL_MS`(기본 5초)다.
+- MOVE 결과 대기 TTL은 `STATION_MOVE_TTL_SECONDS`(기본 300초), 측정 요청·활성 세션 TTL은
   `STATION_SESSION_TTL_SECONDS`(기본 60초)로 설정한다.
 
 ### 최종 결과 등록
@@ -117,5 +120,6 @@ AI 측정 프로그램은 세션 생성 API에서 받은 `sessionId`를 그대�
 - AI가 세션을 생성하면 같은 `cargoId`의 측정 대기 작업에 연결한다.
 - `transport_task.measurement_session_id`로 측정 결과의 대상 작업을 확정한다.
 - 측정 요청 실패, MOVE 실패, 부적합 측정 결과는 작업을 `FAILED`로 종료한다.
-- 측정 요청 또는 활성 측정 세션이 TTL을 넘으면 작업을 `FAILED`로 종료하고 차선을 자동 해제한다.
+- MOVE 결과, 측정 요청 또는 활성 측정 세션이 각각의 TTL을 넘으면 작업을 `FAILED`로 종료하고
+  차선을 자동 해제한다.
 - AI 측정 결과는 MQTT가 아니라 REST 한 경로로만 받는다.

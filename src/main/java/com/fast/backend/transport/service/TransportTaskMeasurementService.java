@@ -1,6 +1,7 @@
 package com.fast.backend.transport.service;
 
 import com.fast.backend.common.exception.BusinessException;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.station.domain.StationMeasurement;
 import com.fast.backend.station.domain.StationSession;
 import com.fast.backend.station.service.StationMeasurementPlacementEligibility;
@@ -17,7 +18,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 /** 최종 측정 결과를 측정 중인 운반 작업에 연결하고 적재 위치를 예약한다. */
@@ -101,7 +101,7 @@ public class TransportTaskMeasurementService {
     private void fail(TransportTask task, String reason) {
         taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.MEASURING, TaskStatus.FAILED,
-                null, LocalDateTime.now());
+                null, CommunicationTime.nowLocal());
         broadcaster.broadcastAfterCommit(
                 "TRANSPORT_TASK_FAILED", task.getTaskCode(), TaskStatus.FAILED.name(), task.getVehicleId());
         log.warn("Transport task failed after measurement: taskId={}, reason={}", task.getTaskCode(), reason);

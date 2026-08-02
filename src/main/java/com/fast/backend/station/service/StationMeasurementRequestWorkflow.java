@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 
 /** 측정 위치 MOVE 결과를 운반 작업 상태와 화물 측정 요청으로 연결한다. */
@@ -21,12 +22,15 @@ public class StationMeasurementRequestWorkflow {
 
     private final TransportTaskMapper taskMapper;
     private final StationMeasureRequestPublisher requestPublisher;
+    private final Clock clock;
 
     public StationMeasurementRequestWorkflow(
             TransportTaskMapper taskMapper,
-            StationMeasureRequestPublisher requestPublisher) {
+            StationMeasureRequestPublisher requestPublisher,
+            Clock clock) {
         this.taskMapper = taskMapper;
         this.requestPublisher = requestPublisher;
+        this.clock = clock;
     }
 
     public void handleMoveResult(VehicleCommand command, VehicleCommandStatus resultStatus) {
@@ -45,7 +49,7 @@ public class StationMeasurementRequestWorkflow {
         }
 
         try {
-            LocalDateTime requestedAt = LocalDateTime.now();
+            LocalDateTime requestedAt = LocalDateTime.now(clock);
             if (taskMapper.markMeasurementRequested(task.getId(), requestedAt) != 1) {
                 log.warn("Station measurement request ignored: task state changed, taskId={}",
                         task.getTaskCode());
@@ -62,7 +66,7 @@ public class StationMeasurementRequestWorkflow {
     }
 
     private void failTask(TransportTask task) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         int updated = taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.FAILED,
                 null, now);

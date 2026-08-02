@@ -54,6 +54,12 @@ public interface TransportTaskMapper {
             @Param("measurementRequestedAt") LocalDateTime measurementRequestedAt);
     List<TransportTask> findExpiredMeasurementRequests(
             @Param("expiredBefore") LocalDateTime expiredBefore);
+    List<TransportTask> findExpiredMovesAwaitingResult(
+            @Param("expiredBefore") LocalDateTime expiredBefore);
+    int failMoveIfAwaitingResult(
+            @Param("id") Long id,
+            @Param("expiredBefore") LocalDateTime expiredBefore,
+            @Param("failedAt") LocalDateTime failedAt);
     Optional<TransportTask> findPendingMeasurementByCargoId(String cargoId);
     Optional<TransportTask> findByMeasurementSessionId(String sessionId);
     int lockMeasurementLane();

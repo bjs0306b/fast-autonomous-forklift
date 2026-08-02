@@ -52,6 +52,10 @@ class VehicleCommandMessageTest {
         assertThat(node.get("payload").get("destination").get("y").asDouble()).isEqualTo(6.0);
         assertThat(node.get("payload").get("destination").get("heading").asDouble()).isEqualTo(180.0);
         assertThat(node.get("payload").get("destination").get("frameId").asText()).isEqualTo("map");
+        assertThat(node.get("destination").get("x").asDouble()).isEqualTo(5.0);
+        assertThat(node.get("destination").get("y").asDouble()).isEqualTo(6.0);
+        assertThat(node.get("destination").get("direction").asDouble()).isCloseTo(Math.PI,
+                org.assertj.core.data.Offset.offset(1.0e-12));
         assertThat(node.has("reason")).isFalse();
         assertThat(node.get("timestamp").asText()).isEqualTo("2026-07-23T11:20:27+09:00");
     }
@@ -67,6 +71,7 @@ class VehicleCommandMessageTest {
 
         assertThat(node.get("payload").isObject()).isTrue();
         assertThat(node.get("payload").size()).isZero();
+        assertThat(node.has("destination")).isFalse();
         assertThat(node.has("reason")).isFalse();
     }
 

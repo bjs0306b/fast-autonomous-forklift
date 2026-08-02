@@ -2,6 +2,7 @@ package com.fast.backend.storage.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.storage.domain.Cargo;
 import com.fast.backend.storage.dto.CargoCreateRequest;
 import com.fast.backend.storage.dto.CargoResponse;
@@ -33,7 +34,7 @@ public class CargoService {
         }
         Cargo cargo = new Cargo();
         cargo.setCargoId(request.cargoId());
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = CommunicationTime.nowLocal();
         cargo.setCreatedAt(now);
         cargoMapper.insert(cargo);
         log.info("Cargo registered: cargoId={}", cargo.getCargoId());

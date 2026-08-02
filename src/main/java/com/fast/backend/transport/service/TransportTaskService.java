@@ -2,6 +2,7 @@ package com.fast.backend.transport.service;
 
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
+import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.storage.mapper.CargoMapper;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.transport.domain.TaskStatus;
@@ -59,7 +60,7 @@ public class TransportTaskService {
         task.setTaskCode("TASK-" + UUID.randomUUID());
         task.setCargoId(cargoId);
         task.setStatus(TaskStatus.PENDING);
-        task.setCreatedAt(LocalDateTime.now());
+        task.setCreatedAt(CommunicationTime.nowLocal());
         transportTaskMapper.insert(task);
         return TransportTaskResponse.from(task);
     }
@@ -79,7 +80,7 @@ public class TransportTaskService {
         if (transportTaskMapper.existsActiveTaskByVehicleId(vehicleId)) {
             throw new BusinessException(ErrorCode.VEHICLE_ALREADY_ASSIGNED);
         }
-        if (transportTaskMapper.updateAssignment(taskCode, vehicleId, LocalDateTime.now()) != 1) {
+        if (transportTaskMapper.updateAssignment(taskCode, vehicleId, CommunicationTime.nowLocal()) != 1) {
             throw new BusinessException(ErrorCode.TASK_ALREADY_ASSIGNED);
         }
         return getDetail(taskCode);
@@ -115,7 +116,7 @@ public class TransportTaskService {
         }
         TaskStatus.validateTransition(task.getStatus(), target);
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = CommunicationTime.nowLocal();
         LocalDateTime startedAt = target == TaskStatus.MOVING_TO_PICKUP ? now : null;
         LocalDateTime completedAt = target == TaskStatus.COMPLETED ? now : null;
         LocalDateTime failedAt = target == TaskStatus.FAILED ? now : null;

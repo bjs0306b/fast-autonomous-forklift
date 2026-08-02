@@ -15,9 +15,8 @@ import java.time.Duration;
  * 정상 측정 중인 세션을 빼앗고, 너무 길면 복구가 늦어진다. 환경변수
  * {@code STATION_SESSION_TTL_SECONDS} 로 재정의할 수 있다.
  *
- * <p><b>스케줄러를 두지 않는다.</b> 만료 판정은 새 세션을 여는 시점에만 필요하므로, 주기적으로 도는
- * 작업을 추가하는 대신 {@code openSession} 의 조건부 UPDATE 안에서 함께 처리한다 — 판정과 점유가
- * 한 문장이라 그 사이에 다른 요청이 끼어들 틈도 없다.
+ * <p>만료 판정은 주기 스케줄러와 새 세션 생성 시점 양쪽에서 수행한다. 스케줄러가 정리하기 전에도
+ * {@code openSession}의 조건부 UPDATE가 만료 점유를 원자적으로 회수할 수 있다.
  */
 @ConfigurationProperties(prefix = "station.session")
 public record StationSessionProperties(

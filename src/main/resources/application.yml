@@ -19,6 +19,8 @@ storage:
     max-overhang-ratio-exclusive: ${STORAGE_PLACEMENT_MAX_OVERHANG_RATIO_EXCLUSIVE:0.05}
 
 station:
+  move:
+    ttl-seconds: ${STATION_MOVE_TTL_SECONDS:300}
   session:
     ttl-seconds: ${STATION_SESSION_TTL_SECONDS:60}
     cleanup-interval-ms: ${STATION_SESSION_CLEANUP_INTERVAL_MS:5000}

@@ -120,7 +120,7 @@ public class VehicleCommandService {
             throw new BusinessException(ErrorCode.STATION_ALREADY_OCCUPIED,
                     "다른 차량이 측정 위치로 이동 중이거나 측정 중입니다.");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = CommunicationTime.nowLocal();
         if (transportTaskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP,
                 now, null) != 1) {

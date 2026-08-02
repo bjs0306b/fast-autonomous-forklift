@@ -44,11 +44,18 @@
   "payload": {
     "destination": {"x": 5.0, "y": 6.0, "heading": 180.0, "frameId": "map"}
   },
+  "destination": {"x": 5.0, "y": 6.0, "direction": 3.141592653589793},
   "timestamp": "2026-08-01T10:00:00+09:00"
 }
 ```
 
-`payload`와 `commandCategory`는 MQTT 실행 계약에만 사용하며 DB에는 저장하지 않는다. 현재 ROS2 브리지는 명령 수신·검증·결과 회신까지 구현돼 있으나 실제 이동 adapter는 아직 `UnavailableCommandAdapter`이므로, 물리 실행 완료로 간주하면 안 된다.
+`payload.destination`은 ROS2 정본 계약이다. 최상위 `destination`은 기존 Isaac Sim 브리지 호환용이며
+동일 좌표를 담되 `direction`은 radian을 사용한다. 두 필드는 MQTT 실행 계약에만 사용하며 DB에는
+저장하지 않는다. 현재 ROS2 브리지는 명령 수신·검증·결과 회신까지 구현돼 있으나 실제 이동 adapter는
+아직 `UnavailableCommandAdapter`이므로, 물리 실행 완료로 간주하면 안 된다.
+
+MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다. 이 안에 결과가 없으면 운반 작업을
+`FAILED`로 종료한다. MOVE 성공 뒤 AI 측정 요청·활성 세션에는 별도 60초 TTL을 적용한다.
 
 ### 측정 결과
 
@@ -103,7 +110,7 @@
 
 ## 장애 처리
 
-- 측정 AI가 죽어 결과가 오지 않으면 세션 TTL 이후 다음 세션 생성 시 회수한다.
+- 측정 AI가 죽어 결과가 오지 않으면 60초 세션 TTL과 주기 정리 작업으로 자동 회수한다.
 - REST 재시도나 MQTT QoS 1 재전송으로 같은 결과가 다시 와도 `measurementId` unique 제약으로 중복 저장하지 않는다.
 - 위치 메시지는 `messageAt`이 현재 저장값보다 새로울 때만 반영한다.
 - DB를 새로 만드는 MVP 단계이므로 별도 마이그레이션 파일은 두지 않는다.

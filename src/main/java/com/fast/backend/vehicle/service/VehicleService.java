@@ -51,7 +51,7 @@ public class VehicleService {
                     "이미 등록된 vehicleId입니다: " + request.vehicleId());
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = CommunicationTime.nowLocal();
         Vehicle vehicle = new Vehicle();
         vehicle.setVehicleId(request.vehicleId());
         vehicle.setName(request.name());
@@ -101,7 +101,7 @@ public class VehicleService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.VEHICLE_NOT_FOUND,
                         "등록되지 않은 차량입니다: " + vehicleId));
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = CommunicationTime.nowLocal();
         vehicleMapper.updateActive(vehicleId, active, now);
         vehicle.setActive(active);
         vehicle.setUpdatedAt(now);

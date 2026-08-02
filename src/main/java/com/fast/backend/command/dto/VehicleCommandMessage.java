@@ -1,5 +1,7 @@
 package com.fast.backend.command.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fast.backend.command.domain.VehicleCommandCategory;
 import com.fast.backend.command.domain.VehicleCommandTargetSystem;
 import com.fast.backend.command.domain.VehicleCommandType;
@@ -35,4 +37,25 @@ public record VehicleCommandMessage(
         VehicleCommandPayload payload,
         OffsetDateTime timestamp
 ) {
+
+    /**
+     * 기존 Isaac Sim 브리지가 읽는 과도기 호환 목적지다.
+     * ROS2는 {@code payload.destination}을 읽고 이 필드는 무시한다.
+     */
+    @JsonProperty("destination")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public LegacyDestination legacyDestination() {
+        VehicleCommandDestination destination = payload == null ? null : payload.destination();
+        if (destination == null) {
+            return null;
+        }
+        double direction = destination.heading() == null
+                ? 0.0
+                : Math.toRadians(destination.heading());
+        return new LegacyDestination(destination.x(), destination.y(), direction);
+    }
+
+    /** Isaac Sim 구형 계약은 방향을 radian으로 사용한다. */
+    public record LegacyDestination(Double x, Double y, double direction) {
+    }
 }

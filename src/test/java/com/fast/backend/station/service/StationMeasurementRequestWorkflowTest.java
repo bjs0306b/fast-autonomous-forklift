@@ -10,6 +10,10 @@ import com.fast.backend.transport.mapper.TransportTaskMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,12 +23,15 @@ import static org.mockito.Mockito.when;
 
 class StationMeasurementRequestWorkflowTest {
 
+    private static final Clock CLOCK = Clock.fixed(
+            Instant.parse("2026-08-03T03:00:00Z"), ZoneId.of("Asia/Seoul"));
+
     @Test
     void successfulMove_publishesCargoMeasurementRequest() {
         TransportTaskMapper taskMapper = mock(TransportTaskMapper.class);
         StationMeasureRequestPublisher publisher = mock(StationMeasureRequestPublisher.class);
         StationMeasurementRequestWorkflow workflow = new StationMeasurementRequestWorkflow(
-                taskMapper, publisher);
+                taskMapper, publisher, CLOCK);
 
         TransportTask task = new TransportTask();
         task.setId(7L);
@@ -45,7 +52,11 @@ class StationMeasurementRequestWorkflowTest {
 
         ArgumentCaptor<StationMeasureRequestMessage> captor =
                 ArgumentCaptor.forClass(StationMeasureRequestMessage.class);
+        ArgumentCaptor<LocalDateTime> requestedAtCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(publisher).publish(captor.capture());
+        verify(taskMapper).markMeasurementRequested(org.mockito.ArgumentMatchers.eq(7L),
+                requestedAtCaptor.capture());
         assertThat(captor.getValue().cargoId()).isEqualTo("CARGO-01");
+        assertThat(requestedAtCaptor.getValue()).isEqualTo(LocalDateTime.of(2026, 8, 3, 12, 0));
     }
 }

@@ -181,7 +181,8 @@ public class StationMeasurementService {
      * 운영자 강제 해제. <b>측정 결과 존재 여부와 무관하게</b> 잠금을 푼다.
      *
      * <p><b>가짜 측정 행을 만들지 않는다.</b> 기존 우회책(desktop 의 {@code --abandon})은 잠금을 풀려고
-     * unreliable 측정 행을 남겨 DB 를 오염시켰다. 여기서는 {@code station_state} 만 비운다.
+     * unreliable 측정 행을 남겨 DB 를 오염시켰다. 여기서는 연결 작업을 실패 처리하고
+     * {@code station_state}를 비운다.
      *
      * <p>요청 sessionId 가 실제 점유 세션과 다르면 해제하지 않는다 — 오래된 화면을 보고 누른 요청이
      * 방금 시작된 정상 세션을 끊는 것을 막는다.
@@ -195,10 +196,9 @@ public class StationMeasurementService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "sessionId 는 필수입니다.");
         }
 
-        StationState before = sessionMapper.findState().orElse(null);
+        StationState before = sessionMapper.findStateForUpdate().orElse(null);
         String occupiedSessionId = before == null ? null : before.getActiveSessionId();
-
-        if (sessionMapper.forceReleaseStation(sessionId) == 0) {
+        if (before == null || !before.isOccupied() || !sessionId.equals(occupiedSessionId)) {
             // 실패 원인 규명 전용 — 상태를 바꾸지 않는다. 이미 유휴인 경우와 다른 세션이 점유 중인
             // 경우를 같은 코드로 돌려주되, 메시지로 구분한다(기존 closeSession 과 같은 정책).
             log.warn("Station session force release rejected: requestedSessionId={}, "
@@ -208,6 +208,22 @@ public class StationMeasurementService {
                             ? "점유 중인 세션이 없습니다: " + sessionId
                             : "요청한 세션이 현재 점유 세션과 다릅니다: requested=" + sessionId
                                     + ", occupied=" + occupiedSessionId);
+        }
+
+        LocalDateTime failedAt = LocalDateTime.now(clock);
+        transportTaskMapper.findByMeasurementSessionId(sessionId).ifPresent(task -> {
+            int updated = transportTaskMapper.updateStatusIfCurrent(
+                    task.getId(), com.fast.backend.transport.domain.TaskStatus.MEASURING,
+                    com.fast.backend.transport.domain.TaskStatus.FAILED, null, failedAt);
+            if (updated == 1) {
+                log.warn("Transport task failed by station force release: taskId={}, sessionId={}",
+                        task.getTaskCode(), sessionId);
+            }
+        });
+
+        if (sessionMapper.forceReleaseStation(sessionId) == 0) {
+            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
+                    "강제 해제 중 세션 점유 상태가 변경됐습니다: " + sessionId);
         }
 
         log.warn("Station session force released: requestedSessionId={}, occupiedSessionId={}, "
@@ -289,7 +305,7 @@ public class StationMeasurementService {
                     "이 세션에는 이미 측정 결과가 저장되어 있습니다: sessionId=" + requestedSessionId);
         }
 
-        LocalDateTime receivedAt = LocalDateTime.now();
+        LocalDateTime receivedAt = LocalDateTime.now(clock);
         StationMeasurement entity = new StationMeasurement();
         entity.setMeasurementId(measurementId);
         // 활성 세션 조회값이 아니라 **요청이 밝힌 세션**을 저장한다. 위에서 두 값이 같음을

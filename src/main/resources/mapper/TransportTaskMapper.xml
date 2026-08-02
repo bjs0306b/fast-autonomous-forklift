@@ -119,6 +119,23 @@
           AND measurement_requested_at &lt;= #{expiredBefore}
         ORDER BY measurement_requested_at, id
     </select>
+    <select id="findExpiredMovesAwaitingResult" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='MOVING_TO_PICKUP'
+          AND measurement_requested_at IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &lt;= #{expiredBefore}
+        ORDER BY started_at, id
+    </select>
+    <update id="failMoveIfAwaitingResult">
+        UPDATE transport_task
+        SET status='FAILED', failed_at=#{failedAt}
+        WHERE id=#{id}
+          AND status='MOVING_TO_PICKUP'
+          AND measurement_requested_at IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &lt;= #{expiredBefore}
+    </update>
     <select id="findPendingMeasurementByCargoId" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
         WHERE cargo_id=#{cargoId} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
