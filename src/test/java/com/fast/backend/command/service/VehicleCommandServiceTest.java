@@ -48,7 +48,7 @@ class VehicleCommandServiceTest {
         when(taskMapper.existsMeasurementLaneBusy()).thenReturn(false);
         when(taskMapper.updateStatusIfCurrent(
                 eq(7L), eq(TaskStatus.ASSIGNED), eq(TaskStatus.MOVING_TO_PICKUP),
-                any(LocalDateTime.class), eq(null), eq(null))).thenReturn(1);
+                any(LocalDateTime.class), eq(null))).thenReturn(1);
 
         service.issueCommand("FORKLIFT-01", new VehicleCommandRequest(
                 "MOVE", null, null,

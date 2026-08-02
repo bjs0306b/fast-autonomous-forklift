@@ -59,8 +59,8 @@ public class VehicleStatusService {
     private VehicleStatusResponse toResponse(VehicleCurrentStatus status) {
         return new VehicleStatusResponse(
                 status.getStatus(), status.getBattery(), status.getPositionX(), status.getPositionY(),
-                status.getPositionFrame(), status.getHeading(), status.getSpeed(), status.getForkHeight(),
-                status.getForkState(), status.getForkErrorCode(), status.getHasCargo(), status.getCargoId(),
+                status.getPositionFrame(), status.getHeading(), status.getSpeed(),
+                status.getHasCargo(), status.getCargoId(),
                 CommunicationTime.toOffset(status.getMessageAt()),
                 CommunicationTime.toOffset(status.getReceivedAt()));
     }

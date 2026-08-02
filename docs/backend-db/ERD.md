@@ -48,9 +48,6 @@ erDiagram
         varchar position_frame
         double heading
         double speed
-        double fork_height
-        varchar fork_state
-        varchar fork_error_code
         boolean has_cargo
         varchar cargo_id
         datetime message_at
@@ -84,7 +81,7 @@ erDiagram
         varchar status
         datetime assigned_at
         datetime started_at
-        datetime picked_up_at
+        datetime measurement_requested_at
         datetime completed_at
         datetime failed_at
         datetime created_at

@@ -28,7 +28,7 @@ class VehicleStatusTestControllerTest {
                 "ACTIVE", 82, 1.2, 3.4, 90.0, 0.4, messageAt);
         VehicleStatusResponse response = new VehicleStatusResponse(
                 VehicleStatus.ACTIVE, 82, null, null, null, null, null,
-                null, null, null, null, null, messageAt, messageAt);
+                null, null, messageAt, messageAt);
         when(service.updateCurrentStatus(eq("FORKLIFT-01"), any())).thenReturn(response);
 
         assertThat(controller.updateStatus("FORKLIFT-01", request).getData()).isEqualTo(response);

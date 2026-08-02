@@ -14,6 +14,7 @@
 → AI 측정 프로그램이 1회 촬영·추론
 → AI 측정 프로그램이 최종 결과를 REST로 등록
 → 백엔드가 적재 위치를 선택·예약하고 작업을 PICKING_UP으로 전환
+→ AI의 기존 세션 종료 DELETE는 이미 자동 해제된 세션으로 안전하게 처리
 ```
 
 작업 상태는 `ASSIGNED → MOVING_TO_PICKUP → MEASURING → PICKING_UP` 순서로 진행한다. 측정 결과가 안전 조건을 만족하지 않거나 빈 적재 위치가 없으면 `FAILED`로 종료한다.
@@ -65,6 +66,15 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 
 현재 AI의 `trigger.py`, `serve.py`, `rest_client.py` 세션 생성 흐름을 그대로 사용한다.
 
+### TTL 실패 처리
+
+- 백엔드가 측정 요청을 발행하면 `transport_task.measurement_requested_at`을 기록한다.
+- 설정된 TTL 안에 AI가 세션을 열지 않으면 작업을 `FAILED`로 종료한다.
+- AI가 세션을 열었지만 TTL 안에 최종 결과를 저장하지 못해도 세션을 자동 해제하고 작업을 `FAILED`로 종료한다.
+- 실패한 작업은 재측정하지 않으며 다음 대기 작업이 측정 차선을 사용할 수 있다.
+- 정리 주기는 `STATION_SESSION_CLEANUP_INTERVAL_MS`(기본 5초), TTL은
+  `STATION_SESSION_TTL_SECONDS`(기본 60초)로 설정한다.
+
 ### 최종 결과 등록
 
 AI 측정 프로그램은 세션 생성 API에서 받은 `sessionId`를 그대로 사용해 `POST /api/stations/measurements`로 결과를 등록한다.
@@ -84,6 +94,8 @@ AI 측정 프로그램은 세션 생성 API에서 받은 `sessionId`를 그대�
 - `status`: `ok`, `dimensions_only`, `no_detection`, `unreliable`
 - `ok`일 때 `tippingLevel`과 `overhangRatio`가 필수다.
 - `sessionId`가 현재 활성 세션과 다르면 백엔드는 이전 화물의 늦은 결과로 판단해 거부한다.
+- AI의 기존 `DELETE /api/stations/sessions/{sessionId}` 호출은 유지한다. 결과 저장으로 이미 자동 해제된
+  경우 백엔드는 `STATION_SESSION_NOT_ACTIVE`를 반환하고 AI는 이를 정상 종료로 처리한다.
 
 ## Isaac Sim 담당 계약
 
@@ -105,4 +117,5 @@ AI 측정 프로그램은 세션 생성 API에서 받은 `sessionId`를 그대�
 - AI가 세션을 생성하면 같은 `cargoId`의 측정 대기 작업에 연결한다.
 - `transport_task.measurement_session_id`로 측정 결과의 대상 작업을 확정한다.
 - 측정 요청 실패, MOVE 실패, 부적합 측정 결과는 작업을 `FAILED`로 종료한다.
+- 측정 요청 또는 활성 측정 세션이 TTL을 넘으면 작업을 `FAILED`로 종료하고 차선을 자동 해제한다.
 - AI 측정 결과는 MQTT가 아니라 REST 한 경로로만 받는다.

@@ -33,6 +33,8 @@ class StationMeasurementRequestWorkflowTest {
         task.setVehicleId("FORKLIFT-01");
         task.setStatus(TaskStatus.MOVING_TO_PICKUP);
         when(taskMapper.findById(7L)).thenReturn(Optional.of(task));
+        when(taskMapper.markMeasurementRequested(org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.any())).thenReturn(1);
 
         VehicleCommand command = new VehicleCommand();
         command.setCommandId("COMMAND-01");

@@ -11,9 +11,6 @@
         <result property="positionFrame" column="position_frame"/>
         <result property="heading" column="heading"/>
         <result property="speed" column="speed"/>
-        <result property="forkHeight" column="fork_height"/>
-        <result property="forkState" column="fork_state"/>
-        <result property="forkErrorCode" column="fork_error_code"/>
         <result property="hasCargo" column="has_cargo"/>
         <result property="cargoId" column="cargo_id"/>
         <result property="messageAt" column="message_at"/>
@@ -22,7 +19,7 @@
 
     <sql id="columns">
         vehicle_id, status, battery, position_x, position_y, position_frame, heading, speed,
-        fork_height, fork_state, fork_error_code, has_cargo, cargo_id, message_at, received_at
+        has_cargo, cargo_id, message_at, received_at
     </sql>
 
     <select id="findByVehicleId" resultMap="result">

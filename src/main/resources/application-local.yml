@@ -19,7 +19,7 @@ mqtt:
   enabled: ${MQTT_ENABLED:true}
   test-api:
     enabled: ${MQTT_TEST_API_ENABLED:false}
-  broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
+  broker-url: ${MQTT_BROKER_URL:tcp://70.12.130.106:1883}
   username: ${MQTT_USERNAME:}
   password: ${MQTT_PASSWORD:}
   inbound-client-id: ${MQTT_INBOUND_CLIENT_ID:fast-backend-inbound}

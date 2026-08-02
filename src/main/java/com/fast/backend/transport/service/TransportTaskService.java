@@ -117,7 +117,6 @@ public class TransportTaskService {
 
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime startedAt = target == TaskStatus.MOVING_TO_PICKUP ? now : null;
-        LocalDateTime pickedUpAt = target == TaskStatus.PICKING_UP ? now : null;
         LocalDateTime completedAt = target == TaskStatus.COMPLETED ? now : null;
         LocalDateTime failedAt = target == TaskStatus.FAILED ? now : null;
 
@@ -136,7 +135,7 @@ public class TransportTaskService {
         }
 
         if (transportTaskMapper.updateStatus(
-                taskCode, target, startedAt, pickedUpAt, completedAt, failedAt) != 1) {
+                taskCode, target, startedAt, completedAt, failedAt) != 1) {
             throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION);
         }
         return getDetail(taskCode);

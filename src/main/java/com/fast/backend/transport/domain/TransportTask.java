@@ -19,7 +19,7 @@ public class TransportTask {
     private TaskStatus status;
     private LocalDateTime assignedAt;
     private LocalDateTime startedAt;
-    private LocalDateTime pickedUpAt;
+    private LocalDateTime measurementRequestedAt;
     private LocalDateTime completedAt;
     private LocalDateTime failedAt;
     private LocalDateTime createdAt;
@@ -52,8 +52,10 @@ public class TransportTask {
     public void setAssignedAt(LocalDateTime assignedAt) { this.assignedAt = assignedAt; }
     public LocalDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
-    public LocalDateTime getPickedUpAt() { return pickedUpAt; }
-    public void setPickedUpAt(LocalDateTime pickedUpAt) { this.pickedUpAt = pickedUpAt; }
+    public LocalDateTime getMeasurementRequestedAt() { return measurementRequestedAt; }
+    public void setMeasurementRequestedAt(LocalDateTime measurementRequestedAt) {
+        this.measurementRequestedAt = measurementRequestedAt;
+    }
     public LocalDateTime getCompletedAt() { return completedAt; }
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
     public LocalDateTime getFailedAt() { return failedAt; }
@@ -63,7 +65,8 @@ public class TransportTask {
 
     /** 별도 updated_at 없이 대시보드에 제공하는 최신 작업 상태 변경 시각. */
     public LocalDateTime getUpdatedAt() {
-        return Stream.of(completedAt, failedAt, pickedUpAt, startedAt, assignedAt, createdAt)
+        return Stream.of(completedAt, failedAt, measurementRequestedAt,
+                        startedAt, assignedAt, createdAt)
                 .filter(java.util.Objects::nonNull).max(LocalDateTime::compareTo).orElse(null);
     }
 }

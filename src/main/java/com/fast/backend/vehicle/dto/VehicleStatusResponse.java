@@ -12,9 +12,6 @@ public record VehicleStatusResponse(
         String positionFrame,
         Double heading,
         Double speed,
-        Double forkHeight,
-        String forkState,
-        String forkErrorCode,
         Boolean hasCargo,
         String cargoId,
         OffsetDateTime messageAt,
@@ -22,7 +19,8 @@ public record VehicleStatusResponse(
 ) {
     public static VehicleStatusResponse unknown() {
         return new VehicleStatusResponse(
-                VehicleStatus.UNKNOWN, null, null, null, null, null, null,
-                null, null, null, null, null, null, null);
+                VehicleStatus.UNKNOWN,
+                null, null, null, null, null, null,
+                null, null, null, null);
     }
 }

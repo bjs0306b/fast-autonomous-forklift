@@ -16,7 +16,7 @@
         <result property="status" column="status"/>
         <result property="assignedAt" column="assigned_at"/>
         <result property="startedAt" column="started_at"/>
-        <result property="pickedUpAt" column="picked_up_at"/>
+        <result property="measurementRequestedAt" column="measurement_requested_at"/>
         <result property="completedAt" column="completed_at"/>
         <result property="failedAt" column="failed_at"/>
         <result property="createdAt" column="created_at"/>
@@ -24,7 +24,8 @@
     <sql id="columns">
         id, task_code, cargo_id, measurement_session_id, measurement_id, vehicle_id, destination_slot_code,
         destination_x, destination_y, destination_heading, fork_height, status,
-        assigned_at, started_at, picked_up_at, completed_at, failed_at, created_at
+        assigned_at, started_at, measurement_requested_at,
+        completed_at, failed_at, created_at
     </sql>
     <sql id="activeStatuses">('ASSIGNED','MOVING_TO_PICKUP','MEASURING','PICKING_UP','TRANSPORTING','PLACING')</sql>
 
@@ -33,11 +34,13 @@
         INSERT INTO transport_task
             (task_code, cargo_id, measurement_session_id, measurement_id, vehicle_id, destination_slot_code,
              destination_x, destination_y, destination_heading, fork_height, status,
-             assigned_at, started_at, picked_up_at, completed_at, failed_at, created_at)
+             assigned_at, started_at, measurement_requested_at,
+             completed_at, failed_at, created_at)
         VALUES
             (#{taskCode}, #{cargoId}, #{measurementSessionId}, #{measurementId}, #{vehicleId}, #{destinationSlotCode},
              #{destinationX}, #{destinationY}, #{destinationHeading}, #{forkHeight}, #{status},
-             #{assignedAt}, #{startedAt}, #{pickedUpAt}, #{completedAt}, #{failedAt}, #{createdAt})
+             #{assignedAt}, #{startedAt}, #{measurementRequestedAt},
+             #{completedAt}, #{failedAt}, #{createdAt})
     </insert>
     <select id="findById" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task WHERE id=#{id}
@@ -74,7 +77,6 @@
     <update id="updateStatus">
         UPDATE transport_task SET status=#{status},
         <if test="startedAt != null">started_at=#{startedAt},</if>
-        <if test="pickedUpAt != null">picked_up_at=#{pickedUpAt},</if>
         <if test="completedAt != null">completed_at=#{completedAt},</if>
         <if test="failedAt != null">failed_at=#{failedAt},</if>
         task_code=task_code
@@ -83,7 +85,6 @@
     <update id="updateStatusIfCurrent">
         UPDATE transport_task SET status=#{targetStatus},
         <if test="startedAt != null">started_at=#{startedAt},</if>
-        <if test="pickedUpAt != null">picked_up_at=#{pickedUpAt},</if>
         <if test="failedAt != null">failed_at=#{failedAt},</if>
         task_code=task_code
         WHERE id=#{id} AND status=#{expectedStatus}
@@ -104,6 +105,20 @@
         SET measurement_session_id=#{sessionId}, status='MEASURING'
         WHERE id=#{id} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
     </update>
+    <update id="markMeasurementRequested">
+        UPDATE transport_task
+        SET measurement_requested_at=#{measurementRequestedAt}
+        WHERE id=#{id}
+          AND status='MOVING_TO_PICKUP'
+          AND measurement_requested_at IS NULL
+    </update>
+    <select id="findExpiredMeasurementRequests" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='MOVING_TO_PICKUP'
+          AND measurement_requested_at IS NOT NULL
+          AND measurement_requested_at &lt;= #{expiredBefore}
+        ORDER BY measurement_requested_at, id
+    </select>
     <select id="findPendingMeasurementByCargoId" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
         WHERE cargo_id=#{cargoId} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL

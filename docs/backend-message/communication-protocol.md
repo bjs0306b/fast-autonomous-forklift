@@ -16,6 +16,7 @@
 
 - MQTT v3, QoS 1, retained false
 - 브로커: `MQTT_BROKER_URL` 환경변수로 주입
+- 개발 기본값: `tcp://70.12.130.106:1883` (AI 측정 프로그램 기본 브로커와 동일)
 - 차량 식별자는 토픽의 `{vehicleId}`와 payload 식별자가 같아야 한다.
 - 측정 결과는 `measurementId`, 차량 명령은 `commandId`로 중복을 방지한다.
 - 잘못된 JSON 또는 지원하지 않는 토픽은 저장하지 않고 로그만 남긴다.

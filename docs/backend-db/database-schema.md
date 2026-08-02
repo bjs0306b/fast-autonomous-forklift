@@ -72,7 +72,6 @@
 | `status`, `battery` | 주행 상태와 배터리 잔량 |
 | `position_x`, `position_y`, `position_frame` | 최신 위치와 좌표계 |
 | `heading`, `speed` | 진행 방향과 속도 |
-| `fork_height`, `fork_state`, `fork_error_code` | 최신 포크 상태 |
 | `has_cargo`, `cargo_id` | 차량이 보고한 화물 적재 상태 |
 | `message_at` | 위치 생산 시각. stale 위치 차단에만 사용 |
 | `received_at` | 마지막으로 수락한 메시지의 백엔드 수신 시각 |
@@ -105,7 +104,8 @@
 | `destination_slot_code` | 측정 완료 후 선택한 적재 위치. 측정 전에는 null |
 | `destination_x`, `destination_y`, `destination_heading`, `fork_height` | 측정 완료 시점의 목적지 스냅샷. 측정 전에는 null |
 | `status` | 작업 진행 상태 |
-| `assigned_at` ~ `failed_at`, `created_at` | 상태별 이력 시각 |
+| `measurement_requested_at` | AI 측정 요청 발행 시각. 세션 미생성 상태의 TTL 실패 기준 |
+| `assigned_at`, `started_at`, `completed_at`, `failed_at`, `created_at` | 주요 상태별 이력 시각 |
 
 작업은 측정 전에 생성된다. MOVE 성공 후 AI가 측정 세션을 생성하면 `measurement_session_id`가 연결되고, 최종 측정 결과가 적합할 때 목적지 예약과 스냅샷 저장을 함께 처리한다. 목적지 스냅샷은 슬롯 설정이 나중에 바뀌어도 이미 생성된 작업의 실행 목표를 보존한다.
 

@@ -72,9 +72,6 @@ CREATE TABLE IF NOT EXISTS vehicle_current_status (
     position_frame  VARCHAR(10) NULL COMMENT '좌표계(map 또는 odom)',
     heading         DOUBLE      NULL COMMENT '차량 진행 방향(degree)',
     speed           DOUBLE      NULL COMMENT '차량 속도(m/s)',
-    fork_height     DOUBLE      NULL COMMENT '현재 포크 높이(m)',
-    fork_state      VARCHAR(20) NULL COMMENT '포크 동작 상태',
-    fork_error_code VARCHAR(50) NULL COMMENT '포크 오류 코드',
     has_cargo       BOOLEAN     NULL COMMENT '화물 적재 여부',
     cargo_id        VARCHAR(50) NULL COMMENT '차량이 보고한 화물 식별자',
     message_at      DATETIME(6) NULL COMMENT '최신 위치 메시지 원본 발생 시각',
@@ -125,7 +122,7 @@ CREATE TABLE IF NOT EXISTS transport_task (
     status                VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '운반 작업 상태',
     assigned_at           DATETIME(6)  NULL COMMENT '차량 배정 시각',
     started_at            DATETIME(6)  NULL COMMENT '운반 작업 시작 시각',
-    picked_up_at          DATETIME(6)  NULL COMMENT '화물 픽업 완료 시각',
+    measurement_requested_at DATETIME(6) NULL COMMENT 'AI 측정 요청 발행 시각. TTL 실패 판정 기준',
     completed_at          DATETIME(6)  NULL COMMENT '운반 작업 완료 시각',
     failed_at             DATETIME(6)  NULL COMMENT '운반 작업 실패 시각',
     created_at            DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '운반 작업 생성 시각',
@@ -162,6 +159,7 @@ CREATE TABLE IF NOT EXISTS transport_task (
     CONSTRAINT fk_transport_task_slot
         FOREIGN KEY (destination_slot_code) REFERENCES storage_slot (slot_code),
     INDEX idx_transport_task_status (status),
+    INDEX idx_transport_task_measurement_timeout (status, measurement_requested_at),
     INDEX idx_transport_task_vehicle (vehicle_id),
     INDEX idx_transport_task_cargo_status (cargo_id, status),
     INDEX idx_transport_task_slot (destination_slot_code)

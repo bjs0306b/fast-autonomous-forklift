@@ -12,7 +12,7 @@ import java.time.Clock;
  * 측정 세션 설정 등록(prompt106).
  *
  * <p><b>{@link Clock} 을 빈으로 두는 이유</b>: TTL 만료 판정은 "지금이 몇 시인가"에 의존하는데,
- * {@code LocalDateTime.now()} 를 직접 부르면 테스트에서 10분을 실제로 기다리는 것 말고는 검증할
+ * {@code LocalDateTime.now()} 를 직접 부르면 테스트에서 TTL 시간을 실제로 기다리는 것 말고는 검증할
  * 방법이 없다. Clock 을 주입받으면 테스트가 {@link Clock#fixed} 로 시간을 앞뒤로 옮겨
  * 만료/미만료를 즉시 재현할 수 있다.
  *

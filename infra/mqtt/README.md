@@ -213,7 +213,7 @@ docker compose start mosquitto
 
 | 대상 | 변수 | 기본값 |
 |---|---|---|
-| Backend | `MQTT_BROKER_URL` | `tcp://localhost:1883` |
+| Backend | `MQTT_BROKER_URL` | `tcp://70.12.130.106:1883` |
 | Backend | `MQTT_USERNAME` / `MQTT_PASSWORD` | 빈 값(익명) |
 | Backend | `MQTT_INBOUND_CLIENT_ID` | `fast-backend-inbound` |
 | Backend | `MQTT_OUTBOUND_CLIENT_ID` | `fast-backend-outbound` |

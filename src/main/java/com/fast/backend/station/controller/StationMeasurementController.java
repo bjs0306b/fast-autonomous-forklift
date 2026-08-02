@@ -63,6 +63,17 @@ public class StationMeasurementController {
     }
 
     /**
+     * AI 측정 프로그램 호환 종료 API. 측정 저장 후 자동 해제된 세션은
+     * {@code STATION_SESSION_NOT_ACTIVE}로 응답하며 AI는 이를 이미 종료된 정상 상태로 처리한다.
+     * 측정 결과가 없는 활성 세션은 TTL이 처리하도록 종료를 거부한다.
+     */
+    @DeleteMapping("/sessions/{sessionId}")
+    public ApiResponse<Void> closeSession(@PathVariable String sessionId) {
+        stationMeasurementService.closeSession(sessionId);
+        return ApiResponse.success(null);
+    }
+
+    /**
      * 운영자 강제 해제. 측정 결과 존재 여부와 <b>무관하게</b> 설비 잠금을 푼다.
      *
      * <p>요청 sessionId 가 현재 점유 세션과 다르거나 이미 유휴면

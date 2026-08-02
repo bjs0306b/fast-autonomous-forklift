@@ -15,7 +15,7 @@ public record TransportTaskResponse(
         LocalDateTime createdAt,
         LocalDateTime assignedAt,
         LocalDateTime startedAt,
-        LocalDateTime pickedUpAt,
+        LocalDateTime measurementRequestedAt,
         LocalDateTime completedAt,
         LocalDateTime failedAt
 ) {
@@ -35,7 +35,8 @@ public record TransportTaskResponse(
                 task.getTaskCode(), task.getCargoId(), task.getMeasurementSessionId(),
                 task.getMeasurementId(), task.getVehicleId(),
                 task.getStatus(), placement,
-                task.getCreatedAt(), task.getAssignedAt(), task.getStartedAt(), task.getPickedUpAt(),
+                task.getCreatedAt(), task.getAssignedAt(), task.getStartedAt(),
+                task.getMeasurementRequestedAt(),
                 task.getCompletedAt(), task.getFailedAt());
     }
 }

@@ -7,7 +7,7 @@ import java.time.Duration;
 /**
  * 측정 세션 점유 정책 설정.
  *
- * <p>{@code ttlSeconds}: 세션 점유가 유효한 시간(초, 기본 600 = 10분). 측정 작업자가 정상 결과를
+ * <p>{@code ttlSeconds}: 세션 점유가 유효한 시간(초, 기본 60초). 측정 작업자가 정상 결과를
  * 보내지 못한 채 종료되면 세션 해제가 일어나지 않아 단일 설비
  * 잠금이 <b>영구히</b> 남는다. 이 시간이 지난 점유는 다음 {@code openSession} 이 회수한다.
  *
@@ -24,8 +24,8 @@ public record StationSessionProperties(
         Long ttlSeconds
 ) {
 
-    /** 설정을 비워 두었을 때 쓰는 기본 TTL(초). 10분. */
-    public static final long DEFAULT_TTL_SECONDS = 600L;
+    /** 설정을 비워 두었을 때 쓰는 기본 TTL(초). */
+    public static final long DEFAULT_TTL_SECONDS = 60L;
 
     /**
      * 상한. TTL 을 하루보다 길게 잡으면 "자동 복구"라는 기능의 의미가 사라져, 설정 오타(예: 초 단위

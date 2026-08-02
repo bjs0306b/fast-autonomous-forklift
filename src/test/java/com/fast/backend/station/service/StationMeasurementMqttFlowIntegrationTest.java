@@ -41,5 +41,22 @@ class StationMeasurementMqttFlowIntegrationTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(error -> ((BusinessException) error).getErrorCode())
                 .isEqualTo(ErrorCode.STATION_SESSION_NOT_ACTIVE);
+
+        // AI는 finally에서 기존 DELETE API를 한 번 더 호출한다. 자동 해제된 세션이므로
+        // SESSION_NOT_ACTIVE가 반환되고 AI는 이를 이미 닫힌 정상 상태로 처리한다.
+        assertThatThrownBy(() -> service.closeSession(session.getSessionId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.STATION_SESSION_NOT_ACTIVE);
+    }
+
+    @Test
+    void incompleteActiveSession_isNotClosedBeforeTtl() {
+        StationSession session = service.openSession("CARGO-INCOMPLETE");
+
+        assertThatThrownBy(() -> service.closeSession(session.getSessionId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.STATION_MEASUREMENT_NOT_COMPLETED);
     }
 }

@@ -45,6 +45,12 @@ public class StationMeasurementRequestWorkflow {
         }
 
         try {
+            LocalDateTime requestedAt = LocalDateTime.now();
+            if (taskMapper.markMeasurementRequested(task.getId(), requestedAt) != 1) {
+                log.warn("Station measurement request ignored: task state changed, taskId={}",
+                        task.getTaskCode());
+                return;
+            }
             requestPublisher.publish(new StationMeasureRequestMessage(task.getCargoId()));
             log.info("Station measurement requested: taskId={}, cargoId={}, vehicleId={}",
                     task.getTaskCode(), task.getCargoId(), task.getVehicleId());
@@ -59,11 +65,11 @@ public class StationMeasurementRequestWorkflow {
         LocalDateTime now = LocalDateTime.now();
         int updated = taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.FAILED,
-                null, null, now);
+                null, now);
         if (updated == 0) {
             taskMapper.updateStatusIfCurrent(
                     task.getId(), TaskStatus.MEASURING, TaskStatus.FAILED,
-                    null, null, now);
+                    null, now);
         }
     }
 }

@@ -101,7 +101,7 @@ public class TransportTaskMeasurementService {
     private void fail(TransportTask task, String reason) {
         taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.MEASURING, TaskStatus.FAILED,
-                null, null, LocalDateTime.now());
+                null, LocalDateTime.now());
         broadcaster.broadcastAfterCommit(
                 "TRANSPORT_TASK_FAILED", task.getTaskCode(), TaskStatus.FAILED.name(), task.getVehicleId());
         log.warn("Transport task failed after measurement: taskId={}, reason={}", task.getTaskCode(), reason);

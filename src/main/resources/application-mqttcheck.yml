@@ -18,7 +18,7 @@
 #   (@SpringBootTest 컨텍스트가 여러 개 뜰 때 clientId 충돌 방지). 그 차단이 바로
 #   "실제 연결"을 증명하지 못하게 만드는 원인이므로 별도 프로필이 필요하다.
 #
-# 실행 (브로커가 localhost:1883에서 실행 중이어야 함)
+# 실행 (기본 브로커는 AI와 같은 70.12.130.106:1883이며 환경변수로 재정의 가능)
 #   mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck"
 #
 # 주의
@@ -54,7 +54,7 @@ mqtt:
   # 검증 중 임의 토픽으로 손수 발행해 볼 수 있도록 테스트 API를 켠다.
   test-api:
     enabled: true
-  broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
+  broker-url: ${MQTT_BROKER_URL:tcp://70.12.130.106:1883}
   username: ${MQTT_USERNAME:}
   password: ${MQTT_PASSWORD:}
   # local 프로필과 다른 clientId를 쓴다 — 같은 clientId로 접속하면 먼저 붙어 있던

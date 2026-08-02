@@ -36,6 +36,7 @@ public enum ErrorCode {
     /** 활성 세션은 있는데 요청이 가리키는 세션과 다르다 — 해제된 옛 세션의 늦은 측정(prompt107). */
     STATION_SESSION_MISMATCH(HttpStatus.CONFLICT, "측정 요청의 세션이 현재 활성 세션과 일치하지 않습니다."),
     STATION_ALREADY_OCCUPIED(HttpStatus.CONFLICT, "측정 설비가 이미 다른 세션에 점유되어 있습니다."),
+    STATION_MEASUREMENT_NOT_COMPLETED(HttpStatus.CONFLICT, "측정 결과가 아직 저장되지 않아 세션을 종료할 수 없습니다."),
     /** 같은 세션에 이미 결과가 있다 — measurementId 중복(재전송)과 구분한다(5장). */
     STATION_SESSION_MEASUREMENT_ALREADY_EXISTS(HttpStatus.CONFLICT, "이 세션에는 이미 측정 결과가 저장되어 있습니다."),
 

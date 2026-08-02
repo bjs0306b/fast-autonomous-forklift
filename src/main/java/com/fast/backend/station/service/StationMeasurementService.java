@@ -132,6 +132,12 @@ public class StationMeasurementService {
         });
 
         if (before != null && before.isOccupied() && before.isExpired(expiredBefore)) {
+            // 스케줄러 실행 사이에 직접 새 세션이 만료 점유를 회수한 경우에도 이전 작업을 남기지 않는다.
+            transportTaskMapper.findByMeasurementSessionId(before.getActiveSessionId()).ifPresent(task ->
+                    transportTaskMapper.updateStatusIfCurrent(
+                            task.getId(), com.fast.backend.transport.domain.TaskStatus.MEASURING,
+                            com.fast.backend.transport.domain.TaskStatus.FAILED,
+                            null, now));
             // 정상 종료를 못 하고 죽은 세션을 회수한 경우다. 조용히 넘어가면 "왜 남의 세션이
             // 끊겼는지" 추적할 수 없으므로 WARN 으로 남긴다.
             log.warn("Station session expired and released: expiredSessionId={}, acquiredAt={}, "
@@ -143,6 +149,32 @@ public class StationMeasurementService {
         log.info("Station session acquired: sessionId={}, cargoId={}, acquiredAt={}",
                 sessionId, cargoId, now);
         return new StationSession(sessionId, cargoId);
+    }
+
+    /**
+     * 기존 AI 클라이언트가 측정 블록 종료 시 호출하는 호환 API다.
+     * 측정 결과 저장 시 세션은 이미 자동 해제되므로 일반적으로
+     * {@code STATION_SESSION_NOT_ACTIVE}가 반환되며, AI는 이를 정상 종료로 처리한다.
+     */
+    @Transactional
+    public void closeSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "sessionId 는 필수입니다.");
+        }
+
+        StationState state = sessionMapper.findStateForUpdate()
+                .orElseThrow(() -> new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE));
+        if (!state.isOccupied() || !sessionId.equals(state.getActiveSessionId())) {
+            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE,
+                    "이미 종료됐거나 현재 활성 세션이 아닙니다: " + sessionId);
+        }
+        if (!measurementMapper.existsBySessionId(sessionId)) {
+            throw new BusinessException(ErrorCode.STATION_MEASUREMENT_NOT_COMPLETED,
+                    "측정 결과가 없는 활성 세션은 TTL 만료 시 자동 종료됩니다: " + sessionId);
+        }
+        if (sessionMapper.releaseStation(sessionId) != 1) {
+            throw new BusinessException(ErrorCode.STATION_SESSION_NOT_ACTIVE);
+        }
     }
 
     /**

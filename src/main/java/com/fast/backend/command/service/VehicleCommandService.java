@@ -89,7 +89,7 @@ public class VehicleCommandService {
             if (linkedTask != null) {
                 transportTaskMapper.updateStatusIfCurrent(
                         linkedTask.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.FAILED,
-                        null, null, CommunicationTime.toLocal(issuedAt));
+                        null, CommunicationTime.toLocal(issuedAt));
             }
         }
         commandMapper.update(entity);
@@ -123,7 +123,7 @@ public class VehicleCommandService {
         LocalDateTime now = LocalDateTime.now();
         if (transportTaskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP,
-                now, null, null) != 1) {
+                now, null) != 1) {
             throw new BusinessException(ErrorCode.INVALID_TASK_STATUS_TRANSITION);
         }
         task.setStatus(TaskStatus.MOVING_TO_PICKUP);

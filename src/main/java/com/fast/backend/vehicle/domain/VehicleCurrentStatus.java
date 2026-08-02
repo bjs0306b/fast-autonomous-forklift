@@ -23,14 +23,10 @@ public class VehicleCurrentStatus {
     /** degree, [0,360) 정규화된 값. */
     private Double heading;
     private Double speed;
-    /** 포크 높이(m). */
-    private Double forkHeight;
     /** 화물 적재 여부. */
     private Boolean hasCargo;
     /** 적재된 화물 식별자. */
     private String cargoId;
-    private String forkState;
-    private String forkErrorCode;
     /** 송신 측(ROS2/Isaac Sim, 또는 테스트 API 호출자)이 명시한 메시지 생성 시각. */
     private LocalDateTime messageAt;
     /** Spring Boot가 이 상태를 실제로 수신·반영한 시각. */
@@ -99,14 +95,6 @@ public class VehicleCurrentStatus {
         this.speed = speed;
     }
 
-    public Double getForkHeight() {
-        return forkHeight;
-    }
-
-    public void setForkHeight(Double forkHeight) {
-        this.forkHeight = forkHeight;
-    }
-
     public Boolean getHasCargo() {
         return hasCargo;
     }
@@ -122,14 +110,6 @@ public class VehicleCurrentStatus {
     public void setCargoId(String cargoId) {
         this.cargoId = cargoId;
     }
-
-    public String getForkState() { return forkState; }
-
-    public void setForkState(String forkState) { this.forkState = forkState; }
-
-    public String getForkErrorCode() { return forkErrorCode; }
-
-    public void setForkErrorCode(String forkErrorCode) { this.forkErrorCode = forkErrorCode; }
 
     public LocalDateTime getMessageAt() {
         return messageAt;

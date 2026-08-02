@@ -32,7 +32,6 @@ public interface TransportTaskMapper {
             @Param("taskCode") String taskCode,
             @Param("status") TaskStatus status,
             @Param("startedAt") LocalDateTime startedAt,
-            @Param("pickedUpAt") LocalDateTime pickedUpAt,
             @Param("completedAt") LocalDateTime completedAt,
             @Param("failedAt") LocalDateTime failedAt);
     int updateStatusIfCurrent(
@@ -40,7 +39,6 @@ public interface TransportTaskMapper {
             @Param("expectedStatus") TaskStatus expectedStatus,
             @Param("targetStatus") TaskStatus targetStatus,
             @Param("startedAt") LocalDateTime startedAt,
-            @Param("pickedUpAt") LocalDateTime pickedUpAt,
             @Param("failedAt") LocalDateTime failedAt);
     int completeMeasurement(
             @Param("id") Long id,
@@ -51,6 +49,11 @@ public interface TransportTaskMapper {
             @Param("destinationHeading") Double destinationHeading,
             @Param("forkHeight") Double forkHeight);
     int startMeasurement(@Param("id") Long id, @Param("sessionId") String sessionId);
+    int markMeasurementRequested(
+            @Param("id") Long id,
+            @Param("measurementRequestedAt") LocalDateTime measurementRequestedAt);
+    List<TransportTask> findExpiredMeasurementRequests(
+            @Param("expiredBefore") LocalDateTime expiredBefore);
     Optional<TransportTask> findPendingMeasurementByCargoId(String cargoId);
     Optional<TransportTask> findByMeasurementSessionId(String sessionId);
     int lockMeasurementLane();
