@@ -1,5 +1,23 @@
 # PROJECT IMPLEMENTATION AUDIT
 
+> # ⚠️ 2026-07-24 시점의 스냅샷이다 — 현재 상태가 아니다
+>
+> 감사 문서라 **내용은 그날 본 것 그대로 둔다**(고치면 기록으로서 가치가 없다).
+> 다만 아래 "없다" 판정들은 **이후 전부 해소됐으므로**, 이 문서를 근거로
+> "아직 안 돼 있다"고 판단하면 안 된다. 2026-08-03 확인:
+>
+> | 이 문서의 판정 | 현재 |
+> |---|---|
+> | "브로커 구축 산출물이 없다 — `docker-compose.yml`·`mosquitto.conf` 부재" | **있다.** `docker-compose.yml` · `Dockerfile.backend` · `infra/mqtt/`(config·compose·README) |
+> | "`ros2_ws`는 UART teleop 전용" | **아니다.** `ros2_ws/src/fast_mqtt_bridge` 가 있다 |
+> | "실제 ROS2 MQTT 발행 코드가 저장소에 없다" | **있다.** `fast_mqtt_bridge`(bridge_core·command_handler·dto·mqtt_policy) |
+>
+> 그 밖에 07-24 이후 바뀐 큰 것: 백엔드 **EC2 배포**(07-31) · 스테이션 측정
+> **MQTT → REST 전환**(07-31) · **MQTT 브로커 EC2 TLS 8883 일원화**(08-03,
+> GPU서버 브로커 폐지) · 백엔드 대규모 리팩터(08-02, -30,728줄).
+>
+> **현재 상태는 `CLAUDE.md` 와 `docs/` 를 볼 것.**
+
 ## 1. 조사 기준 경로
 
 `C:\SSAFY\fast-backend`

@@ -163,19 +163,29 @@ EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 
 로컬 개발용 Mosquitto뿐 아니라 팀이 공유하는 AWS EC2 Mosquitto Broker에도 코드 변경 없이 연결할 수 있도록,
 `application-local.yml`의 MQTT 접속 값을 환경변수로 오버라이드할 수 있게 구성했다.
 
+⚠️ **EC2 브로커는 평문 1883이 아니라 TLS 8883이다**(2026-08-03 정정). `allow_anonymous false`라
+계정 인증이 필수고, **EC2의 1883에는 아무것도 리스닝하지 않는다** — `tcp://...:1883`으로 적으면
+연결이 안 된다.
+
 ```env
-# 로컬 Spring Boot → EC2 공용 Broker
-MQTT_BROKER_URL=tcp://<EC2_PUBLIC_IP>:1883
+# 배포(EC2 도커) — 컨테이너끼리는 컨테이너명으로 붙는다. 현재 backend.env 의 실제 값이다.
+MQTT_BROKER_URL=ssl://fast-mosquitto:8883
 MQTT_USERNAME=<username>
 MQTT_PASSWORD=<password>
 
-# EC2에서 직접 실행하는 Spring Boot → 같은 EC2의 Broker
+# 도커 밖(AI 스테이션·ROS2)에서 붙을 때 — EC2 주소 + 8883 + CA 인증서
+#   ⚠️ 서버 인증서 SAN 이 IP 뿐이라 호스트명(i15a304.p.ssafy.io)으로는 검증에 실패한다.
+#      IP 로 붙거나, DNS SAN 을 넣어 인증서를 재발급해야 한다.
+
+# 로컬 개발 — 직접 띄운 브로커
 MQTT_BROKER_URL=tcp://localhost:1883
-MQTT_USERNAME=<username>
-MQTT_PASSWORD=<password>
 ```
 
-환경변수를 아무것도 설정하지 않으면 기존과 동일하게 `tcp://localhost:1883`(인증 없음)으로 접속한다.
+환경변수를 설정하지 않으면 `tcp://localhost:1883`(인증 없음)으로 접속한다.
+
+> ⚠️ 종전 기본값은 GPU서버 `tcp://70.12.130.106:1883` 이었는데, **그 브로커는 없어졌다**
+> (2026-08-03 GPU서버 학습 전용화). 죽은 주소로 기본값을 두면 발행이 **에러 없이 허공으로 간다** —
+> 실제로 측정 트리거가 통째로 사라진 적이 있다(S15P11A304-188·191).
 비밀번호는 코드/Git에 직접 작성하지 않고 실행 시점의 환경변수(`.env`, 쉘 환경변수, 배포 시크릿 등)로만 주입한다.
 
 EC2 Mosquitto 설치·설정 가이드, 보안 그룹 정책, 통합 테스트 절차, 재연결 테스트, 오류 점검표는
