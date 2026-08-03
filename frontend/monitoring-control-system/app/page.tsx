@@ -276,8 +276,14 @@ export default function MonitoringPage() {
           />
         </div>
 
-        {/* 우측: 상세 패널(위) + 미니맵(아래) */}
-        <div className="grid min-h-0 grid-rows-2 gap-3">
+        {/*
+          우측: 상세 패널(위) + 미니맵(아래).
+
+          행 비율을 1:1(grid-rows-2)에서 2:3 으로 바꿨다. 미니맵의 지도는 20m x 30m 세로형이라
+          **높이가 곧 지도 크기**인데, 상세 패널은 내용이 고정적이라 절반을 다 쓰지 않았다.
+          남는 세로 공간을 지도로 넘긴다.
+        */}
+        <div className="grid min-h-0 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
           {loadState === "loading" && vehicles.length === 0 ? (
             <PanelSkeleton label="차량 정보를 불러오는 중…" />
           ) : (
@@ -292,15 +298,17 @@ export default function MonitoringPage() {
             />
           )}
 
+          {/* 차량이 0대여도 미니맵을 그대로 둔다 — 지도까지 사라지면 "맵이 깨졌나"로 오해하게 되고,
+              실제 원인(차량 미등록·대시보드 조회 실패)이 가려진다. 안내와 재조회는 미니맵 안에서 한다. */}
           {loadState === "loading" && vehicles.length === 0 ? (
             <PanelSkeleton label="미니맵을 불러오는 중…" />
-          ) : vehicles.length === 0 ? (
-            <EmptyVehiclesPanel onRetry={() => void loadDashboard()} />
           ) : (
             <MiniMap
               vehicles={vehicles}
               selectedVehicleId={selectedVehicleId}
               onSelectVehicle={setSelectedVehicleId}
+              realtimeStatus={realtimeStatus}
+              onRefresh={() => void loadDashboard()}
             />
           )}
         </div>
@@ -352,18 +360,6 @@ function PanelSkeleton({ label }: { label: string }) {
   )
 }
 
-function EmptyVehiclesPanel({ onRetry }: { onRetry: () => void }) {
-  return (
-    <section className="flex min-h-0 flex-col items-center justify-center gap-3 rounded-lg border border-slate-700 bg-[#0b1220] p-6 text-center">
-      <p className="text-xs text-slate-400">등록된 활성 차량이 없습니다.</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-      >
-        <RefreshCw className="size-3.5" aria-hidden="true" />
-        새로고침
-      </button>
-    </section>
-  )
-}
+// 차량 0대 안내는 MiniMap 안으로 옮겼다(지도를 지우지 않고 위에 얹는다).
+// 별도 패널 컴포넌트는 더 이상 쓰이지 않아 제거했다 — 호출되지 않는 컴포넌트가 남아 있으면
+// 다음 사람이 "이 화면도 뜨는구나"라고 오해한다.
