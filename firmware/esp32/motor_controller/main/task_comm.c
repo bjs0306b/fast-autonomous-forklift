@@ -25,6 +25,10 @@ static const char *TAG = "COMM_TASK";
 typedef enum {
     LIFT_ACTION_UP,
     LIFT_ACTION_DOWN,
+    /* Retract until the lower home switch is reached, not a fixed distance. */
+    LIFT_ACTION_HOME,
+    /* Center steering, stop traction, then run the lower-switch homing. */
+    LIFT_ACTION_INITIALIZE,
     LIFT_ACTION_STOP
 } lift_action_t;
 
@@ -221,6 +225,10 @@ static esp_err_t parse_lift_frame(
         action = LIFT_ACTION_UP;
     } else if (strcmp(action_text, "DOWN") == 0) {
         action = LIFT_ACTION_DOWN;
+    } else if (strcmp(action_text, "HOME") == 0) {
+        action = LIFT_ACTION_HOME;
+    } else if (strcmp(action_text, "INITIALIZE") == 0) {
+        action = LIFT_ACTION_INITIALIZE;
     } else if (strcmp(action_text, "STOP") == 0) {
         action = LIFT_ACTION_STOP;
     } else {
@@ -314,6 +322,27 @@ static esp_err_t apply_lift_command(const lift_command_t *command)
             return stepper_motor_extend();
         case LIFT_ACTION_DOWN:
             return stepper_motor_retract();
+        case LIFT_ACTION_HOME:
+            return stepper_motor_home();
+        case LIFT_ACTION_INITIALIZE: {
+            /*
+             * Route this through the motor task so PCA9685 access remains
+             * serialized. The ROS bridge holds its drive command at zero
+             * until this homing request reaches a terminal status.
+             */
+            motor_command_t safe_command = {
+                .drive_percent = 0,
+                .steering_cdeg = TELEOP_STEERING_CENTER_CDEG,
+                .sequence = command->sequence
+            };
+            esp_err_t result = motor_task_submit_command(&safe_command);
+
+            if (result != ESP_OK) {
+                return result;
+            }
+
+            return stepper_motor_home();
+        }
         case LIFT_ACTION_STOP:
             return stepper_motor_stop();
         default:
@@ -388,6 +417,7 @@ static void communication_task(void *argument)
     bool receiving_frame = false;
     bool lift_command_pending = false;
     bool lift_backoff_waiting = false;
+    bool lift_requires_home = false;
     uint32_t lift_sequence = 0;
     lift_action_t lift_action = LIFT_ACTION_STOP;
     TickType_t lift_backoff_deadline = 0;
@@ -471,6 +501,20 @@ static void communication_task(void *argument)
                             lift_sequence = command.sequence;
                             lift_action = command.action;
                             lift_backoff_waiting = false;
+                            lift_requires_home =
+                                command.action == LIFT_ACTION_HOME ||
+                                command.action == LIFT_ACTION_INITIALIZE;
+
+                            /*
+                             * HOME can complete synchronously when the fork
+                             * is already pressing the lower switch. Keep it
+                             * pending so the normal backoff still releases
+                             * the switch before DONE is reported.
+                             */
+                            if (lift_requires_home &&
+                                status.lower_limit_active) {
+                                lift_command_pending = true;
+                            }
                         }
                     }
 
@@ -520,6 +564,7 @@ static void communication_task(void *argument)
                 }
                 lift_command_pending = false;
                 lift_backoff_waiting = false;
+                lift_requires_home = false;
                 ESP_LOGE(TAG, "Lift lower-limit backoff failed: %s",
                          esp_err_to_name(result));
             }
@@ -534,9 +579,12 @@ static void communication_task(void *argument)
                          esp_err_to_name(result));
                 lift_command_pending = false;
             } else if (!status.busy) {
-                if (lift_action == LIFT_ACTION_DOWN &&
-                    status.lower_limit_active) {
+                if ((lift_action == LIFT_ACTION_DOWN ||
+                     lift_requires_home) && status.lower_limit_active) {
                     lift_backoff_waiting = true;
+                    /* The home switch was reached; after backoff this is a
+                     * normal completion, not another homing result check. */
+                    lift_requires_home = false;
                     lift_backoff_deadline =
                         xTaskGetTickCount() +
                         pdMS_TO_TICKS(
@@ -547,6 +595,12 @@ static void communication_task(void *argument)
                         "RUNNING",
                         &status
                     );
+                } else if (lift_requires_home) {
+                    send_lift_status(lift_sequence, "ERROR", &status);
+                    lift_command_pending = false;
+                    lift_requires_home = false;
+                    ESP_LOGE(TAG,
+                             "Homing failed before lower limit was reached");
                 } else {
                     send_lift_status(lift_sequence, "DONE", &status);
                     lift_command_pending = false;

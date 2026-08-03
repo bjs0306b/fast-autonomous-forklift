@@ -89,6 +89,7 @@ class UartTeleopBridge(Node):
         self._last_twist: Optional[Twist] = None
         self._last_twist_time: Optional[float] = None
         self._pending_lift_commands = deque(maxlen=8)
+        self._initializing_fork = False
 
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self._subscription = self.create_subscription(
@@ -128,16 +129,18 @@ class UartTeleopBridge(Node):
 
     def _on_fork_command(self, message: String) -> None:
         action = message.data.strip().upper()
-        if action not in {"UP", "DOWN", "STOP"}:
+        if action not in {"UP", "DOWN", "HOME", "INITIALIZE", "STOP"}:
             self.get_logger().warning(
                 f"Rejected fork command {message.data!r}; "
-                "expected UP, DOWN, or STOP"
+                "expected UP, DOWN, HOME, INITIALIZE, or STOP"
             )
             return
         if len(self._pending_lift_commands) == self._pending_lift_commands.maxlen:
             self.get_logger().warning("Fork command queue is full")
             return
         self._pending_lift_commands.append(action)
+        if action == "INITIALIZE":
+            self._initializing_fork = True
 
     def _ensure_serial(self, now: float) -> bool:
         if self._serial is not None and self._serial.is_open:
@@ -172,6 +175,8 @@ class UartTeleopBridge(Node):
         self._serial = None
 
     def _current_command(self, now: float):
+        if self._initializing_fork:
+            return map_twist(0.0, 0.0, self._limits)
         if (
             self._last_twist is None
             or self._last_twist_time is None
@@ -213,6 +218,11 @@ class UartTeleopBridge(Node):
                         separators=(",", ":"),
                     )
                     self._fork_status_publisher.publish(message)
+                    if (
+                        self._initializing_fork
+                        and status.state in {"DONE", "ERROR"}
+                    ):
+                        self._initializing_fork = False
                     self.get_logger().info(
                         "Fork status: "
                         f"sequence={status.sequence}, "

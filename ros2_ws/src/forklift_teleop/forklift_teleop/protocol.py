@@ -58,8 +58,10 @@ def encode_lift_command(sequence: int, action: str) -> bytes:
     if not 0 <= sequence <= 0xFFFFFFFF:
         raise ValueError("sequence must fit uint32")
     normalized_action = action.strip().upper()
-    if normalized_action not in {"UP", "DOWN", "STOP"}:
-        raise ValueError("lift action must be UP, DOWN, or STOP")
+    if normalized_action not in {"UP", "DOWN", "HOME", "INITIALIZE", "STOP"}:
+        raise ValueError(
+            "lift action must be UP, DOWN, HOME, INITIALIZE, or STOP"
+        )
     return frame_body(f"LIFT,{sequence},{normalized_action}")
 
 

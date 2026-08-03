@@ -33,9 +33,16 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(body, "LIFT,9,UP")
         self.assertEqual(int(crc_text, 16), crc16_ccitt_false(body.encode()))
 
+    def test_encode_home_and_initialize_lift_commands(self):
+        self.assertIn(b"LIFT,10,HOME*", encode_lift_command(10, "home"))
+        self.assertIn(
+            b"LIFT,11,INITIALIZE*",
+            encode_lift_command(11, "initialize"),
+        )
+
     def test_encode_lift_rejects_unknown_action(self):
-        with self.assertRaisesRegex(ValueError, "UP, DOWN, or STOP"):
-            encode_lift_command(1, "home")
+        with self.assertRaisesRegex(ValueError, "INITIALIZE"):
+            encode_lift_command(1, "sideways")
 
     def test_sequence_increments_and_wraps(self):
         self.assertEqual(next_sequence(41), 42)
