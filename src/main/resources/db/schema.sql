@@ -83,6 +83,24 @@ CREATE TABLE IF NOT EXISTS vehicle_current_status (
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id)
 );
 
+-- 차량 상태 이력. vehicle_current_status가 차량당 1행(최신)만 유지하는 것과 달리, 정상 처리된 상태
+-- 메시지를 한 건씩 append-only로 쌓는다. 상태 메시지에 고유 식별자가 없어 UNIQUE 제약을 두지 않는다
+-- (같은 상태가 반복되는 heartbeat도 정상 이력이므로 중복 제약으로 누락시키지 않는다).
+CREATE TABLE IF NOT EXISTS vehicle_status_history (
+    history_id  BIGINT      NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '차량 상태 이력 식별자',
+    vehicle_id  VARCHAR(50) NOT NULL COMMENT '상태 대상 차량 식별자',
+    status      VARCHAR(20) NOT NULL COMMENT '수신 당시 차량 주행 상태',
+    battery     INT         NULL COMMENT '수신 당시 배터리 잔량(%)',
+    message_at  DATETIME(6) NULL COMMENT '차량 또는 브리지가 생성한 상태 메시지 시각',
+    received_at DATETIME(6) NOT NULL COMMENT '백엔드가 상태 메시지를 수신한 시각',
+    created_at  DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'DB 이력 생성 시각',
+    CONSTRAINT chk_vehicle_status_history_battery CHECK (battery IS NULL OR battery BETWEEN 0 AND 100),
+    CONSTRAINT fk_vehicle_status_history_vehicle
+        FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
+    INDEX idx_vehicle_status_history_vehicle_message (vehicle_id, message_at),
+    INDEX idx_vehicle_status_history_message (message_at)
+);
+
 CREATE TABLE IF NOT EXISTS storage_slot (
     slot_code           VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '적재 위치 식별자',
     usable_height       DOUBLE      NOT NULL COMMENT '수직 가용 높이(m)',
