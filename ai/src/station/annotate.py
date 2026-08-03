@@ -89,7 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="감지 오버레이 캡처 (발표·데모용)")
     parser.add_argument("--image", type=Path, help="카메라 대신 이미지 파일 사용")
     parser.add_argument("--distance", type=float, help="TF-Nova 대신 고정 거리(cm)")
-    parser.add_argument("--out", type=Path, default=Path("annotated.png"))
+    # 출력은 관례대로 **실행한 디렉터리**에 떨어진다(입력 파일과 달리 cwd 의존이
+    # 문제되지 않는다). 어디에 저장되는지는 실행 끝에 절대경로로 찍어 준다.
+    parser.add_argument("--out", type=Path, default=Path("annotated.png"),
+                        help="저장 경로 (기본: 현재 디렉터리의 annotated.png)")
     args = parser.parse_args(argv)
 
     cfg = StationConfig()

@@ -24,10 +24,16 @@ FULL = {
 }
 
 
-def test_필드_7개를_보낸다() -> None:
+def test_필드_6개를_보낸다() -> None:
+    """`measuredAt`은 2026-08-02 백엔드 리팩터로 DTO에서 제거됐다.
+
+    보내도 Spring이 조용히 버리지만(무해), 계약에 없는 필드를 계속 실어 보내면
+    "이 값이 어딘가 쓰인다"고 오해하게 된다. 저장 시각은 서버 `createdAt`이다.
+    """
     r = to_request(FULL, "sess-1")
     assert set(r) == {"sessionId", "measurementId", "status", "cargoHeight",
-                      "tippingLevel", "overhangRatio", "measuredAt"}
+                      "tippingLevel", "overhangRatio"}
+    assert "measuredAt" not in r
 
 
 def test_sessionId를_그대로_싣는다() -> None:
@@ -190,6 +196,8 @@ def test_세션을_측정_앞에_연다(monkeypatch, capsys) -> None:
     rc = serve.main(["--once", "--publish", "--cargo-id", "cargo-1",
                      "--image", "존재하지-않는-파일.jpg"])
     err = capsys.readouterr().err
-    assert rc == 1
+    # 3 = 세션을 못 열어 **시작조차 못 함**. 측정 실패(1)와 구분한다 —
+    # 운영자가 볼 곳이 다르다(설비 점유·백엔드 vs 화물 배치·조명). 2026-08-03 분리.
+    assert rc == 3
     assert "세션을 열 수 없어" in err
     assert "이미지를 읽을 수 없습니다" not in err

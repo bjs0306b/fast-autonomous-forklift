@@ -15,6 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# `ai/` 루트. 이 파일이 `ai/src/station/config.py` 이므로 parents[2] 가 `ai/` 다.
+# 모델·데이터 경로를 여기 기준으로 잡아 **실행 위치와 무관하게** 동작시킨다.
+_AI_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass(frozen=True)
 class CameraCalib:
@@ -55,7 +59,12 @@ class StationConfig:
     tfnova_seconds: float = 0.5
 
     # --- 모델 (ONNX, mmdeploy end2end: dets[x1,y1,x2,y2,score] + labels) ---
-    model_path: Path = Path("models/end2end.onnx")
+    # ⚠️ **cwd 에 의존하지 않는다.** 예전엔 `Path("models/end2end.onnx")` 상대경로라
+    #    `ai/` 밖에서 실행하면 죽었고, 오류가 onnxruntime 의 "Load model ... failed:
+    #    File doesn't exist" 라 "어디서 실행해야 하는지"가 드러나지 않았다(2026-08-03).
+    #    이 파일이 `ai/src/station/` 에 있으므로 parents[2] 가 `ai/` 다.
+    model_path: Path = field(
+        default_factory=lambda: _AI_ROOT / "models" / "end2end.onnx")
     input_size: int = 800   # 실험7(증강) end2end.onnx는 800 입력으로 export
     score_threshold: float = 0.5
     # 클래스별 임계 — 파렛트만 낮춘다. 검은 플라스틱 격자라 박스처럼 큰 단색면이 없어

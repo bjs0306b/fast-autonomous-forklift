@@ -149,10 +149,18 @@ class AlignTarget:
             # 깊이차 Δd = S·sinθ, 평균 깊이 d̄ = f·S·cosθ / span 이므로
             #   tanθ = 2f/span · yaw_signal
             # S(=중심 간격)가 약분돼 사라진다 — 간격 실측 오차에 둔감하다.
-            tan = 2 * focal_px / self.face.span * yaw_signal if self.face.span > 0 else 0.0
-            yaw_deg = math.degrees(math.atan(tan))
-            distance_mm = (focal_px * HOLE_SPACING_MM
-                           * math.cos(math.radians(yaw_deg)) / self.face.span)
+            # ⚠️ span 가드는 **두 줄 다** 필요하다. 예전엔 tan 에만 있어서, span == 0
+            #    이면 위는 안전하게 0을 내고 **아래가 ZeroDivisionError** 를 냈다.
+            #    span 은 두 구멍 center_x 의 차라, 검출이 겹치면 0이 될 수 있다.
+            if self.face.span > 0:
+                tan = 2 * focal_px / self.face.span * yaw_signal
+                yaw_deg = math.degrees(math.atan(tan))
+                distance_mm = (focal_px * HOLE_SPACING_MM
+                               * math.cos(math.radians(yaw_deg)) / self.face.span)
+            else:
+                # 거리를 추정할 근거가 없다. 0이나 임의값을 넣으면 제어가 그걸 믿고
+                # 움직이므로 **모른다는 사실을 그대로 넘긴다**(None).
+                yaw_deg = 0.0
 
         return AlignError(lateral_ratio=lateral, yaw_signal=yaw_signal,
                           approach_px=self.face.span,
