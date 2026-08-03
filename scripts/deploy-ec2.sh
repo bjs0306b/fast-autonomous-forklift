@@ -79,15 +79,41 @@ fail_and_rollback() {
 }
 
 # ── 동기화 ────────────────────────────────────────────────────────────────
-# --delete 로 삭제된 파일도 반영하되, 비밀값과 git 메타는 반드시 남긴다.
+# 레포 전체가 아니라 **배포에 필요한 경로만** 옮긴다.
+#
+# 이 레포에는 ai/·isaac_sim/·ros2_ws/·3d_model/·recovery/ 처럼 배포와 무관한
+# 대용량 디렉터리가 있다. 통째로 rsync 하면 배포 디렉터리가 부풀고 Docker 빌드
+# 컨텍스트(= 데몬으로 전송되는 양)가 같이 커진다. `.dockerignore` 가 일부를
+# 걸러주지만 목록이 어긋나면 조용히 새 나가므로, 애초에 **보낼 것만 나열**한다.
+#
+# 목록에 없는 항목은 배포 디렉터리에서 지우지 않는다 — `.env`·`backend.env`
+# (서버에만 있고 백업이 없는 비밀값)를 실수로 날리지 않기 위해서다.
+DEPLOY_PATHS=(
+    pom.xml mvnw .mvn src              # 백엔드 빌드
+    frontend/monitoring-control-system # 프론트 빌드
+    infra                              # mqtt-ca.crt
+    Dockerfile.backend
+    docker-compose.yml
+    .dockerignore
+    scripts/deploy-ec2.sh              # 서버에서 손으로 재실행할 수 있도록
+)
+
 log "작업본 → 배포 디렉터리 동기화"
-rsync -a --delete \
-    --exclude='.git/' \
-    --exclude='.env' \
-    --exclude='backend.env' \
-    --exclude='node_modules/' \
-    --exclude='target/' \
-    "$SRC_DIR"/ "$DEPLOY_DIR"/
+for p in "${DEPLOY_PATHS[@]}"; do
+    [ -e "$SRC_DIR/$p" ] || die "동기화 대상이 작업본에 없다: $p"
+    if [ -d "$SRC_DIR/$p" ]; then
+        mkdir -p "$DEPLOY_DIR/$p"
+        rsync -a --delete \
+            --exclude='node_modules/' \
+            --exclude='.next/' \
+            --exclude='target/' \
+            "$SRC_DIR/$p"/ "$DEPLOY_DIR/$p"/
+    else
+        mkdir -p "$(dirname "$DEPLOY_DIR/$p")"
+        rsync -a "$SRC_DIR/$p" "$DEPLOY_DIR/$p"
+    fi
+    echo "  $p"
+done
 
 cd "$DEPLOY_DIR"
 
