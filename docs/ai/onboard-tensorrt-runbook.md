@@ -40,7 +40,18 @@ RTMDet ONNX는 mmdeploy가 낸 커스텀 op(`TRTBatchedNMS`)를 쓰므로 **플�
 | `end2end_s640_trt.onnx` | 40MB | 07-29 | **TRT deploy config로 재-export.** 위와 크기는 같지만 md5가 다르다 — 재-export는 no-op이 아니다 |
 | `onboard_s640_fp16.engine` | 23MB | 07-29 | **현재 엔진.** 2클래스(box·pallet) 시절 산출물 |
 
-`onboard_s640_fp16.engine`은 **145 이전** 것이다. 3클래스(+hole) 모델이 나오면 다시 빌드해야 한다.
+`onboard_s640_fp16.engine`은 **145 이전** 것이다. ~~3클래스(+hole) 모델이 나오면 다시 빌드해야 한다.~~
+→ **완료.** 145가 낸 모델은 **`pallet`·`hole` 2클래스**(box는 폐기)이고, `epoch_116`으로
+`onboard_s640_ep116_fp16.engine`을 이미 빌드해 **G4(10.18ms)까지 통과**했다.
+
+> ⚠️ **온보드는 2클래스다.** 당초 3클래스(box·pallet·hole) 계획이었으나 2026-07-30에
+> **box를 폐기**했다 — exp8 프리라벨이 흰 파렛트를 box로 오인해(장당 2.4개) pallet
+> 검출을 해쳤다. `ai/data/labels/onboard_eval.json`의 어노테이션도 `pallet 105` ·
+> `hole 221` · **box 0건**이다.
+>
+> `ai/src/dataset/label_onboard.py`의 `CLASSES`가 아직 `["box","pallet","hole"]` 3슬롯
+> 이지만 box(id 1)는 **비어 있다.** 이 잔재 때문에 "3클래스" 기술이 여러 문서에
+> 남아 있었다(2026-08-03 정정).
 
 ## 4. 절차
 
@@ -172,6 +183,10 @@ cat /sys/class/thermal/thermal_zone*/temp   # 발열
 
 ## 7. 남은 일
 
-- [ ] 145 3클래스 모델로 재-export → 재빌드 → **G4 재측정**(§5 기록 항목 포함)
+- [x] ~~145 3클래스 모델로 재-export → 재빌드 → G4 재측정~~ → **완료**(2026-07-30).
+      145는 **2클래스**(`pallet`·`hole`) 모델이고, `epoch_116` 기준으로 재-export·재빌드해
+      **G4 10.18ms(97.8fps)** 로 통과했다. 엔진 `onboard_s640_ep116_fp16.engine`.
 - [ ] 07-29 빌드 명령 확정 — §4-③ 플래그를 실행으로 검증하고 이 문서에 반영
-- [ ] 런타임 통합: 180° 회전 + 플러그인 로드 + 카메라 1280×800 → 640 전처리
+- [x] ~~런타임 통합: 180° 회전 + 플러그인 로드 + 카메라 1280×800 → 640 전처리~~ →
+      **완료**(2026-07-30~31). `perception/trt_detector.py` + `scripts/onboard_live.py`,
+      젯슨 종단 실측 **44.96ms · 22.2fps**. 카메라는 젯슨에서 **1280×720**까지만 잡힌다.
