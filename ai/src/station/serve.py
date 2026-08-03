@@ -294,8 +294,11 @@ def main(argv: list[str] | None = None) -> int:
                         default=int(os.environ.get("STATION_MQTT_PORT", "8883")))
     # ⚠️ EC2 브로커는 `allow_anonymous false` + TLS 다. 셋 다 있어야 붙는다.
     #    비밀번호를 명령줄로 받지 않는 이유는 셸 이력·프로세스 목록에 남기 때문이다.
+    # CA 는 **레포 루트** `infra/` 에 있다(`ai/infra/` 아님). Dockerfile.backend 도
+    # 같은 경로를 COPY 하므로 백엔드·스테이션이 같은 인증서를 본다.
     parser.add_argument("--broker-ca", default=os.environ.get(
-                            "STATION_MQTT_CA", str(_AI_ROOT / "infra" / "mqtt-ca.crt")),
+                            "STATION_MQTT_CA",
+                            str(_AI_ROOT.parent / "infra" / "mqtt-ca.crt")),
                         help="브로커 CA 인증서 (환경변수 STATION_MQTT_CA). "
                              "빈 값이면 평문 접속")
     parser.add_argument("--topic", default="fast/station/measure_request",
