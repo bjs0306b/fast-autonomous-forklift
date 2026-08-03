@@ -34,6 +34,25 @@
         </foreach>
     </select>
 
+    <select id="findFirstAvailableIdleVehicleId" resultType="string">
+        SELECT v.vehicle_id
+        FROM vehicle v
+        JOIN vehicle_current_status s ON s.vehicle_id = v.vehicle_id
+        WHERE v.active = TRUE
+          AND s.status = 'IDLE'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM transport_task t
+              WHERE t.vehicle_id = v.vehicle_id
+                AND t.status IN (
+                    'ASSIGNED', 'MOVING_TO_PICKUP', 'MEASURING', 'PICKING_UP',
+                    'TRANSPORTING', 'PLACING'
+                )
+          )
+        ORDER BY v.vehicle_id ASC
+        LIMIT 1
+    </select>
+
     <!-- Status messages never change position/message_at. -->
     <insert id="upsert" parameterType="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
         INSERT INTO vehicle_current_status (vehicle_id, status, battery, received_at)

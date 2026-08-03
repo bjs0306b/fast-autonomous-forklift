@@ -12,6 +12,11 @@ import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.station.service.StationMeasurementService;
+import com.fast.backend.vehicle.domain.Vehicle;
+import com.fast.backend.vehicle.domain.VehicleCurrentStatus;
+import com.fast.backend.vehicle.domain.VehicleStatus;
+import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
+import com.fast.backend.vehicle.mapper.VehicleMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,6 +37,46 @@ class TransportTaskServiceIntegrationTest {
     @Autowired private StorageSlotMapper slotMapper;
     @Autowired private TransportTaskMapper taskMapper;
     @Autowired private StationMeasurementService measurementService;
+    @Autowired private TransportSchedulingService schedulingService;
+    @Autowired private VehicleMapper vehicleMapper;
+    @Autowired private VehicleCurrentStatusMapper vehicleStatusMapper;
+
+    @Test
+    void automaticScheduling_assignsOldestPendingTaskToIdleVehicle() {
+        LocalDateTime now = LocalDateTime.now();
+        insertCargo("CARGO-SCHEDULE-OLD", now);
+        insertCargo("CARGO-SCHEDULE-NEW", now);
+
+        TransportTask oldTask = pendingTask(
+                "TASK-SCHEDULE-OLD", "CARGO-SCHEDULE-OLD", now.minusMinutes(1));
+        TransportTask newTask = pendingTask(
+                "TASK-SCHEDULE-NEW", "CARGO-SCHEDULE-NEW", now);
+        taskMapper.insert(oldTask);
+        taskMapper.insert(newTask);
+
+        Vehicle vehicle = new Vehicle();
+        vehicle.setVehicleId("FORKLIFT-SCHEDULE");
+        vehicle.setName("자동 배정 테스트 차량");
+        vehicle.setActive(true);
+        vehicle.setCreatedAt(now);
+        vehicle.setUpdatedAt(now);
+        vehicleMapper.insert(vehicle);
+
+        VehicleCurrentStatus status = new VehicleCurrentStatus();
+        status.setVehicleId(vehicle.getVehicleId());
+        status.setStatus(VehicleStatus.IDLE);
+        status.setReceivedAt(now);
+        vehicleStatusMapper.upsert(status);
+
+        schedulingService.matchNext();
+
+        TransportTask assigned = taskMapper.findById(oldTask.getId()).orElseThrow();
+        TransportTask waiting = taskMapper.findById(newTask.getId()).orElseThrow();
+        assertThat(assigned.getStatus()).isEqualTo(TaskStatus.ASSIGNED);
+        assertThat(assigned.getVehicleId()).isEqualTo(vehicle.getVehicleId());
+        assertThat(waiting.getStatus()).isEqualTo(TaskStatus.PENDING);
+        assertThat(waiting.getVehicleId()).isNull();
+    }
 
     @Test
     void measurementResult_completesPendingPlacementAndOwnsReservation() {
@@ -75,5 +120,21 @@ class TransportTaskServiceIntegrationTest {
         StorageSlot reserved = slotMapper.findBySlotCode("SLOT-TRANSPORT").orElseThrow();
         assertThat(reserved.getStatus()).isEqualTo(StorageSlotStatus.RESERVED);
         assertThat(reserved.getReservedTaskId()).isEqualTo(task.getId());
+    }
+
+    private void insertCargo(String cargoId, LocalDateTime createdAt) {
+        Cargo cargo = new Cargo();
+        cargo.setCargoId(cargoId);
+        cargo.setCreatedAt(createdAt);
+        cargoMapper.insert(cargo);
+    }
+
+    private TransportTask pendingTask(String taskCode, String cargoId, LocalDateTime createdAt) {
+        TransportTask task = new TransportTask();
+        task.setTaskCode(taskCode);
+        task.setCargoId(cargoId);
+        task.setStatus(TaskStatus.PENDING);
+        task.setCreatedAt(createdAt);
+        return task;
     }
 }

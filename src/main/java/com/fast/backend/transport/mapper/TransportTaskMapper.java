@@ -13,6 +13,7 @@ public interface TransportTaskMapper {
     int insert(TransportTask task);
     Optional<TransportTask> findById(Long id);
     Optional<TransportTask> findByTaskCode(String taskCode);
+    Optional<TransportTask> findOldestPending();
     List<TransportTask> findAll(
             @Param("status") TaskStatus status,
             @Param("vehicleId") String vehicleId,

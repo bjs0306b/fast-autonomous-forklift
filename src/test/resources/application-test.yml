@@ -48,3 +48,7 @@ vehicle:
 
 websocket:
   allowed-origin-patterns: "*"
+
+transport:
+  scheduling:
+    enabled: false
