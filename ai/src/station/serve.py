@@ -450,6 +450,20 @@ def main(argv: list[str] | None = None) -> int:
     # 0.8초라 측정 예산(≤1초)을 넘긴다.
     from station.trigger import MeasureTrigger, wait_until_still
 
+    # **백엔드를 트리거보다 먼저 확인한다.** 안 그러면 신호를 받은 **뒤에야** 백엔드가
+    # 안 닿는 걸 알게 되고, 그 신호는 그대로 날아간다(재발행이 없다). 2026-08-03에
+    # `STATION_API_BASE` 미설정으로 localhost 를 찌르다 트리거를 하나 잃었다.
+    backend = base_url_of(None)
+    try:
+        active_session()
+        print(f"[listen] 백엔드 {backend} ✅")
+    except Exception as e:
+        print(f"[listen] ❌ 백엔드 연결 실패 {backend} — {e}", file=sys.stderr)
+        if "localhost" in backend:
+            print("  `STATION_API_BASE` 가 설정되지 않아 기본값(localhost)을 씁니다. "
+                  "레포 루트 `.env` 에 배포 주소를 넣으세요.", file=sys.stderr)
+        return 1
+
     # **브로커를 카메라보다 먼저 연결한다.** 주소·포트가 틀렸으면 하드웨어를 잡기 전에
     # 실패하는 편이 낫다 — 카메라를 열어놓고 죽으면 다른 프로세스가 못 쓴다.
     # 비밀번호는 환경변수로만 받는다 — 명령줄은 셸 이력·프로세스 목록에 남는다.
