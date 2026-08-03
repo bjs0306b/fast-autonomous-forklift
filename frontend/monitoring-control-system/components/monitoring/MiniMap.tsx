@@ -80,6 +80,8 @@ const REALTIME_BADGE: Record<RealtimeConnectionStatus, { label: string; classNam
  *   안에서만 퍼센트 좌표를 계산하므로, 패널 크기가 변해도 마커가 배경과 어긋나지 않는다.
  * - **차량이 0대여도 배경은 항상 그린다.** 지도가 사라지면 "이미지 문제인가?"로 오해하기 쉽다.
  * - 마커 클릭 시 팝업 없이 onSelectVehicle(vehicleId) 만 호출한다(기존 동작 유지).
+ * - 통합 관제 패널의 상단 지도 영역으로 사용된다. 지도 기준 박스의 비율과 좌표 변환은 그대로
+ *   유지하므로 패널이 넓어져도 지도가 왜곡되지 않는다.
  */
 export function MiniMap({
   vehicles,
@@ -109,14 +111,14 @@ export function MiniMap({
   return (
     <section
       className={cn(
-        // 지도가 세로형(20m x 30m)이라 카드 높이가 곧 지도 크기다. 그리드 행 높이에만 맡기면
-        // 뷰포트가 낮을 때 지도가 과하게 작아지므로 최소 높이를 두고, 부족하면 페이지가 스크롤되게 한다.
-        "flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220] md:min-h-[500px] lg:min-h-[600px]",
+        // 단독/세로 배치에서는 읽을 수 있는 최소 높이를 확보한다. 데스크톱 통합 패널에서는
+        // 호출부의 min-h-0/flex 비율이 이 값을 덮어써 남은 viewport 높이에 맞춰 줄어든다.
+        "flex h-full min-h-[280px] flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220] md:min-h-[360px] lg:min-h-[420px]",
         className,
       )}
       aria-label="창고 미니맵"
     >
-      <header className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-3 py-1.5">
         <span className="text-xs font-semibold text-slate-100">미니맵</span>
         <div className="flex items-center gap-1.5">
           {/* 위치 수신은 정보 배지다 — 0/N 이어도 오류처럼 붉게 표시하지 않는다. */}
@@ -144,9 +146,11 @@ export function MiniMap({
         </div>
       </header>
 
-      {/* 카드 본문: 남은 세로 공간을 전부 쓰고, 넘치는 것은 잘라낸다. */}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
-        {/* 지도 스테이지: 본문 전체를 덮고 그 안에서 지도를 가운데 정렬한다.
+      {/* 통합 패널의 지도 본문. */}
+      <div className="min-h-0 flex-1 overflow-hidden p-1.5">
+        {/* 지도 자체는 전체 너비 영역 안에서 비율을 지키며 커진다(가로로 늘리지 않는다). */}
+        <div className="relative h-full min-h-0 overflow-hidden">
+        {/* 지도 스테이지: 지도 영역 전체를 덮고 그 안에서 지도를 가운데 정렬한다.
             absolute 로 깔아야 부모 높이 계산에 지도가 영향을 주지 않아, 지도가 스스로를 작게 만드는
             순환(높이 → 비율 → 높이)이 생기지 않는다. */}
         <div className="absolute inset-0 flex items-center justify-center p-1">
@@ -199,8 +203,8 @@ export function MiniMap({
         </div>
 
         {/* 개발 모드 전용 진단 정보. 운영 번들에서는 이 분기 자체가 제거된다.
-            지도 위가 아니라 **지도 옆 여백**에 둔다 — 지도를 가리면 정작 확인하려던 마커 위치가 안 보인다.
-            (지도는 비율 고정이라 카드가 가로로 넓으면 좌우에 남는 공간이 생긴다) */}
+            지도 열 안의 남는 여백(지도는 비율 고정이라 열보다 좁을 수 있다)에 둔다 —
+            지도를 가리면 정작 확인하려던 마커 위치가 안 보인다. */}
         {process.env.NODE_ENV === "development" ? (
           <div className="pointer-events-none absolute right-1 top-1 max-w-[38%] overflow-hidden rounded bg-slate-950/85 px-1.5 py-1 font-mono text-[8px] leading-tight text-slate-400 ring-1 ring-slate-700/60">
             <div>
@@ -222,6 +226,8 @@ export function MiniMap({
             })}
           </div>
         ) : null}
+        </div>
+
       </div>
     </section>
   )

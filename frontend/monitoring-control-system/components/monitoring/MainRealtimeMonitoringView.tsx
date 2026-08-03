@@ -85,7 +85,7 @@ export function MainRealtimeMonitoringView({
     <div
       ref={containerRef}
       className={cn(
-        "relative min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220]",
+        "relative h-full min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220]",
         className,
       )}
       aria-label="디지털 트윈 실시간 영상 화면"

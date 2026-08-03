@@ -1,7 +1,5 @@
 package com.fast.backend.vehicle.dto;
 
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
 import java.time.OffsetDateTime;
@@ -17,7 +15,6 @@ import java.time.OffsetDateTime;
  */
 public record VehicleStatusUpdateRequest(
         @NotBlank String status,
-        @Min(0) @Max(100) Integer battery,
         Double positionX,
         Double positionY,
         Double heading,

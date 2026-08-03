@@ -71,13 +71,11 @@ class VehicleCurrentStatusMapperIntegrationTest {
         VehicleCurrentStatus status = new VehicleCurrentStatus();
         status.setVehicleId("FORKLIFT-STATUS");
         status.setStatus(VehicleStatus.IDLE);
-        status.setBattery(88);
         status.setReceivedAt(sourceTime.plusSeconds(2));
         statusMapper.upsert(status);
 
         VehicleCurrentStatus stored = statusMapper.findByVehicleId("FORKLIFT-STATUS").orElseThrow();
         assertThat(stored.getStatus()).isEqualTo(VehicleStatus.IDLE);
-        assertThat(stored.getBattery()).isEqualTo(88);
         assertThat(stored.getPositionX()).isEqualTo(7.0);
         assertThat(stored.getPositionY()).isEqualTo(8.0);
         assertThat(stored.getMessageAt()).isEqualTo(sourceTime);

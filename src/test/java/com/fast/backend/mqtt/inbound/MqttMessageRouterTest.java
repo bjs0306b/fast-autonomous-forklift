@@ -47,6 +47,7 @@ class MqttMessageRouterTest {
                 pathService, commandResultService);
     }
 
+    /** payload 의 battery 는 백엔드가 쓰지 않는 구형 필드다. 남겨 두어 구형 송신자 호환도 함께 확인한다. */
     @Test
     void vehicleIdMismatch_doesNotReachService() {
         router.route("forklift/FORKLIFT-1/status", """

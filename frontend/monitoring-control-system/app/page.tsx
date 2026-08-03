@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react"
+import { AlertTriangle, RefreshCw } from "lucide-react"
 import { MainRealtimeMonitoringView } from "@/components/monitoring/MainRealtimeMonitoringView"
 import { MiniMap } from "@/components/monitoring/MiniMap"
 import { VehicleDetailPanel } from "@/components/monitoring/VehicleDetailPanel"
@@ -9,7 +9,7 @@ import { GlobalEmergencyStopBar } from "@/components/monitoring/GlobalEmergencyS
 import { CommandNotice, type CommandNoticeState } from "@/components/monitoring/CommandNotice"
 import { useMonitoringDashboard } from "@/hooks/useMonitoringDashboard"
 import { useMonitoringSocket } from "@/hooks/useMonitoringSocket"
-import { emergencyStopAll, emergencyStopVehicle } from "@/lib/api/commandApi"
+import { emergencyStopAll, emergencyStopVehicle, stopVehicle } from "@/lib/api/commandApi"
 import { useIsaacSimStream } from "@/components/monitoring/IsaacSimStream"
 import type { RealtimeConnectionStatus, SelectedVehicleSummary } from "@/types/monitoring"
 
@@ -43,7 +43,7 @@ export default function MonitoringPage() {
   // --- FR-503 비상정지 상태 ---
   // 차량별 진행 중 명령(중복 클릭 방지). 차량 A 요청 중에도 차량 B 는 독립적으로 사용 가능하다.
   const [pendingCommandByVehicleId, setPendingCommandByVehicleId] = useState<
-    Record<string, "EMERGENCY_STOP" | null>
+    Record<string, "STOP" | "EMERGENCY_STOP" | null>
   >({})
   const [globalEmergencyStopPending, setGlobalEmergencyStopPending] = useState(false)
   const [notice, setNotice] = useState<CommandNoticeState | null>(null)
@@ -165,6 +165,51 @@ export default function MonitoringPage() {
     [pendingCommandByVehicleId, safeSet],
   )
 
+  /** 선택 차량 일반 정지. 발행 성공 뒤에도 상태는 WebSocket 수신 전까지 그대로 둔다. */
+  const handleStopVehicle = useCallback(
+    async (vehicleId: string) => {
+      if (pendingCommandByVehicleId[vehicleId]) return
+
+      setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: "STOP" }))
+      setNotice(null)
+      try {
+        const response = await stopVehicle(vehicleId)
+        if (response.status === "PUBLISHED") {
+          safeSet(setNotice, {
+            tone: "success",
+            message: `${vehicleId} 정지 명령을 전송했습니다.`,
+            detail: `commandId ${response.commandId} · 실제 상태는 차량 상태 이벤트로 갱신됩니다.`,
+          })
+        } else if (response.status === "PUBLISH_FAILED") {
+          safeSet(setNotice, {
+            tone: "error",
+            message: `${vehicleId} 정지 명령 발행에 실패했습니다.`,
+            detail:
+              response.resultMessage ??
+              "MQTT 브로커로 명령을 발행하지 못했습니다. 차량 상태를 확인해 주세요.",
+          })
+        } else {
+          safeSet(setNotice, {
+            tone: "warning",
+            message: `${vehicleId} 정지 명령 상태를 확인할 수 없습니다.`,
+            detail: `응답 status=${response.status ?? "null"}`,
+          })
+        }
+      } catch (error) {
+        safeSet(setNotice, {
+          tone: "error",
+          message: `${vehicleId} 정지 요청에 실패했습니다.`,
+          detail: error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.",
+        })
+      } finally {
+        if (mountedRef.current) {
+          setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: null }))
+        }
+      }
+    },
+    [pendingCommandByVehicleId, safeSet],
+  )
+
   /**
    * 전체 비상정지.
    *
@@ -229,12 +274,12 @@ export default function MonitoringPage() {
   }, [selectedVehicle])
 
   return (
-    <main className="flex min-h-svh w-full flex-col gap-3 bg-slate-950 p-3 text-slate-100">
-      <header className="flex items-center justify-between gap-3">
+    <main className="flex h-dvh w-full min-w-0 flex-col gap-[clamp(0.375rem,0.6vw,0.5rem)] overflow-hidden bg-slate-950 p-[clamp(0.5rem,0.7vw,0.75rem)] text-slate-100">
+      <header className="flex shrink-0 items-center justify-between gap-3">
         <div>
           <h1 className="text-base font-semibold text-balance">디지털 트윈 실시간 관제</h1>
           <p className="text-xs text-slate-400">
-            좌측 영상 · 우측 상세/미니맵 · 차량 상태·위치 실시간 연동(FR-402-1)
+            좌측 영상 · 우측 미니맵/상세 · 차량 상태·위치 실시간 연동(FR-402-1)
           </p>
         </div>
 
@@ -260,10 +305,10 @@ export default function MonitoringPage() {
         pending={globalEmergencyStopPending}
       />
 
-      {/* 관제 본문: 좌측 영상 / 우측 상세+미니맵 */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
+      {/* 관제 본문: 좌측 영상 / 우측 통합 차량 관제 패널 */}
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-[clamp(0.5rem,0.7vw,0.75rem)] overflow-y-auto lg:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)] lg:overflow-hidden">
         {/* 좌측: 디지털 트윈 영상 전용 영역 */}
-        <div className="flex min-h-0 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-col">
           <MainRealtimeMonitoringView
             streamStatus={streamStatus}
             streamError={streamError}
@@ -276,42 +321,43 @@ export default function MonitoringPage() {
           />
         </div>
 
-        {/*
-          우측: 상세 패널(위) + 미니맵(아래).
+        {/* 우측: 외곽선 하나 안에서 미니맵 → 차량 상세 순서로 이어지는 통합 패널. */}
+        <section
+          className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220]"
+          aria-label="차량 관제"
+          aria-busy={loadState === "loading"}
+        >
+          <header className="shrink-0 border-b border-slate-700 px-3 py-1.5">
+            <h2 className="text-sm font-semibold text-slate-100">차량 관제</h2>
+          </header>
 
-          행 비율을 1:1(grid-rows-2)에서 2:3 으로 바꿨다. 미니맵의 지도는 20m x 30m 세로형이라
-          **높이가 곧 지도 크기**인데, 상세 패널은 내용이 고정적이라 절반을 다 쓰지 않았다.
-          남는 세로 공간을 지도로 넘긴다.
-        */}
-        <div className="grid min-h-0 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
-          {loadState === "loading" && vehicles.length === 0 ? (
-            <PanelSkeleton label="차량 정보를 불러오는 중…" />
-          ) : (
+          {/* 데이터가 아직 없어도 지도와 빈 상세를 숨기지 않는다. */}
+          <MiniMap
+            vehicles={vehicles}
+            selectedVehicleId={selectedVehicleId}
+            onSelectVehicle={setSelectedVehicleId}
+            realtimeStatus={realtimeStatus}
+            onRefresh={() => void loadDashboard()}
+            className="min-h-0 flex-[0.75] overflow-hidden rounded-none border-0 bg-transparent"
+          />
+
+          <div className="min-h-0 flex-1 overflow-hidden border-t border-slate-700">
             <VehicleDetailPanel
               vehicle={selectedVehicle}
-              // STOP 은 아직 프론트 연결 계약이 없어 패널 내부에서 비활성으로 표시된다.
-              // 여기서 Mock 핸들러를 넘기지 않는다 — 호출되지 않는 핸들러는 오해만 남긴다.
+              onStop={(id) => void handleStopVehicle(id)}
               onEmergencyStop={(id) => void handleEmergencyStopVehicle(id)}
-              emergencyStopPending={
-                selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] != null : false
+              stopPending={
+                selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "STOP" : false
               }
+              emergencyStopPending={
+                selectedVehicleId
+                  ? pendingCommandByVehicleId[selectedVehicleId] === "EMERGENCY_STOP"
+                  : false
+              }
+              className="h-full min-h-0 rounded-none border-0 bg-transparent"
             />
-          )}
-
-          {/* 차량이 0대여도 미니맵을 그대로 둔다 — 지도까지 사라지면 "맵이 깨졌나"로 오해하게 되고,
-              실제 원인(차량 미등록·대시보드 조회 실패)이 가려진다. 안내와 재조회는 미니맵 안에서 한다. */}
-          {loadState === "loading" && vehicles.length === 0 ? (
-            <PanelSkeleton label="미니맵을 불러오는 중…" />
-          ) : (
-            <MiniMap
-              vehicles={vehicles}
-              selectedVehicleId={selectedVehicleId}
-              onSelectVehicle={setSelectedVehicleId}
-              realtimeStatus={realtimeStatus}
-              onRefresh={() => void loadDashboard()}
-            />
-          )}
-        </div>
+          </div>
+        </section>
       </div>
     </main>
   )
@@ -326,7 +372,7 @@ function DashboardErrorBanner({
 }) {
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2"
+      className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-1.5"
       role="alert"
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -344,19 +390,6 @@ function DashboardErrorBanner({
         다시 시도
       </button>
     </div>
-  )
-}
-
-function PanelSkeleton({ label }: { label: string }) {
-  return (
-    <section
-      className="flex min-h-0 flex-col items-center justify-center gap-2 rounded-lg border border-slate-700 bg-[#0b1220]"
-      aria-busy="true"
-      aria-live="polite"
-    >
-      <Loader2 className="size-6 animate-spin text-sky-400" aria-hidden="true" />
-      <p className="text-xs text-slate-400">{label}</p>
-    </section>
   )
 }
 

@@ -5,7 +5,6 @@
     <resultMap id="result" type="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
         <id property="vehicleId" column="vehicle_id"/>
         <result property="status" column="status"/>
-        <result property="battery" column="battery"/>
         <result property="positionX" column="position_x"/>
         <result property="positionY" column="position_y"/>
         <result property="positionFrame" column="position_frame"/>
@@ -18,7 +17,7 @@
     </resultMap>
 
     <sql id="columns">
-        vehicle_id, status, battery, position_x, position_y, position_frame, heading, speed,
+        vehicle_id, status, position_x, position_y, position_frame, heading, speed,
         has_cargo, cargo_id, message_at, received_at
     </sql>
 
@@ -55,11 +54,10 @@
 
     <!-- Status messages never change position/message_at. -->
     <insert id="upsert" parameterType="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
-        INSERT INTO vehicle_current_status (vehicle_id, status, battery, received_at)
-        VALUES (#{vehicleId}, #{status}, #{battery}, #{receivedAt})
+        INSERT INTO vehicle_current_status (vehicle_id, status, received_at)
+        VALUES (#{vehicleId}, #{status}, #{receivedAt})
         ON DUPLICATE KEY UPDATE
             status = VALUES(status),
-            battery = VALUES(battery),
             received_at = VALUES(received_at)
     </insert>
 

@@ -46,6 +46,11 @@ export interface DashboardVehicle {
   status: VehicleStatus
   location: DashboardLocation | null
   currentTask: DashboardCurrentTask | null
+  /** 적재 여부. null 은 "미적재"가 아니라 **확인할 근거가 없음**을 뜻한다. */
+  hasCargo: boolean | null
+  cargoId: string | null
+  /** 팔레트를 제외한 화물 높이(m). 측정 결과가 없으면 null. */
+  cargoHeight: number | null
   lastUpdatedAt: string | null
 }
 

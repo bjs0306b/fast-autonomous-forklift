@@ -33,7 +33,7 @@ export function GlobalEmergencyStopBar({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2",
+        "flex shrink-0 items-center justify-between gap-2 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-1.5",
         className,
       )}
       role="region"
@@ -58,7 +58,7 @@ export function GlobalEmergencyStopBar({
         aria-busy={pending}
         data-testid="global-estop-button"
         className={cn(
-          "inline-flex shrink-0 items-center gap-2 rounded-md px-4 py-2 text-sm font-bold tracking-wide text-white uppercase shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:outline-none",
+          "inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-bold tracking-wide text-white uppercase shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:outline-none",
           disabled ? "cursor-not-allowed bg-red-900/60 text-red-200/70" : "bg-red-600 hover:bg-red-500",
         )}
         title={activeVehicleCount === 0 ? "대상 활성 차량이 없습니다" : undefined}

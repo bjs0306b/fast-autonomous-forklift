@@ -33,11 +33,11 @@ class ForkliftStatusServiceTest {
     @Test
     void delegatesNormalizedStatusContract() {
         OffsetDateTime timestamp = OffsetDateTime.of(2026, 7, 21, 18, 0, 0, 0, ZoneOffset.ofHours(9));
-        service.handleStatus(new ForkliftStatusMessage("FORKLIFT-01", "ACTIVE", 82, timestamp));
+        service.handleStatus(new ForkliftStatusMessage("FORKLIFT-01", "ACTIVE", timestamp));
 
         ArgumentCaptor<VehicleStatusUpdateCommand> captor = ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
         verify(vehicleStatusService).updateCurrentStatus(eq("FORKLIFT-01"), captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new VehicleStatusUpdateCommand("ACTIVE", 82, timestamp));
+        assertThat(captor.getValue()).isEqualTo(new VehicleStatusUpdateCommand("ACTIVE", timestamp));
     }
 
     @Test
@@ -45,7 +45,7 @@ class ForkliftStatusServiceTest {
         when(vehicleStatusService.updateCurrentStatus(any(), any()))
                 .thenThrow(new BusinessException(ErrorCode.VEHICLE_NOT_FOUND));
         ForkliftStatusMessage message = new ForkliftStatusMessage(
-                "UNKNOWN", "ACTIVE", 50, OffsetDateTime.now(ZoneOffset.ofHours(9)));
+                "UNKNOWN", "ACTIVE", OffsetDateTime.now(ZoneOffset.ofHours(9)));
         assertThatCode(() -> service.handleStatus(message)).doesNotThrowAnyException();
     }
 }

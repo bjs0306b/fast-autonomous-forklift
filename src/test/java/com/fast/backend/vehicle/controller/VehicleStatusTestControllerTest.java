@@ -25,15 +25,15 @@ class VehicleStatusTestControllerTest {
         VehicleStatusTestController controller = new VehicleStatusTestController(service);
         OffsetDateTime messageAt = OffsetDateTime.of(2026, 7, 21, 18, 0, 0, 0, ZoneOffset.ofHours(9));
         VehicleStatusUpdateRequest request = new VehicleStatusUpdateRequest(
-                "ACTIVE", 82, 1.2, 3.4, 90.0, 0.4, messageAt);
+                "ACTIVE", 1.2, 3.4, 90.0, 0.4, messageAt);
         VehicleStatusResponse response = new VehicleStatusResponse(
-                VehicleStatus.ACTIVE, 82, null, null, null, null, null,
+                VehicleStatus.ACTIVE, null, null, null, null, null,
                 null, null, messageAt, messageAt);
         when(service.updateCurrentStatus(eq("FORKLIFT-01"), any())).thenReturn(response);
 
         assertThat(controller.updateStatus("FORKLIFT-01", request).getData()).isEqualTo(response);
         ArgumentCaptor<VehicleStatusUpdateCommand> captor = ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
         verify(service).updateCurrentStatus(eq("FORKLIFT-01"), captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new VehicleStatusUpdateCommand("ACTIVE", 82, messageAt));
+        assertThat(captor.getValue()).isEqualTo(new VehicleStatusUpdateCommand("ACTIVE", messageAt));
     }
 }
