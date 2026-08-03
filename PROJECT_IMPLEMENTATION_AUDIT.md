@@ -169,7 +169,7 @@ topic/payload 식별자 일치 검증) → 도메인 Service → DB → WebSocke
 | `forklift/+/fork-status` | 구독 | O — `routeForkStatus` | 1 | — |
 | `forklift/+/error` | 구독 | O — `routeEmbeddedError` | 1 | — |
 | `cargo/detected` | 구독 | O — `routeCargoDetected` | 1 | — |
-| `fast/station/+/measurement` | 구독 | O — `routeStationMeasurement` | 1 | — |
+| ~~`fast/station/+/measurement`~~ | ~~구독~~ | **X — 폐기됨(2026-07-31 REST 전환). 코드에 없음** | — | — |
 | `forklift/%s/command` | 발행 | O — `Embedded`/`IsaacForkliftCommandPublisher` | 1 | false |
 | `forklift/%s/emergency` | — | **X — 정의만 존재, 발행·구독 코드 없음** | — | — |
 
@@ -367,9 +367,11 @@ Docker container 생성도 하지 않았다.
 
 - **AI 화물 분석 도메인** (`com.fast.backend.ai.*`): `cargo/detected` 수신 → 검증 → 2테이블 저장 →
   `/topic/ai/cargo-analysis` 전송 + 조회 API 2종. 통합 테스트 포함.
-- **측정 스테이션 도메인** (`com.fast.backend.station.*`): `fast/station/+/measurement` 수신 →
-  snake_case DTO + OffsetDateTime 오프셋 보존 저장 → 전용 destination 전송 + 조회 API 2종.
-  자기정합성 검증(magnitude/eccentric/miniature) 구현.
+- **측정 스테이션 도메인** (`com.fast.backend.station.*`): ~~`fast/station/+/measurement` 수신 →
+  snake_case DTO + OffsetDateTime 오프셋 보존 저장~~ → **2026-07-31 REST 전환으로 바뀌었다.**
+  `POST /api/stations/measurements`로 camelCase 6필드(`sessionId`·`measurementId`·`status`·
+  `cargoHeight`·`tippingLevel`·`overhangRatio`)를 받는다. MQTT 구독·라우팅·DTO는 제거됐다.
+  세션 뮤텍스(`station_state`)와 TTL 자동 해제가 추가됐다.
 - **임베디드 포크 상태·오류 이력** (`com.fast.backend.embedded.*`): `fork-status`/`error` 수신 → 저장 →
   전송 + 조회 API 2종.
 - **Isaac Sim 도메인** (`com.fast.backend.isaac.*`): 상태·위치·경로 수신 및 명령 발행.

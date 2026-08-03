@@ -83,10 +83,14 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck" "-Dspring-boot.run.us
 브로커 실행·연결·구독·명령 발행·retained·재연결 확인 절차는 전부
 [`infra/mqtt/README.md`](infra/mqtt/README.md)에 정리돼 있다.
 
-- 구독 토픽(8종, 백엔드가 실제 사용하는 MQTT QoS는 전부 **1**): `forklift/+/status`, `forklift/+/location`,
+- 구독 토픽(백엔드가 실제 사용하는 MQTT QoS는 전부 **1**): `forklift/+/status`, `forklift/+/location`,
   `forklift/+/path`, `forklift/+/command-result`, `forklift/+/fork-status`, `forklift/+/error`,
-  `cargo/detected`, `fast/station/+/measurement`. QoS는 `mqtt.default-qos`(로컬 기본 1) 하나를 8개 토픽에
-  균등 적용한다(`MqttConfig.mqttInboundAdapter`, `MqttConfigTest`로 회귀 검증).
+  `cargo/detected`. QoS는 `mqtt.default-qos`(로컬 기본 1)를 균등 적용한다
+  (`MqttConfig.mqttInboundAdapter`, `MqttConfigTest`로 회귀 검증).
+  - ⚠️ **`fast/station/+/measurement`는 폐기됐다**(2026-07-31, REST 전환). 스테이션 측정 결과는
+    `POST /api/stations/measurements` 한 경로로만 받는다. 구독·라우팅·DTO가 모두 제거돼
+    **코드에 존재하지 않는다**(2026-08-03 확인). 종전 "구독 8종" 기술이 이 토픽을 포함하고
+    있어 정정했다.
 - 발행 토픽(1종): `forklift/{vehicleId}/command` — 이동(ROS2)·포크/적재(임베디드)·비상정지를 모두
   이 토픽 하나로 발행한다. payload의 `targetSystem`/`commandCategory`로 수신 측이 분기한다.
   **MQTT QoS 1, retained false**(확정, `VehicleCommandPublisher`의 코드 상수 — 설정값을 참조하지 않음).
