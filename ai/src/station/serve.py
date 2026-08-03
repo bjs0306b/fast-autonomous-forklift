@@ -453,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     # **백엔드를 트리거보다 먼저 확인한다.** 안 그러면 신호를 받은 **뒤에야** 백엔드가
     # 안 닿는 걸 알게 되고, 그 신호는 그대로 날아간다(재발행이 없다). 2026-08-03에
     # `STATION_API_BASE` 미설정으로 localhost 를 찌르다 트리거를 하나 잃었다.
+    from station.rest_client import active_session, base_url_of
     backend = base_url_of(None)
     try:
         active_session()
