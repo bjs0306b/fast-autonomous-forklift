@@ -6,7 +6,6 @@ import java.time.OffsetDateTime;
 /** REST와 WebSocket API로 전달하는 차량 현재 상태. */
 public record VehicleStatusResponse(
         VehicleStatus status,
-        Integer battery,
         Double positionX,
         Double positionY,
         String positionFrame,
@@ -20,7 +19,7 @@ public record VehicleStatusResponse(
     public static VehicleStatusResponse unknown() {
         return new VehicleStatusResponse(
                 VehicleStatus.UNKNOWN,
-                null, null, null, null, null, null,
+                null, null, null, null, null,
                 null, null, null, null);
     }
 }

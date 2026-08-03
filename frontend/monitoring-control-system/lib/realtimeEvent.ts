@@ -19,6 +19,10 @@ function toStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
 }
 
+function toBooleanOrNull(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null
+}
+
 export function parseRealtimeEvent(body: string): RealtimeEvent<unknown> | null {
   let parsed: unknown
   try {
@@ -48,7 +52,13 @@ export function normalizeStatusEvent(
     toStringOrNull(data.messageAt) ??
     toStringOrNull(data.receivedAt) ??
     toStringOrNull(event.occurredAt)
-  return { vehicleId: event.vehicleId, status, updatedAt }
+  return {
+    vehicleId: event.vehicleId,
+    status,
+    updatedAt,
+    hasCargo: toBooleanOrNull(data.hasCargo),
+    cargoId: toStringOrNull(data.cargoId),
+  }
 }
 
 export function normalizeLocationEvent(

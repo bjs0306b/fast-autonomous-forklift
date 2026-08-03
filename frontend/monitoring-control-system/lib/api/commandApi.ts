@@ -11,6 +11,24 @@ import { postJson } from "./httpClient"
 // 성공/실패 판정은 호출자에게 넘긴다(판정 로직을 API 계층에 숨기지 않는다).
 
 /**
+ * 선택 차량 1대 일반 정지.
+ *
+ * `POST /api/vehicles/{vehicleId}/commands/stop`
+ *
+ * 요청 본문은 없으며, `status` 가 `"PUBLISHED"` 여야 발행 성공이다.
+ */
+export async function stopVehicle(
+  vehicleId: string,
+  signal?: AbortSignal,
+): Promise<VehicleCommandResponse> {
+  return postJson<VehicleCommandResponse>(
+    `/api/vehicles/${encodeURIComponent(vehicleId)}/commands/stop`,
+    undefined,
+    signal,
+  )
+}
+
+/**
  * 선택 차량 1대 비상정지.
  *
  * `POST /api/vehicles/{vehicleId}/commands/emergency-stop`

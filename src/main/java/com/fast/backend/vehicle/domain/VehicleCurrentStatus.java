@@ -16,7 +16,6 @@ public class VehicleCurrentStatus {
 
     private String vehicleId;
     private VehicleStatus status;
-    private Integer battery;
     private Double positionX;
     private Double positionY;
     private String positionFrame;
@@ -49,14 +48,6 @@ public class VehicleCurrentStatus {
 
     public void setStatus(VehicleStatus status) {
         this.status = status;
-    }
-
-    public Integer getBattery() {
-        return battery;
-    }
-
-    public void setBattery(Integer battery) {
-        this.battery = battery;
     }
 
     public Double getPositionX() {

@@ -46,11 +46,11 @@ INSERT IGNORE INTO vehicle (vehicle_id, name, active) VALUES
     ('FORKLIFT-02', 'Forklift 02', TRUE);
 
 INSERT IGNORE INTO vehicle_current_status
-    (vehicle_id, status, battery, received_at) VALUES
-    ('REAL-F01', 'UNKNOWN', NULL, NOW(6)),
-    ('SIM-F01', 'UNKNOWN', NULL, NOW(6)),
-    ('FORKLIFT-01', 'IDLE', 100, NOW(6)),
-    ('FORKLIFT-02', 'UNKNOWN', NULL, NOW(6));
+    (vehicle_id, status, received_at) VALUES
+    ('REAL-F01', 'UNKNOWN', NOW(6)),
+    ('SIM-F01', 'UNKNOWN', NOW(6)),
+    ('FORKLIFT-01', 'IDLE', NOW(6)),
+    ('FORKLIFT-02', 'UNKNOWN', NOW(6));
 
 INSERT IGNORE INTO storage_slot
     (slot_code, usable_height, fork_height, destination_x, destination_y,

@@ -41,7 +41,6 @@ public class VehicleStatusTestController {
         // Isaac 확장 필드는 이 테스트 API가 다루지 않으므로 isaacExtras=null로 두어 기존 값이 보존된다.
         VehicleStatusUpdateCommand command = new VehicleStatusUpdateCommand(
                 request.status(),
-                request.battery(),
                 request.messageAt());
 
         VehicleStatusResponse response = vehicleStatusService.updateCurrentStatus(vehicleId, command);

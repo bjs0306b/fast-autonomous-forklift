@@ -1,0 +1,152 @@
+"use client"
+
+import { cn } from "@/lib/utils"
+import type { DashboardVehicle } from "@/types/monitoring"
+import { resolveVehicleSource } from "./MiniMapVehicleMarker"
+import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
+
+/**
+ * SelectedVehicleInfoPanel
+ *
+ * 차량 상세 상단에 들어가는 선택 차량 핵심 요약.
+ *
+ * 표시 순서는 <b>차량 ID → 차량 상태 → 물건 높이 → 적재 여부</b>로 고정한다. 화물 ID 는 적재 여부 아래
+ * 보조 정보다.
+ *
+ * `VehicleDetailPanel` 안에서 정밀 좌표·작업·제어 영역보다 먼저 렌더링한다.
+ *
+ * 값은 전부 props 의 vehicle 에서만 읽는다. 상태/위치 이벤트가 상위 상태를 갱신하면 자동으로
+ * 다시 그려지고, 위치만 바뀐 경우 선택은 그대로 유지된다.
+ */
+export function SelectedVehicleInfoPanel({
+  vehicle,
+  className,
+}: {
+  vehicle: DashboardVehicle | null
+  className?: string
+}) {
+  return (
+    <section className={cn("min-h-0", className)} aria-label="선택 차량 정보">
+      {vehicle ? <SelectedVehicleFields vehicle={vehicle} /> : <EmptySelection />}
+    </section>
+  )
+}
+
+function EmptySelection() {
+  return (
+    <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 xl:grid-cols-4">
+      <InfoField label="차량 ID" empty />
+      <InfoField label="차량 상태" empty />
+      <InfoField label="물건 높이" empty />
+      <InfoField label="적재 여부" empty />
+      <dd className="text-xs text-slate-400 sm:col-span-2 xl:col-span-4">
+        차량을 선택해 주세요.
+      </dd>
+    </dl>
+  )
+}
+
+function SelectedVehicleFields({ vehicle }: { vehicle: DashboardVehicle }) {
+  const color = VEHICLE_STATUS_COLOR[vehicle.status] ?? VEHICLE_STATUS_COLOR.UNKNOWN
+  const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? "확인 불가"
+  const source = resolveVehicleSource(vehicle.vehicleId)
+
+  return (
+    <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 xl:grid-cols-4">
+      {/* 1. 차량 ID */}
+      <InfoField label="차량 ID">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-mono text-xs font-semibold text-white">{vehicle.vehicleId}</span>
+          {source !== "unknown" ? (
+            <span className="rounded bg-white/5 px-1 py-px text-[9px] font-semibold tracking-wide text-slate-300 uppercase">
+              {source === "real" ? "REAL" : "SIM"}
+            </span>
+          ) : null}
+          {!vehicle.active ? (
+            <span className="rounded bg-slate-500/15 px-1 py-px text-[9px] font-semibold text-slate-300">
+              비활성
+            </span>
+          ) : null}
+        </div>
+        <span className="mt-0.5 block truncate text-[10px] text-slate-400">{vehicle.name}</span>
+      </InfoField>
+
+      {/* 2. 차량 상태 */}
+      <InfoField label="차량 상태">
+        <span
+          className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs font-medium"
+          style={{ backgroundColor: `rgba(${color.glow},0.15)`, color: color.border }}
+          data-testid="selected-vehicle-status"
+          data-status={vehicle.status}
+        >
+          <span
+            className="size-1.5 rounded-full"
+            style={{ backgroundColor: color.base }}
+            aria-hidden="true"
+          />
+          {statusLabel}
+        </span>
+      </InfoField>
+
+      {/* 3. 물건 높이 — 측정 파이프라인의 실측값(m)이며 없으면 만들어 내지 않는다.
+             0 도 정상값일 수 있으므로 truthy 가 아니라 != null 로 판정한다. */}
+      <InfoField label="물건 높이">
+        {vehicle.cargoHeight != null ? (
+          <span className="font-mono text-base leading-none font-semibold text-slate-100">
+            {vehicle.cargoHeight.toFixed(2)}
+            <span className="ml-1 text-[10px] font-normal text-slate-400">m</span>
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400">측정 정보 없음</span>
+        )}
+      </InfoField>
+
+      {/* 4. 적재 여부 — null 은 "미적재"가 아니라 "확인 불가"다. */}
+      <InfoField label="적재 여부">
+        <CargoBadge hasCargo={vehicle.hasCargo} />
+        {vehicle.cargoId ? (
+          <span className="mt-1 block truncate font-mono text-[10px] text-slate-400">
+            {vehicle.cargoId}
+          </span>
+        ) : null}
+      </InfoField>
+    </dl>
+  )
+}
+
+function CargoBadge({ hasCargo }: { hasCargo: boolean | null }) {
+  const { label, className } =
+    hasCargo === true
+      ? { label: "적재 중", className: "bg-amber-500/15 text-amber-300" }
+      : hasCargo === false
+        ? { label: "미적재", className: "bg-white/5 text-slate-300" }
+        : { label: "확인 불가", className: "bg-white/5 text-slate-400" }
+
+  return (
+    <span
+      className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium", className)}
+      data-testid="selected-vehicle-cargo"
+    >
+      {label}
+    </span>
+  )
+}
+
+function InfoField({
+  label,
+  children,
+  empty = false,
+}: {
+  label: string
+  children?: React.ReactNode
+  empty?: boolean
+}) {
+  return (
+    <div className="min-w-0 px-1.5 py-1">
+      <dt className="text-[10px] tracking-wide text-slate-400 uppercase">{label}</dt>
+      <dd className={cn("mt-0.5 min-h-5", empty && "text-slate-600")}>{children}</dd>
+    </div>
+  )
+}
+
+export default SelectedVehicleInfoPanel

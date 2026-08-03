@@ -127,58 +127,6 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 
 -- =============================================================================
--- 4. vehicle_status_history  — 상태 이력(Jira -132/-133)
--- =============================================================================
--- 구 스키마에도 같은 이름의 테이블이 있어 CREATE TABLE IF NOT EXISTS 가 무효다. 컬럼 구조가 달라
--- 아래 보정이 없으면 상태 메시지 수신 시 이력 INSERT 가 실패하고, 같은 트랜잭션의 최신 상태 갱신까지
--- 함께 롤백된다(VehicleStatusService.updateCurrentStatus 는 두 저장을 한 트랜잭션으로 묶는다).
-
--- 4-1. created_at 기본값 — 현재 Mapper 는 이 컬럼을 INSERT 하지 않는다.
-SET @sql = (
-    SELECT IF(COUNT(*) = 1,
-        'ALTER TABLE vehicle_status_history MODIFY COLUMN created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)',
-        'SELECT ''SKIP: vehicle_status_history.created_at already has default'' AS message')
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vehicle_status_history'
-      AND COLUMN_NAME = 'created_at' AND COLUMN_DEFAULT IS NULL);
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- 4-2. PK 컬럼명 id -> history_id
---   VehicleStatusHistoryMapper.xml 이 keyColumn="history_id" / resultMap history_id 를 기대한다.
---   **컬럼 이름만 바꾸는 CHANGE COLUMN 이며 PK 와 AUTO_INCREMENT 는 그대로 유지된다.**
---   데이터는 보존된다. 다른 테이블이 이 컬럼을 FK 로 참조하지 않는 것을 아래 확인 쿼리로 먼저 볼 것.
---     SELECT * FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
---      WHERE REFERENCED_TABLE_SCHEMA = 'fast_backend'
---        AND REFERENCED_TABLE_NAME = 'vehicle_status_history';
-SET @sql = (
-    SELECT IF(COUNT(*) = 1,
-        'ALTER TABLE vehicle_status_history CHANGE COLUMN id history_id BIGINT NOT NULL AUTO_INCREMENT COMMENT ''차량 상태 이력 식별자''',
-        'SELECT ''SKIP: vehicle_status_history PK column already named history_id'' AS message')
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vehicle_status_history' AND COLUMN_NAME = 'id');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- 4-3. 조회 인덱스 (상태 이력 API 의 정렬·필터)
-SET @sql = (
-    SELECT IF(COUNT(*) = 0,
-        'ALTER TABLE vehicle_status_history ADD INDEX idx_vehicle_status_history_vehicle_message (vehicle_id, message_at)',
-        'SELECT ''SKIP: idx_vehicle_status_history_vehicle_message exists'' AS message')
-    FROM INFORMATION_SCHEMA.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vehicle_status_history'
-      AND INDEX_NAME = 'idx_vehicle_status_history_vehicle_message');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-SET @sql = (
-    SELECT IF(COUNT(*) = 0,
-        'ALTER TABLE vehicle_status_history ADD INDEX idx_vehicle_status_history_message (message_at)',
-        'SELECT ''SKIP: idx_vehicle_status_history_message exists'' AS message')
-    FROM INFORMATION_SCHEMA.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vehicle_status_history'
-      AND INDEX_NAME = 'idx_vehicle_status_history_message');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-
--- =============================================================================
 -- 5. cargo  — 화물 등록 INSERT 복구
 -- =============================================================================
 -- 구 스키마의 width/length/height/volume 는 NOT NULL(기본값 없음)인데 현재 CargoMapper.insert 는
@@ -421,9 +369,9 @@ SET @sql = IF(@has_source = 1,
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 최신 상태 행. 없어도 위치 수신 시 자동 생성되지만, 대시보드 초기 표시를 위해 넣어 둔다.
-INSERT IGNORE INTO vehicle_current_status (vehicle_id, status, battery, received_at) VALUES
-    ('REAL-F01', 'UNKNOWN', NULL, NOW(6)),
-    ('SIM-F01',  'UNKNOWN', NULL, NOW(6));
+INSERT IGNORE INTO vehicle_current_status (vehicle_id, status, received_at) VALUES
+    ('REAL-F01', 'UNKNOWN', NOW(6)),
+    ('SIM-F01',  'UNKNOWN', NOW(6));
 
 
 -- =============================================================================
@@ -435,7 +383,6 @@ FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = DATABASE()
   AND ((TABLE_NAME = 'station_state'          AND COLUMN_NAME = 'acquired_at')
     OR (TABLE_NAME = 'vehicle_current_status' AND COLUMN_NAME = 'position_frame')
-    OR (TABLE_NAME = 'vehicle_status_history' AND COLUMN_NAME = 'history_id')
     OR (TABLE_NAME = 'transport_task'         AND COLUMN_NAME IN
         ('measurement_session_id','measurement_id','destination_slot_code','measurement_requested_at'))
     OR (TABLE_NAME = 'storage_slot'           AND COLUMN_NAME IN ('usable_height','fork_height')))
@@ -448,7 +395,6 @@ WHERE TABLE_SCHEMA = DATABASE()
   AND IS_NULLABLE = 'NO' AND COLUMN_DEFAULT IS NULL AND EXTRA NOT LIKE '%auto_increment%'
   AND ((TABLE_NAME = 'vehicle'                AND COLUMN_NAME NOT IN ('vehicle_id','name','active','created_at','updated_at'))
     OR (TABLE_NAME = 'vehicle_current_status' AND COLUMN_NAME NOT IN ('vehicle_id','status','received_at'))
-    OR (TABLE_NAME = 'vehicle_status_history' AND COLUMN_NAME NOT IN ('history_id','vehicle_id','status','received_at'))
     OR (TABLE_NAME = 'cargo'                  AND COLUMN_NAME NOT IN ('cargo_id','created_at'))
     OR (TABLE_NAME = 'storage_slot'           AND COLUMN_NAME NOT IN ('slot_code','usable_height','fork_height','destination_x','destination_y','destination_heading','status'))
     OR (TABLE_NAME = 'transport_task'         AND COLUMN_NAME NOT IN ('id','task_code','cargo_id','status','created_at')))

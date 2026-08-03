@@ -3,7 +3,6 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS vehicle_command;
 DROP TABLE IF EXISTS transport_task;
 DROP TABLE IF EXISTS storage_slot;
-DROP TABLE IF EXISTS vehicle_status_history;
 DROP TABLE IF EXISTS vehicle_current_status;
 DROP TABLE IF EXISTS vehicle;
 DROP TABLE IF EXISTS station_measurement;
