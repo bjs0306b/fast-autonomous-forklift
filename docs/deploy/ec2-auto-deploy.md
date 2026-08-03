@@ -42,9 +42,24 @@ scripts/deploy-ec2.sh   (EC2 에서 실행)
 채팅·이슈·커밋 어디에도 붙여넣지 않는다.
 
 **1)** GitLab 프로젝트 → **Settings → CI/CD → Runners** → *New project runner*
-- Tags: **`ec2`** ← `.gitlab-ci.yml` 의 `tags:` 와 반드시 일치해야 한다
-- *Run untagged jobs*: 체크 해제
-- 생성 후 나오는 토큰(`glrt-...`)을 복사
+
+| 항목 | 값 | 이유 |
+|---|---|---|
+| Tags | **`ec2`** | `.gitlab-ci.yml` 의 `tags:` 와 글자까지 같아야 한다. 다르면 잡이 `no runner for tags` 로 영원히 대기한다 |
+| Run untagged jobs | ☐ 해제 | 켜면 프로젝트의 태그 없는 잡을 전부 집어가 배포 전용 러너가 남의 빌드까지 EC2 에서 돌린다 |
+| Runner description | `ec2-deploy` | — |
+| Paused | ☐ 해제 | — |
+| **Protected** | ☑ **체크** | 아래 참조 |
+| Maximum job timeout | 비움 | 잡 타임아웃은 `.gitlab-ci.yml` 에 `30m` 으로 있다 |
+
+> ⚠️ **Protected 를 반드시 체크한다.** shell executor 라 CI 스크립트가 EC2 에서
+> `ubuntu` 계정으로 그대로 실행되고, 그 계정엔 `NOPASSWD` sudo 가 있다. 체크하지
+> 않으면 **누구든 브랜치를 하나 파서 `.gitlab-ci.yml` 에 `tags: [ec2]` 잡을 넣는
+> 것만으로 배포 서버에서 임의 명령을 돌릴 수 있다.** 체크하면 protected 브랜치
+> (`develop`·`master`)에서만 동작한다. 파이프라인이 어차피 `develop` 전용이라
+> 잃는 것은 없다(feature 브랜치에서 파이프라인을 시험할 수 없다는 점만 다르다).
+
+생성 후 나오는 토큰(`glrt-...`)을 복사한다. **채팅·이슈·커밋 어디에도 남기지 않는다.**
 
 **2)** EC2 에서 등록:
 
