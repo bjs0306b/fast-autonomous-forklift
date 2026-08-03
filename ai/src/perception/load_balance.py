@@ -100,8 +100,12 @@ class LoadBalance:
     def to_dict(self) -> dict:
         """표면에 독립적인 경고 페이로드. 소비자(대시보드·시리얼·로그)가 그대로 쓴다.
 
-        출력처가 아직 미정이라(FR-104) 문자열이 아니라 구조화 값으로 낸다 — 화면은
-        ``message``를, 제어 로직은 ``ratio_x/ratio_y``를, 집계는 ``eccentric``을 쓴다.
+        문자열이 아니라 구조화 값으로 낸다 — 화면은 ``message``를, 제어 로직은
+        ``ratio_x/ratio_y``를, 집계는 ``eccentric``을 쓴다.
+
+        출력처는 정해졌다: 측정 JSON의 ``load_balance`` 필드로 나가고, 백엔드에는
+        ``pipeline``이 뽑아낸 ``overhangRatio``(= ``ratio_x``)만 REST 로 전달된다.
+        ⚠️ 백엔드는 **0.05 이상이면 적재 추천을 내지 않는다**(``placementEligible: false``).
         """
         return {
             "eccentric": self.eccentric,
@@ -154,10 +158,12 @@ def assess_load(
 
 # --- 감지 모델 연결 (FR-101 추론 → FR-104) ---------------------------------
 #
-# RTMDet 추론(FR-101-3/5)은 아직 없다. 그 출력이 나오면 클래스 라벨·bbox·점수를
-# Detection 리스트로 감싸 assess_detections에 넘기면 된다 — 이 어댑터가 모델과
-# 편하중 로직 사이의 유일한 접점이다. bbox 좌표만 다루므로 지금 하드웨어·모델 없이
-# 테스트된다.
+# RTMDet 추론은 **현역이다**(exp8, `ai/models/end2end.onnx`). 검출 결과를 클래스
+# 라벨·bbox·점수의 Detection 리스트로 감싸 넘기면 된다 — 이 어댑터가 모델과 편하중
+# 로직 사이의 유일한 접점이라, bbox 좌표만 다루므로 하드웨어·모델 없이 테스트된다.
+#
+# ⚠️ 실사용 경로는 `station.pipeline` 이고 **`assess_load` 를 직접 부른다**(좌우만
+# 채택). 여기 `assess_detections` 는 그 앞단 어댑터로 남아 있다.
 
 
 @dataclass(frozen=True)
