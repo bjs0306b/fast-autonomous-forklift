@@ -28,9 +28,47 @@
 | 입력 크기 | `800` (스테이션 letterbox 크기와 같아야 한다) |
 | `--score` | **`0.05`** ← 아래 참조 |
 
-> ⚠️ **스크립트가 레포 안에 없다.** 젯슨의 `~/S15P11A304` 에는 이 파일이 없고
-> `~/dimeval/` 에 손으로 복사된 사본이 있다. EC2 배포 디렉터리와 같은 구조라,
-> 레포를 고쳐도 젯슨에 자동으로 반영되지 않는다. 옮길 때는 사람이 복사해야 한다.
+> ⚠️ **젯슨 사본은 레포와 자동으로 동기화되지 않는다.** 원본은 레포의
+> `ai/scripts/onboard_infer_server.py` 이고, 젯슨에서 도는 것은 `~/dimeval/` 에
+> **손으로 복사된 사본**이다. 젯슨의 `~/S15P11A304` 에는 이 파일이 없다.
+
+### 🚨 레포를 고쳤으면 젯슨에도 복사할 것 — 실제로 터졌다
+
+2026-08-03 정합 점검에서 **젯슨 사본이 3일 낡아 있는 것**을 발견했다(Jira 186).
+07-31에 고친 사고 방지 장치가 보드에는 반영되지 않은 채였다.
+
+| | 레포(수정본) | 젯슨(낡음) |
+|---|---|---|
+| `TrtDetector(class_thresholds=…)` | `{}` 명시 | **안 넘김** |
+
+`TrtDetector` 는 `class_thresholds=None` 이면 `DEFAULT_CLASS_THRESHOLDS =
+{"pallet": 0.7}` 를 쓴다 — **온보드 포크정렬용 값**이다. 그래서 스테이션 임계(0.4)로는
+통과할 **score 0.4~0.7 파렛트가 보드에서만 버려지고**, 같은 장면이 로컬은 `ok`,
+보드는 `dimensions_only` 가 된다. 전복·편하중이 통째로 빠지는데 **에러는 나지 않는다.**
+
+당시 실물 측정에서 파렛트 score 가 0.91 이라 드러나지 않았다. 조명·각도가 나빠
+0.4~0.7 구간에 들어갈 때만 발현한다 — **시연 당일에 걸리기 좋은 형태**다.
+
+**배포·점검 때마다 md5 를 대조한다.** 이게 유일한 방어선이다.
+
+```bash
+md5sum ai/scripts/onboard_infer_server.py
+ssh orin 'md5sum /home/orin/dimeval/onboard_infer_server.py'
+```
+
+다르면 복사하고 재시작한다. 재시작해야 새 코드가 로드된다 —
+**파일만 바꾸면 돌고 있는 프로세스는 옛 코드 그대로다.**
+
+```bash
+scp ai/scripts/onboard_infer_server.py orin:/home/orin/dimeval/onboard_infer_server.py
+ssh -t orin "sudo systemctl restart fast-onboard-infer"
+```
+
+확인은 **파일 수정 시각 < 프로세스 기동 시각**으로 한다.
+
+```bash
+ssh orin 'ls -l --time-style=+%H:%M:%S /home/orin/dimeval/onboard_infer_server.py; ps -o lstart= -p $(pgrep -f onboard_infer_server | head -1)'
+```
 
 ### ⚠️ `--score` 를 낮추는 이유
 
