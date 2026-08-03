@@ -217,7 +217,41 @@ def check_wiring(args) -> int:
     return 0 if ok else 1
 
 
+def _load_dotenv(path: Path) -> int:
+    """레포 루트 `.env`를 환경변수로 올린다. 없으면 조용히 넘어간다.
+
+    이 프로젝트의 설정 관례가 `.env` 파일이다(`.env.example`이 루트에 있고
+    `.gitignore`가 `.env`를 막는다). 스테이션만 "셸에 직접 export" 를 요구하면
+    다른 구성요소와 어긋나고, 설정했는데 왜 안 되냐로 시간을 쓰게 된다.
+
+    `python-dotenv`를 쓰지 않는 이유는 이 env 가 numpy 1.x·opencv 4.10 고정으로
+    간신히 맞춰져 있어(CLAUDE.md) 의존성을 늘리고 싶지 않아서다. 필요한 기능이
+    "key=value 를 읽어 환경변수로" 뿐이라 직접 읽는다.
+
+    ⚠️ **이미 설정된 환경변수를 덮어쓰지 않는다.** 셸에서 준 값이 파일보다
+    우선이어야 일회성 오버라이드가 가능하다.
+    """
+    if not path.is_file():
+        return 0
+    loaded = 0
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value
+        loaded += 1
+    return loaded
+
+
 def main(argv: list[str] | None = None) -> int:
+    # ⚠️ argparse 기본값이 `os.environ.get(...)` 을 **파서를 만들 때** 읽는다.
+    #    그래서 .env 로드는 반드시 그 전에 해야 한다.
+    _load_dotenv(_AI_ROOT.parent / ".env")
+
     parser = argparse.ArgumentParser(description="측정 스테이션 (FR-101-5)")
     parser.add_argument("--once", action="store_true", help="1회 측정 후 종료")
     parser.add_argument("--probe", action="store_true", help="카메라 인덱스 확인")
