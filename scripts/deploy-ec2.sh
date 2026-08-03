@@ -115,6 +115,18 @@ for p in "${DEPLOY_PATHS[@]}"; do
     echo "  $p"
 done
 
+# CI 러너는 잡을 **root 로** 실행한다. shell executor 를 `--user ubuntu` 로 두면
+# `su -s /bin/bash ubuntu -c 'bash -l'` 단계에서 `prepare environment: exit status 1`
+# 이 나고 잡이 시작조차 못 한다(2026-08-03 실측: 같은 명령을 손으로 실행하면 exit 0
+# 이므로 셸 프로필 문제가 아니다. `FF_USE_LEGACY_BASH_EVAL` 로도 안 바뀐다).
+#
+# 그래서 동기화된 파일이 root 소유가 된다. 그대로 두면 다음에 사람이 ubuntu 로
+# 손수 배포할 때 rsync 가 권한 오류로 죽는다 — 끝나고 돌려준다.
+if [ "$(id -u)" -eq 0 ]; then
+    chown -R ubuntu:ubuntu "$DEPLOY_DIR"
+    echo "  (root 실행 — 소유권을 ubuntu 로 되돌림)"
+fi
+
 cd "$DEPLOY_DIR"
 
 # ── 빌드 ──────────────────────────────────────────────────────────────────
