@@ -79,15 +79,53 @@ fail_and_rollback() {
 }
 
 # ── 동기화 ────────────────────────────────────────────────────────────────
-# --delete 로 삭제된 파일도 반영하되, 비밀값과 git 메타는 반드시 남긴다.
+# 레포 전체가 아니라 **배포에 필요한 경로만** 옮긴다.
+#
+# 이 레포에는 ai/·isaac_sim/·ros2_ws/·3d_model/·recovery/ 처럼 배포와 무관한
+# 대용량 디렉터리가 있다. 통째로 rsync 하면 배포 디렉터리가 부풀고 Docker 빌드
+# 컨텍스트(= 데몬으로 전송되는 양)가 같이 커진다. `.dockerignore` 가 일부를
+# 걸러주지만 목록이 어긋나면 조용히 새 나가므로, 애초에 **보낼 것만 나열**한다.
+#
+# 목록에 없는 항목은 배포 디렉터리에서 지우지 않는다 — `.env`·`backend.env`
+# (서버에만 있고 백업이 없는 비밀값)를 실수로 날리지 않기 위해서다.
+DEPLOY_PATHS=(
+    pom.xml mvnw .mvn src              # 백엔드 빌드
+    frontend/monitoring-control-system # 프론트 빌드
+    infra                              # mqtt-ca.crt
+    Dockerfile.backend
+    docker-compose.yml
+    .dockerignore
+    scripts/deploy-ec2.sh              # 서버에서 손으로 재실행할 수 있도록
+)
+
 log "작업본 → 배포 디렉터리 동기화"
-rsync -a --delete \
-    --exclude='.git/' \
-    --exclude='.env' \
-    --exclude='backend.env' \
-    --exclude='node_modules/' \
-    --exclude='target/' \
-    "$SRC_DIR"/ "$DEPLOY_DIR"/
+for p in "${DEPLOY_PATHS[@]}"; do
+    [ -e "$SRC_DIR/$p" ] || die "동기화 대상이 작업본에 없다: $p"
+    if [ -d "$SRC_DIR/$p" ]; then
+        mkdir -p "$DEPLOY_DIR/$p"
+        rsync -a --delete \
+            --exclude='node_modules/' \
+            --exclude='.next/' \
+            --exclude='target/' \
+            "$SRC_DIR/$p"/ "$DEPLOY_DIR/$p"/
+    else
+        mkdir -p "$(dirname "$DEPLOY_DIR/$p")"
+        rsync -a "$SRC_DIR/$p" "$DEPLOY_DIR/$p"
+    fi
+    echo "  $p"
+done
+
+# CI 러너는 잡을 **root 로** 실행한다. shell executor 를 `--user ubuntu` 로 두면
+# `su -s /bin/bash ubuntu -c 'bash -l'` 단계에서 `prepare environment: exit status 1`
+# 이 나고 잡이 시작조차 못 한다(2026-08-03 실측: 같은 명령을 손으로 실행하면 exit 0
+# 이므로 셸 프로필 문제가 아니다. `FF_USE_LEGACY_BASH_EVAL` 로도 안 바뀐다).
+#
+# 그래서 동기화된 파일이 root 소유가 된다. 그대로 두면 다음에 사람이 ubuntu 로
+# 손수 배포할 때 rsync 가 권한 오류로 죽는다 — 끝나고 돌려준다.
+if [ "$(id -u)" -eq 0 ]; then
+    chown -R ubuntu:ubuntu "$DEPLOY_DIR"
+    echo "  (root 실행 — 소유권을 ubuntu 로 되돌림)"
+fi
 
 cd "$DEPLOY_DIR"
 

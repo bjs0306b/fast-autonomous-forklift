@@ -73,16 +73,31 @@ sudo gitlab-runner register \
   --description "ec2-deploy"
 ```
 
-**3)** 러너 서비스를 `ubuntu` 계정으로 돌린다. 배포 디렉터리 소유자가 `ubuntu` 이고,
-`ubuntu` 에만 `NOPASSWD` sudo 가 있기 때문이다. 기본값(`gitlab-runner` 계정)이면
-`docker` 도 `rsync` 도 권한에서 막힌다.
+**3)** 러너 서비스를 **`root`** 로 돌린다. 기본값(`gitlab-runner` 계정)이면 `docker` 도
+`rsync` 도 권한에서 막힌다.
 
 ```bash
 sudo gitlab-runner uninstall
-sudo gitlab-runner install --user ubuntu --working-directory /home/ubuntu/gitlab-runner
-sudo systemctl restart gitlab-runner
+sudo gitlab-runner install --user root --working-directory /home/ubuntu/gitlab-runner
+sudo systemctl daemon-reload
+sudo systemctl enable --now gitlab-runner
 sudo gitlab-runner verify
 ```
+
+> ⚠️ **`--user ubuntu` 로 두면 잡이 시작조차 못 한다.** shell executor 가 잡 전에
+> `su -s /bin/bash ubuntu -c 'bash -l'` 로 계정을 바꾸는데, 그 단계에서
+> `prepare environment: exit status 1` 이 난다(2026-08-03).
+>
+> **셸 프로필 문제가 아니다** — 오류 메시지가 가리키는 문서 링크는 오해를 부른다.
+> 실측으로 전부 배제했다: `.bash_logout`(치워도 exit 0) · `.bashrc`/`.profile`(우분투
+> 기본값, exit 0) · `su` 4가지 변형(전부 exit 0) · **러너와 완전히 동일한 명령을
+> 손으로 실행해도 exit 0**. `FF_USE_LEGACY_BASH_EVAL=true` 도 듣지 않는다(플래그는
+> 활성화되지만 `Using new shell command execution` 이 그대로 나오고 동일하게 실패).
+>
+> **근본 원인은 미규명이다.** root 로 돌려 `su` 단계 자체를 없애는 것이 현재 해법이다.
+> 대가로 잡이 root 로 돌지만, 러너가 Protected 전용이라 `develop`·`master` 에서만
+> 동작하는 점은 그대로다. root 실행 때문에 동기화 파일이 root 소유가 되는 것은
+> `deploy-ec2.sh` 가 끝에서 `ubuntu` 로 되돌린다.
 
 **4)** 확인: GitLab Runners 화면에서 초록불이면 된다.
 
@@ -167,6 +182,8 @@ cd /home/ubuntu/fast-backend && sudo docker compose up -d --no-build
 | 파이프라인이 안 뜬다 | Runners 화면 | 러너 오프라인 → `sudo systemctl restart gitlab-runner` |
 | `no runner for tags` | `.gitlab-ci.yml` `tags:` | 러너 태그가 `ec2` 가 아님 |
 | `permission denied` (docker/rsync) | `sudo gitlab-runner verify` | 러너가 `gitlab-runner` 계정으로 돎 → §2-3 |
+| `prepare environment: exit status 1` | `ps -o user,cmd -C gitlab-runner` | 러너가 `--user ubuntu` 로 돎 → **`--user root`** 로 재설치 (§2-3) |
+| 손으로 배포 시 rsync 권한 오류 | `ls -ld /home/ubuntu/fast-backend` | root 소유로 남음. `sudo chown -R ubuntu:ubuntu /home/ubuntu/fast-backend` |
 | 빌드 단계 실패 | 잡 로그 | 테스트 실패. **서버는 멀쩡하다** — 코드를 고칠 것 |
 | 헬스체크 실패 후 롤백됨 | `docker compose logs backend` | 기동 실패. DB 스키마·env 확인 |
 | 차량 3대가 화면에 보임 | `SELECT COUNT(*) FROM vehicle` | `SQL_INIT_MODE=always` → 즉시 `never` |
