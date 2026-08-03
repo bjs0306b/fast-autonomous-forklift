@@ -1,0 +1,20 @@
+# 줄바꿈 정규화
+#
+# 팀 작업 환경이 윈도우라 core.autocrlf 로 CRLF 가 붙는다. 리눅스에서 실행되는
+# 파일에 CRLF 가 들어가면 조용히 깨지지 않고 **첫 줄부터 죽는다**:
+#
+#   ./deploy-ec2.sh: /usr/bin/env: 'bash\r': No such file or directory
+#
+# 아래 파일들은 EC2·젯슨·GPU서버에서 실행되거나 파싱되므로 LF 를 강제한다.
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+mvnw        text eol=lf
+
+# 인증서·키는 바이트가 바뀌면 안 된다.
+*.crt       -text
+*.pem       -text
+*.key       -text

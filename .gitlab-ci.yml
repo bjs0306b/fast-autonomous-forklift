@@ -1,0 +1,37 @@
+# GitLab CI — EC2 자동배포
+#
+# develop 에 커밋이 들어오면 EC2 에 배포한다. 러너가 **배포 대상 서버 위에서**
+# 돌기 때문에 SSH 키나 배포용 자격증명을 CI 변수에 넣지 않는다.
+#
+# 러너 등록: docs/deploy/ec2-auto-deploy.md
+#
+# ⚠️ develop 푸시마다 무조건 배포한다(팀 결정, Jira S15P11A304-179).
+#    깨진 머지가 그대로 시연 서버에 올라간다는 뜻이다. 완화책은 두 겹이다.
+#      1) 이미지 빌드 단계에서 `./mvnw clean package` 가 테스트를 돈다 —
+#         테스트가 깨지면 빌드가 실패하고 **돌던 컨테이너는 건드리지 않는다.**
+#      2) 기동 후 헬스체크가 실패하면 직전 이미지로 롤백한다.
+#    그래도 "테스트는 통과하는데 실제로 망가진" 변경은 막지 못한다.
+
+stages:
+  - deploy
+
+deploy:ec2:
+  stage: deploy
+  tags:
+    - ec2
+  environment:
+    name: production
+    url: http://i15a304.p.ssafy.io:3000
+  # 배포는 절대 동시에 돌면 안 된다. 두 파이프라인이 같은 디렉터리에 rsync 하면
+  # 반쯤 섞인 소스로 이미지가 빌드된다. resource_group 이 순차 실행을 보장한다.
+  resource_group: production
+  # 배포 중인 잡은 중간에 죽이지 않는다 — 컨테이너가 내려간 상태로 남을 수 있다.
+  interruptible: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+  script:
+    - chmod +x scripts/deploy-ec2.sh
+    - ./scripts/deploy-ec2.sh
+  timeout: 30m
