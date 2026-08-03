@@ -34,13 +34,22 @@
 > | **`cargoHeight`** | **`dimensions.height_cm`** | **cm ÷ 100 = m** — 데스크탑이 변환 |
 > | `tippingLevel` | `tipping.level` | 소문자 그대로 보내면 백엔드가 대문자로 저장 |
 > | `overhangRatio` | `tipping.overhang` | 없음 |
-> | `measuredAt` | `measured_at` | 없음(단, **백엔드에 저장 컬럼이 없어 버려진다**) |
+> | ~~`measuredAt`~~ | ~~`measured_at`~~ | **백엔드 DTO에서 제거됐다**(2026-08-02 리팩터). 보내도 무시된다 — 아래 참조 |
 >
 > ```
 > POST /api/stations/measurements   Content-Type: application/json
 > { "sessionId": "...", "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
->   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
+>   "tippingLevel": "safe", "overhangRatio": 0.04 }
 > ```
+>
+> ⚠️ **`measuredAt`은 더 이상 계약에 없다.** `StationMeasurementCreateRequest`에서
+> 제거됐고 저장 시각은 서버가 `createdAt`으로 남긴다. 클라이언트가 아직 보내고 있지만
+> Spring 이 `fail-on-unknown-properties` 를 켜지 않아 **조용히 버려진다**(무해). 즉시
+> 저장되는 흐름이라 실측에서 두 시각이 사실상 같았다(12:12:00 vs 12:12:00.376).
+>
+> ⚠️ **위 예시의 `overhangRatio` 를 0.057 에서 0.04 로 고쳤다.** 0.05 **이상**이면
+> `placementEligible: false` 가 되어 적재 추천이 나가지 않는다. 정상 흐름 예시에
+> 실패하는 값을 쓰고 있었다.
 >
 > 백엔드 MQTT 측정 요청에는 `cargoId`만 들어온다. AI가
 > `POST /api/stations/sessions?cargoId=...`로 세션을 생성한 뒤, 응답으로 받은 **`sessionId`를 반드시 보낸다.**
