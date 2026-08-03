@@ -196,6 +196,8 @@ def test_세션을_측정_앞에_연다(monkeypatch, capsys) -> None:
     rc = serve.main(["--once", "--publish", "--cargo-id", "cargo-1",
                      "--image", "존재하지-않는-파일.jpg"])
     err = capsys.readouterr().err
-    assert rc == 1
+    # 3 = 세션을 못 열어 **시작조차 못 함**. 측정 실패(1)와 구분한다 —
+    # 운영자가 볼 곳이 다르다(설비 점유·백엔드 vs 화물 배치·조명). 2026-08-03 분리.
+    assert rc == 3
     assert "세션을 열 수 없어" in err
     assert "이미지를 읽을 수 없습니다" not in err

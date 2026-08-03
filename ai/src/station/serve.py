@@ -433,8 +433,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 0 if publish(payload, session_id) else 1
         except StationApiError as e:
             # 세션 열기 실패(대개 409 ALREADY_OCCUPIED) — 측정은 시작도 안 했다.
+            #
+            # **측정 실패(1)와 구분해 3을 돌려준다.** 운영자가 할 일이 다르다:
+            #   1 → 화물 배치·조명·검출을 본다 (재려고 했는데 안 됐다)
+            #   3 → 설비 점유·백엔드 연결을 본다 (재려는 시도조차 못 했다)
+            # 종전엔 둘 다 1이라 로그 마지막 줄만 보면 원인을 가릴 수 없었다.
             print(f"[station-api] 세션을 열 수 없어 측정을 건너뜁니다: {e}", file=sys.stderr)
-            return 1
+            return 3
         except SessionNotReleased:
             return 2      # 잠긴 세션이 남았다 — 성공(0)·측정실패(1)와 구분한다
 
@@ -505,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"상시 모드 — {args.topic} 대기 중. Ctrl-C로 종료", flush=True)
     measured: set[str] = set()
-    rc = done = 0
+    rc = done = ok_count = fail_count = 0
     try:
         with trigger as trig:
             for req in trig.requests():
@@ -530,11 +535,26 @@ def main(argv: list[str] | None = None) -> int:
                 rc = measure_for_cargo(req.cargo_id, detector, frame)
                 if rc == 0:
                     measured.add(req.cargo_id)
+                    ok_count += 1
+                else:
+                    fail_count += 1
                 done += 1
+
+                # ⚠️ **성공과 시도를 구분해 찍는다.** 종전엔 실패해도 "N건 측정 완료"
+                #    라고 해서, 마지막 줄만 보면 성공한 것으로 읽혔다. 실제로 세션
+                #    점유(409)로 측정을 **시작조차 못 한** 경우에도 "완료"가 찍혔다.
+                #    위에 409 가 남아 있어도 결론 줄이 거짓이면 그쪽을 믿게 된다.
+                verdict = {
+                    0: "성공",
+                    2: "실패(내 세션이 안 풀림 — --release-session 필요)",
+                    3: "실패(세션을 못 열었다 — 설비 점유·백엔드 확인)",
+                }.get(rc, "실패(측정 불가 — 화물 배치·조명 확인)")
                 if args.max_measurements and done >= args.max_measurements:
-                    print(f"[listen] {done}건 측정 완료 — 종료", flush=True)
+                    tail = f" (성공 {ok_count} · 실패 {fail_count})" if fail_count else ""
+                    print(f"[listen] {done}건 시도{tail} — 종료  [{verdict}]", flush=True)
                     break
-                print(f"[listen] 측정 종료 rc={rc} — 다음 요청 대기", flush=True)
+                print(f"[listen] {verdict} — 다음 요청 대기 "
+                      f"(누적 성공 {ok_count} · 실패 {fail_count})", flush=True)
     except KeyboardInterrupt:
         print("\n종료", flush=True)
     finally:
