@@ -24,10 +24,16 @@ FULL = {
 }
 
 
-def test_필드_7개를_보낸다() -> None:
+def test_필드_6개를_보낸다() -> None:
+    """`measuredAt`은 2026-08-02 백엔드 리팩터로 DTO에서 제거됐다.
+
+    보내도 Spring이 조용히 버리지만(무해), 계약에 없는 필드를 계속 실어 보내면
+    "이 값이 어딘가 쓰인다"고 오해하게 된다. 저장 시각은 서버 `createdAt`이다.
+    """
     r = to_request(FULL, "sess-1")
     assert set(r) == {"sessionId", "measurementId", "status", "cargoHeight",
-                      "tippingLevel", "overhangRatio", "measuredAt"}
+                      "tippingLevel", "overhangRatio"}
+    assert "measuredAt" not in r
 
 
 def test_sessionId를_그대로_싣는다() -> None:
