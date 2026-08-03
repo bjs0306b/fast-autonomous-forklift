@@ -62,6 +62,18 @@ ESP32-S3를 USB-C로 공급할 때는 Jetson 및 모터 HAT과 GND만 공통으�
 
 유효한 명령만 모터 태스크의 최신 명령 큐에 전달하고 watchdog을 갱신합니다. 잘못된 CRC, 잘린 프레임, 과도하게 긴 프레임 또는 범위 밖 명령은 폐기합니다.
 
+### 포크 원점·초기화 명령
+
+```text
+@LIFT,<seq>,UP|DOWN|HOME|INITIALIZE|STOP*<CRC16>\n
+```
+
+- `HOME`: 포크를 **하한 홈 스위치가 눌릴 때까지** 아래로 이동한다. 최대
+  `STEPPER_MOTOR_HOMING_MAX_STEPS` 안에 스위치가 눌리지 않으면 `ERROR`로 끝난다.
+- `INITIALIZE`: 주행 모터를 정지하고 조향 서보를 정면(100°)으로 돌린 뒤 `HOME`을 실행한다.
+- 하한 스위치가 눌리면 즉시 정지한 뒤 500 ms 후 소폭 상승해 스위치를 해제하고 `DONE`을 보고한다.
+- 상한 스위치는 사용하지 않는다. 상승 이동 범위는 명령 step 수와 기구적 안전 범위로 관리한다.
+
 ## USB 센서 상행 프레임
 
 프레이밍과 CRC는 UART 명령과 동일합니다(`frame_codec.c` 공유). 모든 필드는 10진수입니다.
@@ -291,17 +303,27 @@ ros2 topic pub --once \
   "{data: STOP}"
 ```
 
-### 시연 종료 후 포크 호밍
+### 시연 종료 후 포크 호밍·초기화
 
-이전 명령이 `DONE`인 것을 확인하면서 `DOWN`을 한 번씩 전송한다.
+포크만 하한 원점으로 보낼 때는 `HOME`을 사용한다. 이 명령은 정해진 이동량이
+아니라 하한 홈 스위치가 눌릴 때까지 계속 내려간다.
 
 ```bash
 ros2 topic pub --once \
   /fork/command std_msgs/msg/String \
-  "{data: DOWN}"
+  "{data: HOME}"
 ```
 
-하단 리밋 접촉 후 정지하고, 500ms 뒤 조금 상승해 스위치가 해제된 상태에서 `DONE`이 나오면 호밍 완료다.
+운행 시작 전 조향까지 정면으로 맞추려면 `INITIALIZE`를 보낸다. 완료 상태가 올
+때까지 ROS2 브리지는 주행 명령을 0·중앙 조향으로 유지한다.
+
+```bash
+ros2 topic pub --once \
+  /fork/command std_msgs/msg/String \
+  "{data: INITIALIZE}"
+```
+
+하단 리밋 접촉 후 정지하고, 500ms 뒤 조금 상승해 스위치가 해제된 상태에서 `DONE`이 나오면 초기화 완료다.
 
 ### 검증 결과와 범위
 
