@@ -1,0 +1,21 @@
+.git
+.idea
+*.iml
+target
+frontend/monitoring-control-system/node_modules
+frontend/monitoring-control-system/.next
+ai
+isaac_sim
+ros2_ws
+scripts
+*.py
+*.pyc
+prompt
+.env
+.env.*
+# `.env.*` 는 앞에 점이 붙은 것만 잡는다 — 배포가 쓰는 `backend.env` 는 걸리지 않아
+# 빌드 컨텍스트로 넘어갔다. 지금 Dockerfile 은 경로를 지정해 COPY 하므로 이미지에
+# 들어가진 않지만, `COPY . .` 이 생기는 순간 비밀값이 이미지에 박힌다.
+*.env
+!*.env.example
+*.pem

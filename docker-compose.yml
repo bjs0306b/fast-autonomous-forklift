@@ -1,0 +1,59 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: fast-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: fast_backend
+      MYSQL_USER: fastbackend
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fast-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - default
+      - fast-mqtt_default
+
+  frontend:
+    build:
+      context: ./frontend/monitoring-control-system
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+        NEXT_PUBLIC_ISAAC_WEBRTC_SERVER: ${NEXT_PUBLIC_ISAAC_WEBRTC_SERVER}
+        NEXT_PUBLIC_ISAAC_WEBRTC_SIGNAL_PORT: ${NEXT_PUBLIC_ISAAC_WEBRTC_SIGNAL_PORT:-49100}
+        NEXT_PUBLIC_ISAAC_WEBRTC_MEDIA_PORT: ${NEXT_PUBLIC_ISAAC_WEBRTC_MEDIA_PORT:-47998}
+    container_name: fast-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  mysql-data:
+
+networks:
+  default: {}
+  fast-mqtt_default:
+    external: true
