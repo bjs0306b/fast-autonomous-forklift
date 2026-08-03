@@ -48,10 +48,20 @@ bt_navigator:
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
-    # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
-    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
-    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
-    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
+    # ⚠️ 이 줄을 지우면 `navigate_to_pose_no_spin.xml` 이 조용히 안 쓰인다 (S15P11A304-193).
+    #
+    # `forklift_teleop nav2_forklift.launch.py` 가 RewrittenYaml 로 여기에 실제 경로를
+    # 넣는다. **RewrittenYaml 은 이미 있는 키만 덮어쓰므로 자리를 비워둬야 한다.**
+    #
+    # 비어 있으면 Nav2 는 **기본 트리**로 돌아가고 거기엔 <Spin> 이 들어 있다.
+    # Spin 은 이 차량에서 매번 실패한다 — 전진 성분 없는 명령을 모터 브리지가
+    # 데드밴드로 걸러 아무 동작도 안 한다(mapping.py:map_twist).
+    # 2026-08-03 젯슨 실물에서 `behavior_server: spin failed` 로 확인했다.
+    #
+    # ⚠️ `bringup_launch.py` 를 **직접** 부르면 이 주입이 일어나지 않는다.
+    #    07-31에 no_spin 트리를 만들어 두고도 계속 기본 트리가 쓰이던 이유가 그것이다.
+    default_nav_to_pose_bt_xml: ""
+    # navigate_through_poses 는 쓰지 않아 기본값 그대로 둔다.
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
