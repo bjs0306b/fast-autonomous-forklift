@@ -34,13 +34,22 @@
 > | **`cargoHeight`** | **`dimensions.height_cm`** | **cm ÷ 100 = m** — 데스크탑이 변환 |
 > | `tippingLevel` | `tipping.level` | 소문자 그대로 보내면 백엔드가 대문자로 저장 |
 > | `overhangRatio` | `tipping.overhang` | 없음 |
-> | `measuredAt` | `measured_at` | 없음(단, **백엔드에 저장 컬럼이 없어 버려진다**) |
+> | ~~`measuredAt`~~ | ~~`measured_at`~~ | **백엔드 DTO에서 제거됐다**(2026-08-02 리팩터). 보내도 무시된다 — 아래 참조 |
 >
 > ```
 > POST /api/stations/measurements   Content-Type: application/json
 > { "sessionId": "...", "measurementId": "...", "status": "ok", "cargoHeight": 0.723,
->   "tippingLevel": "safe", "overhangRatio": 0.057, "measuredAt": "2026-07-31T09:37:48+09:00" }
+>   "tippingLevel": "safe", "overhangRatio": 0.04 }
 > ```
+>
+> ⚠️ **`measuredAt`은 더 이상 계약에 없다.** `StationMeasurementCreateRequest`에서
+> 제거됐고 저장 시각은 서버가 `createdAt`으로 남긴다. 클라이언트가 아직 보내고 있지만
+> Spring 이 `fail-on-unknown-properties` 를 켜지 않아 **조용히 버려진다**(무해). 즉시
+> 저장되는 흐름이라 실측에서 두 시각이 사실상 같았다(12:12:00 vs 12:12:00.376).
+>
+> ⚠️ **위 예시의 `overhangRatio` 를 0.057 에서 0.04 로 고쳤다.** 0.05 **이상**이면
+> `placementEligible: false` 가 되어 적재 추천이 나가지 않는다. 정상 흐름 예시에
+> 실패하는 값을 쓰고 있었다.
 >
 > 백엔드 MQTT 측정 요청에는 `cargoId`만 들어온다. AI가
 > `POST /api/stations/sessions?cargoId=...`로 세션을 생성한 뒤, 응답으로 받은 **`sessionId`를 반드시 보낸다.**
@@ -216,9 +225,14 @@ STATION_API_BASE=http://<백엔드> python src/station/serve.py --once --publish
 > 0.12m를 따로 더하므로(`requiredHeight = cargoHeight + 0.12 + clearance`) 총높이를 보내면
 > 파렛트를 두 번 더한다. 단위 변환과 이 구분은 `tests/test_rest_client.py`가 회귀 검증한다.
 
-**서버 확인 완료 (2026-07-31)**: 백엔드가 `http://70.12.246.250:8080`에 떠 있다. 실제
-페이로드를 보내 **6필드가 전부 검증을 통과**했다(400이 아니라 409 `SESSION_NOT_ACTIVE` —
-세션만 없었고 규격은 맞았다). 200까지의 왕복은 세션을 열어야 하므로 미확인.
+**서버 확인 완료 (2026-08-03 갱신)**: 백엔드는 **EC2 `http://i15a304.p.ssafy.io:8080`**
+에 배포돼 있다. 실물 리그로 전 구간(세션 → 측정 저장 201 → 자동 해제 → 조회)을 돌려
+확인했다 — `cargoHeight 0.585`(화물만) · `tippingLevel SAFE` · `overhangRatio 0.0` ·
+`placementEligible true`.
+
+> ⚠️ **종전 주소 `70.12.246.250:8080`(김재원 노트북)은 죽었다.** 2026-07-31 저녁에
+> 접속 불가를 확인했고 배포는 EC2로 갔다. 이 문서가 그 주소를 계속 가리키고 있어
+> 2026-08-03에 고쳤다 — **주소는 문서 말고 실측을 믿을 것.**
 
 ## 세션 — 단일 설비 뮤텍스
 
@@ -226,15 +240,23 @@ STATION_API_BASE=http://<백엔드> python src/station/serve.py --once --publish
 있는 동안 다른 화물은 세션을 못 연다(409 `STATION_ALREADY_OCCUPIED`).
 
 ```bash
-STATION_API_BASE=http://70.12.246.250:8080 \
+STATION_API_BASE=http://i15a304.p.ssafy.io:8080 \
   python src/station/serve.py --once --publish --cargo-id cargo-1
 ```
 
 ### ⚠️ `--cargo-id` 없이 보내면 남의 화물에 붙는다
 
-측정 요청에는 **cargoId가 없다.** 백엔드는 `findActiveSession()`으로 **현재 활성 세션**을
-찾아 붙일 뿐 화물을 대조하지 않는다. 누가 다른 화물로 세션을 열어둔 상태에서 보내면
-**그 화물에 조용히 기록되고, 사후에 알아낼 방법이 없다.**
+측정 요청에는 **cargoId가 없다.** 세션을 열 때 준 화물에 귀속된다. 그래서 잘못된
+세션에 보내면 **그 화물에 조용히 기록되고, 사후에 알아낼 방법이 없다.**
+
+> **2026-08-03 갱신 — `sessionId`가 필수가 되면서 오귀속 구멍이 막혔다.**
+> 종전에는 백엔드가 `findActiveSession()`으로 *현재* 활성 세션을 찾아 붙였다. TTL로
+> 세션 A가 풀리고 B가 열린 뒤 도착한 **A의 늦은 측정이 B에 귀속**되는 문제가 있었다.
+> 지금은 요청에 `sessionId`를 실어야 하고 활성 세션과 다르면 409
+> `STATION_SESSION_MISMATCH`로 거부된다.
+>
+> ⚠️ **불일치로 거부됐다고 새 sessionId로 바꿔 재전송하면 안 된다** — 막으려던
+> 오귀속을 그대로 되살린다. 측정 시점의 값을 유지할 것.
 
 → **측정 데스크탑이 자기 세션을 열고 자기가 닫는다.** ("누가 여는지"의 답이다.)
 
@@ -250,7 +272,24 @@ STATION_API_BASE=http://70.12.246.250:8080 \
 세션이 몇 밀리초만 존재해 위 둘을 다 잃는다. 실패 시 `unreliable` 측정을 남겨 자동
 해제하는 절충안도 있었으나, **측정 실패 행을 DB에 쌓지 않기로** 했다(2026-07-31 결정).
 
-### ⚠️ 세션은 스스로 안 풀린다
+### ~~세션은 스스로 안 풀린다~~ → TTL이 도입됐다 (2026-08-03 갱신)
+
+> **아래 서술은 TTL 도입 전(~2026-07-31) 기준이다.** 지금은 백엔드가 세션을 자동
+> 해제하므로 "영구 잠김"은 발생하지 않는다. 배경으로 남겨둔다.
+>
+> | 항목 | 현재 |
+> |---|---|
+> | 활성 세션 TTL | `STATION_SESSION_TTL_SECONDS` **기본 60초** |
+> | MOVE 결과 대기 TTL | `STATION_MOVE_TTL_SECONDS` 기본 300초 |
+> | 정리 주기 | `STATION_SESSION_CLEANUP_INTERVAL_MS` 기본 5초 |
+> | 측정 저장 시 | **세션이 자동 해제된다.** 이후 `DELETE`는 409 `STATION_SESSION_NOT_ACTIVE` — **정상 종료로 처리할 것** |
+> | TTL 초과 시 | 세션 해제 + 작업 `FAILED`. **재측정은 없다** |
+>
+> ⚠️ **TTL 60초 안에 측정이 저장돼야 한다.** 여유는 충분하다 — 세션 창 상한이 정지
+> 대기 ≤5초(`STILL_TIMEOUT_S`) + 추론 ≤1.5초(`DEFAULT_TIMEOUT`) + REST ~0.2초로
+> **6초 이내**다(2026-08-03 실측). 다만 `--once`로 잰 총 소요 10초에는 파이썬 기동과
+> 105MB ONNX 로드가 포함돼 있으니 **그 값을 TTL 예산으로 쓰지 말 것** — 상시 모드
+> (`--listen`)에서는 세션을 열기 전에 끝나 있다.
 
 백엔드에 **TTL·자동 만료가 없다.** 게다가 종료는 **측정이 저장된 뒤에만** 된다
 (409 `STATION_MEASUREMENT_NOT_COMPLETED`). 전송이 실패한 채 끝나면 설비가 잠긴 채 남고

@@ -81,3 +81,9 @@ infra/mqtt/log/*
 !infra/mqtt/log/.gitkeep
 firmware/esp32/motor_controller/4�@W@8
 firmware/esp32/motor_controller/4�@W@8
+
+### AI 실행 산출물 ###
+# 진단·점검 명령이 작업 디렉터리에 떨어뜨리는 파일. 코드가 아니라 실행 흔적이라
+# 커밋 대상이 아니다 — `serve.py --probe` 가 어느 index 가 어느 카메라인지
+# 확인하려고 프레임을 저장한다.
+camera_probe_*.jpg
