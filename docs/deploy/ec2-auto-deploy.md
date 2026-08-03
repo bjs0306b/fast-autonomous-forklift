@@ -27,6 +27,30 @@ scripts/deploy-ec2.sh   (EC2 에서 실행)
 컨테이너 4개가 모두 `restart=unless-stopped` 이므로 **재부팅 시 자동 복구된다.**
 (systemd 유닛을 따로 만들 필요가 없다 — Docker 데몬이 그 역할을 한다.)
 
+### 언제 배포가 도는가
+
+`develop` 에 **배포 산출물에 영향을 주는 경로**가 바뀐 병합에만 돈다
+(`.gitlab-ci.yml` 의 `.deploy_paths`).
+
+| 바뀌면 배포함 | 바뀌어도 배포 안 함 |
+|---|---|
+| `src/` · `pom.xml` · `mvnw` · `.mvn/` | `docs/` |
+| `frontend/monitoring-control-system/` | `ai/` · `ros2_ws/` · `isaac_sim/` |
+| `infra/` · `Dockerfile.backend` · `docker-compose.yml` · `.dockerignore` | `firmware/` · `hardware/` · `3d_model/` |
+| `scripts/deploy-ec2.sh` · `.gitlab-ci.yml` | |
+
+⚠️ **이 목록은 `scripts/deploy-ec2.sh` 의 `DEPLOY_PATHS` 와 같아야 한다.**
+동기화되는 것과 배포를 트리거하는 것이 어긋나면, 서버에 반영은 되는데 배포는 안
+도는(혹은 그 반대) 상태가 된다. **한쪽을 고치면 다른 쪽도 고칠 것.**
+
+배포를 건너뛴 경우 `deploy:skipped` 잡이 대신 돈다. 잡이 하나도 없으면 GitLab 이
+파이프라인을 만들지 못해 화면에서 실패처럼 보이기 때문이다 — "배포를 안 한 것"과
+"파이프라인이 깨진 것"을 구분하기 위한 장치다.
+
+> `changes` 는 브랜치의 이전 커밋과 비교한다. 비교 대상을 정할 수 없을 때
+> (새 브랜치의 첫 파이프라인 등)는 **전부 바뀐 것으로 간주해 배포한다** —
+> 안전한 쪽으로 기운다.
+
 | 컨테이너 | 이미지 | 포트 |
 |---|---|---|
 | `fast-backend` | 빌드 (`Dockerfile.backend`) | 8080 |
