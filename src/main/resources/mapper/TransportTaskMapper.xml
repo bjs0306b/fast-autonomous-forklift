@@ -48,6 +48,12 @@
     <select id="findByTaskCode" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task WHERE task_code=#{taskCode}
     </select>
+    <select id="findOldestPending" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='PENDING' AND vehicle_id IS NULL
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+    </select>
     <select id="findAll" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
         <where>

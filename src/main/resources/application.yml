@@ -25,6 +25,11 @@ station:
     ttl-seconds: ${STATION_SESSION_TTL_SECONDS:60}
     cleanup-interval-ms: ${STATION_SESSION_CLEANUP_INTERVAL_MS:5000}
 
+transport:
+  scheduling:
+    enabled: ${TRANSPORT_SCHEDULING_ENABLED:true}
+    interval-ms: ${TRANSPORT_SCHEDULING_INTERVAL_MS:1000}
+
 logging:
   level:
     root: INFO

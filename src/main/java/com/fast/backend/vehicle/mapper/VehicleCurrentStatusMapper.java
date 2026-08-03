@@ -14,6 +14,9 @@ public interface VehicleCurrentStatusMapper {
 
     List<VehicleCurrentStatus> findAllByVehicleIds(List<String> vehicleIds);
 
+    /** 활성 작업이 없는 IDLE 차량을 식별자 순으로 한 대 조회한다. */
+    Optional<String> findFirstAvailableIdleVehicleId();
+
     /**
      * MySQL {@code INSERT ... ON DUPLICATE KEY UPDATE}로 차량당 최신 상태 한 행만 유지한다
      * (vehicle_id가 PK, prompt16.md 7장 조건). "오래된 메시지가 최신 상태를 덮어쓰지 않도록" 하는 비교는
