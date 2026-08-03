@@ -11,6 +11,15 @@
 #define COMM_TASK_PRIORITY              4
 
 /*
+ * A marginal I2C connector must not cost the whole vehicle. Actuator bring-up
+ * is retried at boot, and keeps being retried afterwards, so a cable that is
+ * reseated recovers without a reboot.
+ */
+#define MOTOR_INIT_RETRY_COUNT          5U
+#define MOTOR_INIT_RETRY_DELAY_MS       500U
+#define MOTOR_RECOVERY_PERIOD_MS        5000U
+
+/*
  * Sampling must not be delayed by telemetry, so the IMU task runs at a high
  * priority on core 0 while the USB uplink drains its queue on core 1.
  */
@@ -37,10 +46,10 @@
 #define STEPPER_MOTOR_TASK_STACK_SIZE     3072U
 #define STEPPER_MOTOR_TASK_PRIORITY       5U
 
-#define STEPPER_MOTOR_START_RATE_SPS      100U
-#define STEPPER_MOTOR_DEFAULT_RATE_SPS    1500U
-#define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  2000U
-#define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  6400U
+#define STEPPER_MOTOR_START_RATE_SPS      200U
+#define STEPPER_MOTOR_DEFAULT_RATE_SPS    4000U
+#define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  8000U
+#define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  12800U
 #define STEPPER_MOTOR_HOMING_RATE_SPS     1000U
 #define STEPPER_MOTOR_HOMING_ACCEL_SPS2   300U
 #define STEPPER_MOTOR_HOMING_MAX_STEPS    300000U
@@ -166,13 +175,19 @@
  * servo keep I2C0 to themselves: a 8x8 ToF readout is a long block transfer and
  * would otherwise queue up behind servo updates.
  *
- *   SDA   A4 / GPIO11    2.2k external pull-up required
- *   SCL   A5 / GPIO12    2.2k external pull-up required
- *   LPn   A6 / GPIO13    left  - drives the I2C comms block low
- *   LPn   A7 / GPIO14    right
- *   INT   A0 / GPIO1     left
- *   INT   A1 / GPIO2     right
- *   PWREN D0 / GPIO43    shared hardware reset for both sensors
+ *   MOSI_SDA   A4 / GPIO11    pull-up to 3V3 (one pair for the whole bus)
+ *   MCLK_SCL   A5 / GPIO12    pull-up to 3V3
+ *   LPn        A6 / GPIO13    left  - gates the I2C comms block
+ *   LPn        A7 / GPIO14    right
+ *   INT        A0 / GPIO1     left
+ *   INT        A1 / GPIO2     right
+ *   SPI_I2C_N  GND            selects I2C mode
+ *   NCS        3V3            SPI deselected
+ *   MISO       unconnected    SPI only
+ *
+ * The SATEL-style breakout brings out no PWREN, so the sensors cannot be power
+ * cycled from software. Addresses are resolved by probing instead; see
+ * tof_assign_address().
  */
 #define TOF_I2C_PORT                    I2C_NUM_1
 #define TOF_I2C_SDA_GPIO                GPIO_NUM_11
@@ -181,7 +196,21 @@
 #define TOF_RIGHT_LPN_GPIO              GPIO_NUM_14
 #define TOF_LEFT_INT_GPIO               GPIO_NUM_1
 #define TOF_RIGHT_INT_GPIO              GPIO_NUM_2
-#define TOF_PWREN_GPIO                  GPIO_NUM_43
+#define TOF_PROBE_TIMEOUT_MS            50
+
+/*
+ * A sensor that was reset or browned out needs far longer than the 10 ms that
+ * settles a plain LPn toggle. Probing too early reports it missing while it is
+ * still coming back.
+ */
+#define TOF_RESET_SETTLE_MS             150
+
+/*
+ * The address register is volatile. A write can be acknowledged and then lost
+ * again when the part finishes an internal reset, so the move is re-checked
+ * after this delay instead of being trusted on the ACK alone.
+ */
+#define TOF_ADDRESS_SETTLE_MS           50
 
 /*
  * 100 kHz cannot carry two 8x8 readouts at 15 Hz. The part is rated to 1 MHz;
@@ -196,6 +225,13 @@
 #define TOF_ADDRESS_DEFAULT_8BIT        0x52
 #define TOF_ADDRESS_LEFT_8BIT           0x54
 
+/*
+ * Bit per sensor: bit 0 left, bit 1 right. Clearing a bit keeps that sensor
+ * out of the bring-up sequence entirely, including its LPn line, which is the
+ * way to isolate a sensor whose wiring disturbs the working one.
+ */
+#define TOF_ENABLED_MASK                0x3U
+
 #define TOF_ZONE_COUNT                  64U
 #define TOF_RANGING_FREQUENCY_HZ        15U     /* 8x8 maximum */
 #define TOF_SENSOR_COUNT                2U
@@ -203,6 +239,13 @@
 /* Ranging is valid at target_status 5, and 9 with reduced confidence */
 #define TOF_STATUS_VALID                5U
 #define TOF_STATUS_VALID_LOW_CONFIDENCE 9U
+
+/*
+ * How often the task checks for frames the interrupt did not deliver. A sensor
+ * whose INT line is missing, or that asserted it before the handler was
+ * installed, still gets read at close to its 15 Hz rate this way.
+ */
+#define TOF_POLL_PERIOD_MS              30U
 
 #define TOF_TASK_STACK_SIZE             8192
 #define TOF_TASK_PRIORITY               8

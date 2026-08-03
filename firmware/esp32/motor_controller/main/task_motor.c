@@ -18,6 +18,7 @@ static const char *TAG = "MOTOR_TASK";
 
 static QueueHandle_t s_motor_command_queue = NULL;
 static volatile bool s_drive_idle = true;
+static volatile bool s_actuators_ready = false;
 
 static esp_err_t motor_apply_safe_stop(void)
 {
@@ -99,28 +100,55 @@ static esp_err_t motor_apply_command(
     return ESP_OK;
 }
 
+/* One attempt at bringing both actuators up; quiet so retries do not spam */
+static esp_err_t motor_try_initialize(void)
+{
+    esp_err_t result = servo_init();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return dc_motor_init();
+}
+
+static bool motor_initialize_with_retry(void)
+{
+    for (uint32_t attempt = 1; attempt <= MOTOR_INIT_RETRY_COUNT; attempt++) {
+        esp_err_t result = motor_try_initialize();
+
+        if (result == ESP_OK) {
+            return true;
+        }
+
+        ESP_LOGW(TAG, "Actuator initialization attempt %lu/%lu failed: %s",
+                 (unsigned long)attempt,
+                 (unsigned long)MOTOR_INIT_RETRY_COUNT,
+                 esp_err_to_name(result));
+        vTaskDelay(pdMS_TO_TICKS(MOTOR_INIT_RETRY_DELAY_MS));
+    }
+
+    return false;
+}
+
 static void motor_task(void *argument)
 {
     (void)argument;
 
     ESP_LOGI(TAG, "Command-driven motor task started");
 
-    esp_err_t result = servo_init();
+    /*
+     * The task stays alive even when the actuators do not answer. Deleting it
+     * used to leave the vehicle dead until someone power cycled it, and a
+     * single loose I2C connector was enough to trigger that.
+     */
+    s_actuators_ready = motor_initialize_with_retry();
 
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "Servo initialization failed: %s",
-                 esp_err_to_name(result));
-        vTaskDelete(NULL);
-        return;
-    }
-
-    result = dc_motor_init();
-
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "DC motor initialization failed: %s",
-                 esp_err_to_name(result));
-        vTaskDelete(NULL);
-        return;
+    if (!s_actuators_ready) {
+        ESP_LOGE(TAG,
+                 "Actuators unavailable; commands will be rejected until the "
+                 "I2C bus recovers. Check the Motor HAT and servo PCA9685 "
+                 "power and the SDA/SCL wiring");
     }
 
     motor_command_t applied_command = {
@@ -129,11 +157,36 @@ static void motor_task(void *argument)
         .sequence = 0
     };
     TickType_t last_valid_command_tick = xTaskGetTickCount();
+    TickType_t last_recovery_tick = xTaskGetTickCount();
     bool watchdog_stopped = true;
+    esp_err_t result;
 
-    ESP_LOGI(TAG, "Actuators ready; waiting for UART commands");
+    if (s_actuators_ready) {
+        ESP_LOGI(TAG, "Actuators ready; waiting for UART commands");
+    }
 
     while (true) {
+        /* Keep trying: a reseated connector should recover on its own */
+        if (!s_actuators_ready) {
+            TickType_t now = xTaskGetTickCount();
+
+            if (now - last_recovery_tick >=
+                pdMS_TO_TICKS(MOTOR_RECOVERY_PERIOD_MS)) {
+                last_recovery_tick = now;
+
+                if (motor_try_initialize() == ESP_OK) {
+                    s_actuators_ready = true;
+                    applied_command.drive_percent = 0;
+                    applied_command.steering_cdeg =
+                        TELEOP_STEERING_CENTER_CDEG;
+                    ESP_LOGW(TAG, "Actuators recovered; accepting commands");
+                }
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         motor_command_t command;
 
         if (xQueueReceive(
@@ -144,10 +197,16 @@ static void motor_task(void *argument)
             result = motor_apply_command(&command, &applied_command);
 
             if (result != ESP_OK) {
+                /*
+                 * The bus dropped out mid-command. Fall back to the reject and
+                 * retry path instead of killing the task.
+                 */
                 ESP_LOGE(TAG, "Command %lu failed: %s",
                          (unsigned long)command.sequence,
                          esp_err_to_name(result));
-                break;
+                s_actuators_ready = false;
+                last_recovery_tick = xTaskGetTickCount();
+                continue;
             }
 
             last_valid_command_tick = xTaskGetTickCount();
@@ -169,7 +228,9 @@ static void motor_task(void *argument)
             if (result != ESP_OK) {
                 ESP_LOGE(TAG, "Watchdog safe stop failed: %s",
                          esp_err_to_name(result));
-                break;
+                s_actuators_ready = false;
+                last_recovery_tick = xTaskGetTickCount();
+                continue;
             }
 
             applied_command.drive_percent = 0;
@@ -201,7 +262,7 @@ esp_err_t motor_task_submit_command(const motor_command_t *command)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (s_motor_command_queue == NULL) {
+    if (s_motor_command_queue == NULL || !s_actuators_ready) {
         return ESP_ERR_INVALID_STATE;
     }
 

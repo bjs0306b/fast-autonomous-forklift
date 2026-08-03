@@ -1,6 +1,7 @@
 #ifndef VL53L8CX_PAIR_H
 #define VL53L8CX_PAIR_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -18,12 +19,17 @@ typedef struct {
 } tof_zone_data_t;
 
 /*
- * Bring up I2C1, hardware-reset both sensors, move the left one off the shared
- * default address, upload firmware to both and start 8x8 ranging.
+ * Bring up I2C1, move each sensor onto its own address, upload firmware and
+ * start 8x8 ranging.
  *
- * Returns ESP_ERR_NOT_FOUND when a sensor does not answer.
+ * Sensors are taken individually: one that does not answer is dropped off the
+ * bus and the rest carry on, so a single wiring fault does not cost the whole
+ * front view. Returns ESP_ERR_NOT_FOUND only when neither sensor works.
  */
 esp_err_t tof_pair_init(void);
+
+/* False for a sensor that failed to start; it publishes nothing */
+bool tof_pair_is_present(tof_sensor_id_t sensor);
 
 /* True once a sensor has a fresh frame waiting */
 esp_err_t tof_pair_data_ready(tof_sensor_id_t sensor, bool *ready);
