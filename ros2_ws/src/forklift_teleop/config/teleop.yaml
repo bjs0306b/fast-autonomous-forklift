@@ -25,13 +25,24 @@ uart_teleop_bridge:
     #   [종전]  8500 ────── 10000 ────── 11500
     #           ?           좌회전최대     직진        ← 직진이 끝에 몰림
     #
-    #   [지금] 10000 ────── 11500 ────── 13000
-    #          좌 15°        직진         우 15°       ← 대칭
+    # 🔴 **원점 이동은 소프트웨어만으로 안 된다 — 되돌렸다.**
     #
-    # 서보 안전 범위는 30~150° 이므로 130° 는 여유가 있다.
-    # ⚠️ 서보를 교체하거나 혼을 다시 끼우면 **이 값을 다시 재야 한다.**
-    #    확인법: 명령을 주지 않으면 워치독이 중립을 유지한다 — 그때 바퀴가
-    #    직진이면 맞다.
-    steering_center_cdeg: 11500
-    steering_min_cdeg: 10000
-    steering_max_cdeg: 13000
+    # 11500/10000/13000 으로 옮겼더니 브리지가 죽었다:
+    #
+    #     protocol.py: ValueError: steering_cdeg must be between 8500 and 11500
+    #
+    # 같은 8500~11500 상한이 **네 곳**에 박혀 있다:
+    #   ① mapping.py  TeleopLimits.validate()      (넓혔음)
+    #   ② protocol.py encode_command()             ← 여기서 죽었다
+    #   ③ 펌웨어 config.h  TELEOP_STEERING_MIN/MAX_CDEG
+    #   ④ 펌웨어 task_comm.c / task_motor.c 의 검증
+    #
+    # ③④ 는 **ESP32 재빌드·플래시**가 필요하다. 시연 주간에 펌웨어를 건드리는 것은
+    # 위험 대비 실익이 없어 원상 복구한다.
+    #
+    # ⚠️ 그래서 **오른쪽으로 못 꺾는 문제가 그대로 남아 있다**(S15P11A304-197).
+    #    근본 해결은 서보 혼을 기구적으로 다시 끼워 100° 가 직진이 되게 하는 것이다.
+    #    스플라인 한 칸이 약 1.4° 라 완벽하진 않아도 범위 안으로는 들어온다.
+    steering_center_cdeg: 10000
+    steering_min_cdeg: 8500
+    steering_max_cdeg: 11500
