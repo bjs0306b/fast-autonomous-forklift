@@ -16,7 +16,7 @@
 
 | 컬럼 | 의미 |
 |---|---|
-| `cargo_id` | 입하부터 출하까지 사용하는 화물 식별자. 팔레트와 화물을 분리하지 않는다. |
+| `cargo_id` | 백엔드가 `BIGINT AUTO_INCREMENT`로 생성하는 화물 식별자. 팔레트와 화물을 분리하지 않는다. |
 | `created_at` | 화물 최초 등록 시각 |
 
 ### station_session

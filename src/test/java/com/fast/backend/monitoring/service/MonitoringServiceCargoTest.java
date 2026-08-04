@@ -65,14 +65,14 @@ class MonitoringServiceCargoTest {
     void transportingTask_fillsCargoInfoAndHeight() {
         when(vehicleService.findActiveVehicles()).thenReturn(List.of(vehicle("FORKLIFT-01", null, null)));
         when(transportTaskMapper.findActiveTasksWithVehicle())
-                .thenReturn(List.of(task("FORKLIFT-01", "CARGO-001", TaskStatus.TRANSPORTING)));
-        when(stationMeasurementMapper.findLatestCargoHeights(List.of("CARGO-001")))
-                .thenReturn(List.of(new CargoMeasuredHeight("CARGO-001", 1.25)));
+                .thenReturn(List.of(task("FORKLIFT-01", 1L, TaskStatus.TRANSPORTING)));
+        when(stationMeasurementMapper.findLatestCargoHeights(List.of(1L)))
+                .thenReturn(List.of(new CargoMeasuredHeight(1L, 1.25)));
 
         DashboardResponse.VehicleView view = single(service.getDashboard());
 
         assertThat(view.hasCargo()).isTrue();
-        assertThat(view.cargoId()).isEqualTo("CARGO-001");
+        assertThat(view.cargoId()).isEqualTo(1L);
         assertThat(view.cargoHeight()).isEqualTo(1.25);
     }
 
@@ -81,26 +81,26 @@ class MonitoringServiceCargoTest {
     void taskBeforePickup_reportsCargoIdButNotLoaded() {
         when(vehicleService.findActiveVehicles()).thenReturn(List.of(vehicle("FORKLIFT-01", null, null)));
         when(transportTaskMapper.findActiveTasksWithVehicle())
-                .thenReturn(List.of(task("FORKLIFT-01", "CARGO-002", TaskStatus.MEASURING)));
+                .thenReturn(List.of(task("FORKLIFT-01", 2L, TaskStatus.MEASURING)));
 
         DashboardResponse.VehicleView view = single(service.getDashboard());
 
         assertThat(view.hasCargo()).isFalse();
-        assertThat(view.cargoId()).isEqualTo("CARGO-002");
+        assertThat(view.cargoId()).isEqualTo(2L);
     }
 
     /** 차량 보고값이 있으면 작업 상태보다 우선한다. */
     @Test
     void reportedCargoInfo_winsOverTaskDerivedValue() {
         when(vehicleService.findActiveVehicles())
-                .thenReturn(List.of(vehicle("FORKLIFT-01", Boolean.TRUE, "CARGO-REPORTED")));
+                .thenReturn(List.of(vehicle("FORKLIFT-01", Boolean.TRUE, 3L)));
         when(transportTaskMapper.findActiveTasksWithVehicle())
-                .thenReturn(List.of(task("FORKLIFT-01", "CARGO-FROM-TASK", TaskStatus.MEASURING)));
+                .thenReturn(List.of(task("FORKLIFT-01", 4L, TaskStatus.MEASURING)));
 
         DashboardResponse.VehicleView view = single(service.getDashboard());
 
         assertThat(view.hasCargo()).isTrue();
-        assertThat(view.cargoId()).isEqualTo("CARGO-REPORTED");
+        assertThat(view.cargoId()).isEqualTo(3L);
     }
 
     /** 근거가 전혀 없으면 false 로 단정하지 않고 null(=확인 불가)을 준다. */
@@ -125,12 +125,12 @@ class MonitoringServiceCargoTest {
                 vehicle("FORKLIFT-02", null, null),
                 vehicle("FORKLIFT-03", null, null)));
         when(transportTaskMapper.findActiveTasksWithVehicle()).thenReturn(List.of(
-                task("FORKLIFT-01", "CARGO-A", TaskStatus.TRANSPORTING),
-                task("FORKLIFT-02", "CARGO-B", TaskStatus.TRANSPORTING),
-                task("FORKLIFT-03", "CARGO-C", TaskStatus.PLACING)));
+                task("FORKLIFT-01", 10L, TaskStatus.TRANSPORTING),
+                task("FORKLIFT-02", 11L, TaskStatus.TRANSPORTING),
+                task("FORKLIFT-03", 12L, TaskStatus.PLACING)));
         when(stationMeasurementMapper.findLatestCargoHeights(any())).thenReturn(List.of(
-                new CargoMeasuredHeight("CARGO-A", 0.5),
-                new CargoMeasuredHeight("CARGO-B", 0.9)));
+                new CargoMeasuredHeight(10L, 0.5),
+                new CargoMeasuredHeight(11L, 0.9)));
 
         DashboardResponse dashboard = service.getDashboard();
 
@@ -141,7 +141,7 @@ class MonitoringServiceCargoTest {
         assertThat(byId.get("FORKLIFT-02").cargoHeight()).isEqualTo(0.9);
         // 측정 결과가 없는 화물은 높이만 null 이고 화물 ID 는 그대로 남는다.
         assertThat(byId.get("FORKLIFT-03").cargoHeight()).isNull();
-        assertThat(byId.get("FORKLIFT-03").cargoId()).isEqualTo("CARGO-C");
+        assertThat(byId.get("FORKLIFT-03").cargoId()).isEqualTo(12L);
     }
 
     private static DashboardResponse.VehicleView single(DashboardResponse dashboard) {
@@ -149,13 +149,13 @@ class MonitoringServiceCargoTest {
         return dashboard.vehicles().get(0);
     }
 
-    private static VehicleResponse vehicle(String vehicleId, Boolean hasCargo, String cargoId) {
+    private static VehicleResponse vehicle(String vehicleId, Boolean hasCargo, Long cargoId) {
         VehicleStatusResponse status = new VehicleStatusResponse(
                 VehicleStatus.IDLE, null, null, null, null, null, hasCargo, cargoId, null, null);
         return new VehicleResponse(vehicleId, vehicleId, true, status);
     }
 
-    private static TransportTask task(String vehicleId, String cargoId, TaskStatus status) {
+    private static TransportTask task(String vehicleId, Long cargoId, TaskStatus status) {
         TransportTask task = new TransportTask();
         task.setTaskCode("TASK-" + cargoId);
         task.setVehicleId(vehicleId);

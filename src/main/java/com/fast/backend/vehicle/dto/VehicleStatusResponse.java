@@ -12,7 +12,7 @@ public record VehicleStatusResponse(
         Double heading,
         Double speed,
         Boolean hasCargo,
-        String cargoId,
+        Long cargoId,
         OffsetDateTime messageAt,
         OffsetDateTime receivedAt
 ) {

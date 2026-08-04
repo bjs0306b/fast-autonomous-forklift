@@ -82,18 +82,18 @@ public class MonitoringService {
                 .forEach(task -> currentTasks.putIfAbsent(task.getVehicleId(), task));
 
         // 화물 높이는 차량 목록이 확정된 뒤 한 번에 조회한다(차량별 조회 금지 — N+1).
-        Map<String, String> cargoIdByVehicleId = new HashMap<>();
+        Map<String, Long> cargoIdByVehicleId = new HashMap<>();
         for (VehicleResponse vehicle : activeVehicles) {
-            String cargoId = resolveCargoId(vehicle, currentTasks.get(vehicle.vehicleId()));
+            Long cargoId = resolveCargoId(vehicle, currentTasks.get(vehicle.vehicleId()));
             if (cargoId != null) {
                 cargoIdByVehicleId.put(vehicle.vehicleId(), cargoId);
             }
         }
-        Map<String, Double> cargoHeights = findCargoHeights(cargoIdByVehicleId.values());
+        Map<Long, Double> cargoHeights = findCargoHeights(cargoIdByVehicleId.values());
 
         List<DashboardResponse.VehicleView> vehicles = activeVehicles.stream()
                 .map(vehicle -> {
-                    String cargoId = cargoIdByVehicleId.get(vehicle.vehicleId());
+                    Long cargoId = cargoIdByVehicleId.get(vehicle.vehicleId());
                     return toVehicleView(
                             vehicle,
                             locations.get(vehicle.vehicleId()),
@@ -119,9 +119,9 @@ public class MonitoringService {
      * 메시지에는 화물 정보가 없어 이 값이 채워지지 않으므로, 비어 있으면 진행 중인 운반 작업의
      * 화물로 대신한다. 작업의 {@code cargo_id} 는 작업 생성 시 반드시 채워지는 실데이터다.
      */
-    private static String resolveCargoId(VehicleResponse vehicle, TransportTask currentTask) {
-        String reported = vehicle.status().cargoId();
-        if (reported != null && !reported.isBlank()) {
+    private static Long resolveCargoId(VehicleResponse vehicle, TransportTask currentTask) {
+        Long reported = vehicle.status().cargoId();
+        if (reported != null) {
             return reported;
         }
         return currentTask == null ? null : currentTask.getCargoId();
@@ -144,12 +144,12 @@ public class MonitoringService {
     }
 
     /** 화물 식별자 → 최근 측정 높이(m). 조회 대상이 없으면 쿼리를 아예 실행하지 않는다. */
-    private Map<String, Double> findCargoHeights(Collection<String> cargoIds) {
-        List<String> distinct = cargoIds.stream().distinct().toList();
+    private Map<Long, Double> findCargoHeights(Collection<Long> cargoIds) {
+        List<Long> distinct = cargoIds.stream().distinct().toList();
         if (distinct.isEmpty()) {
             return Map.of();
         }
-        Map<String, Double> heights = new HashMap<>();
+        Map<Long, Double> heights = new HashMap<>();
         // 쿼리가 오래된 것 → 최신 순으로 주므로, 뒤 행이 앞 행을 덮어 최신 1건만 남는다.
         for (CargoMeasuredHeight row : stationMeasurementMapper.findLatestCargoHeights(distinct)) {
             heights.put(row.cargoId(), row.cargoHeight());
@@ -161,7 +161,7 @@ public class MonitoringService {
             VehicleResponse vehicle,
             VehicleLocationSnapshot location,
             TransportTask currentTask,
-            String cargoId,
+            Long cargoId,
             Double cargoHeight) {
         VehicleStatusResponse status = vehicle.status();
         DashboardResponse.LocationView locationView = location == null ? null

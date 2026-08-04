@@ -5,13 +5,13 @@
 ```mermaid
 erDiagram
     cargo {
-        varchar cargo_id PK
+        bigint cargo_id PK "AUTO_INCREMENT"
         datetime created_at
     }
 
     station_session {
         varchar session_id PK
-        varchar cargo_id FK
+        bigint cargo_id FK
     }
 
     station_state {
@@ -49,7 +49,7 @@ erDiagram
         double heading
         double speed
         boolean has_cargo
-        varchar cargo_id
+        bigint cargo_id
         datetime message_at
         datetime received_at
     }
@@ -63,13 +63,13 @@ erDiagram
         double destination_heading
         varchar status
         bigint reserved_task_id
-        varchar stored_cargo_id FK,UK
+        bigint stored_cargo_id FK,UK
     }
 
     transport_task {
         bigint id PK
         varchar task_code UK
-        varchar cargo_id FK
+        bigint cargo_id FK
         varchar measurement_session_id FK,UK
         varchar measurement_id FK
         varchar vehicle_id FK

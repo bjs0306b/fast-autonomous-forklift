@@ -45,10 +45,16 @@ public class TransportTaskMeasurementService {
         this.broadcaster = broadcaster;
     }
 
-    public void complete(StationSession session, StationMeasurement measurement) {
+    /**
+     * 측정 결과를 작업과 적재 위치에 연결한다.
+     *
+     * @return 작업이 정상적으로 {@link TaskStatus#PICKING_UP} 상태가 되어 다음 입하를 준비해도 되면
+     *         {@code true}, 측정 부적합·추천 실패 등으로 작업을 실패 처리했으면 {@code false}
+     */
+    public boolean complete(StationSession session, StationMeasurement measurement) {
         TransportTask task = taskMapper.findByMeasurementSessionId(session.getSessionId()).orElse(null);
         if (task == null) {
-            return;
+            return false;
         }
         if (!session.getCargoId().equals(task.getCargoId())) {
             throw new IllegalStateException("측정 세션과 운반 작업의 화물이 일치하지 않습니다: "
@@ -56,7 +62,7 @@ public class TransportTaskMeasurementService {
         }
         if (!eligibility.isEligible(measurement)) {
             fail(task, "측정 결과가 적재 조건을 만족하지 않음");
-            return;
+            return false;
         }
 
         final PlacementRecommendation recommendation;
@@ -65,12 +71,12 @@ public class TransportTaskMeasurementService {
                     measurement.getCargoHeight(), loadEmptyCandidates());
         } catch (BusinessException exception) {
             fail(task, exception.getMessage());
-            return;
+            return false;
         }
 
         if (slotMapper.reserveIfEmpty(recommendation.slotCode(), task.getId()) != 1) {
             fail(task, "선택된 적재 위치를 예약하지 못함: " + recommendation.slotCode());
-            return;
+            return false;
         }
         if (taskMapper.completeMeasurement(
                 task.getId(), measurement.getMeasurementId(), recommendation.slotCode(),
@@ -83,6 +89,7 @@ public class TransportTaskMeasurementService {
                 "TRANSPORT_TASK_MEASURED", task.getTaskCode(), TaskStatus.PICKING_UP.name(), task.getVehicleId());
         log.info("Transport task measurement completed: taskId={}, measurementId={}, slotCode={}",
                 task.getTaskCode(), measurement.getMeasurementId(), recommendation.slotCode());
+        return true;
     }
 
     private List<PlacementCandidate> loadEmptyCandidates() {

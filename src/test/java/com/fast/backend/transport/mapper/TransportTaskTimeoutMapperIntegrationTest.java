@@ -26,7 +26,6 @@ class TransportTaskTimeoutMapperIntegrationTest {
     void moveTimeout_doesNotOverwriteAJustRecordedMeasurementRequest() {
         LocalDateTime startedAt = LocalDateTime.of(2026, 8, 3, 11, 50);
         Cargo cargo = new Cargo();
-        cargo.setCargoId("CARGO-MOVE-TIMEOUT-RACE");
         cargo.setCreatedAt(startedAt);
         cargoMapper.insert(cargo);
 

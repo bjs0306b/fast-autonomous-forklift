@@ -5,7 +5,7 @@
 ## 전체 순서
 
 ```text
-운반 작업 생성 및 차량 배정
+화물 등록과 운반 작업 원자적 생성 및 차량 배정
 → taskId가 포함된 측정 위치 MOVE 명령 발행
 → ROS2가 MOVE 결과 SUCCESS 반환
 → 백엔드가 cargoId로 fast/station/measure_request 발행
@@ -55,14 +55,20 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 
 ```json
 {
-  "cargoId": "CARGO-001"
+  "cargoId": 1
 }
 ```
 
 - 요청 한 건당 한 번 측정하고 최종 결과 한 건만 전송한다.
+- `cargoId`는 백엔드가 `POST /api/cargos`에서 자동 생성한 64비트 정수다.
 - AI는 기존 `POST /api/stations/sessions?cargoId=...` API로 세션을 생성한다.
 - 백엔드는 생성된 세션을 같은 `cargoId`의 측정 대기 작업과 연결한다.
 - 이미지 파일은 저장하지 않는다. 실시간 영상 표시가 필요하면 측정 결과 계약과 별도 스트림으로 구현한다.
+
+정상 측정 결과가 저장되고 작업이 `PICKING_UP`으로 전환되면, 측정 트랜잭션 커밋 후
+`CARGO_INTAKE_NEXT_DELAY_MS`(기본 5000ms)가 지난 시점에 다음 화물과 `PENDING` 운반 작업을
+자동 생성한다. 부적합 측정, 적재 위치 추천 실패, 세션 TTL 만료에서는 자동 생성하지 않는다.
+자동 입하는 `CARGO_INTAKE_AUTO_CREATE_ENABLED`(기본 `true`)로 끌 수 있다.
 
 현재 AI의 `trigger.py`, `serve.py`, `rest_client.py` 세션 생성 흐름을 그대로 사용한다.
 

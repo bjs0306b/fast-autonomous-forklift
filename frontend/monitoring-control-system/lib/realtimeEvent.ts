@@ -57,7 +57,7 @@ export function normalizeStatusEvent(
     status,
     updatedAt,
     hasCargo: toBooleanOrNull(data.hasCargo),
-    cargoId: toStringOrNull(data.cargoId),
+    cargoId: toFiniteNumberOrNull(data.cargoId),
   }
 }
 

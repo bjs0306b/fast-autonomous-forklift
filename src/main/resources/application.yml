@@ -30,6 +30,12 @@ transport:
     enabled: ${TRANSPORT_SCHEDULING_ENABLED:true}
     interval-ms: ${TRANSPORT_SCHEDULING_INTERVAL_MS:1000}
 
+cargo:
+  intake:
+    # 정상 측정 완료 후 다음 화물과 PENDING 작업을 자동 생성한다.
+    auto-create-enabled: ${CARGO_INTAKE_AUTO_CREATE_ENABLED:true}
+    next-delay-ms: ${CARGO_INTAKE_NEXT_DELAY_MS:5000}
+
 logging:
   level:
     root: INFO

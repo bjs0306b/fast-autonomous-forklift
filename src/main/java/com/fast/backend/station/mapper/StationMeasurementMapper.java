@@ -43,6 +43,6 @@ public interface StationMeasurementMapper {
      *
      * @param cargoIds 조회할 화물 식별자. <b>비어 있으면 호출하지 말 것</b>(IN () 는 문법 오류다).
      */
-    List<CargoMeasuredHeight> findLatestCargoHeights(@Param("cargoIds") List<String> cargoIds);
+    List<CargoMeasuredHeight> findLatestCargoHeights(@Param("cargoIds") List<Long> cargoIds);
 
 }

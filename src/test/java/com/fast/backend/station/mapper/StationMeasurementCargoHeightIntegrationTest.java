@@ -42,57 +42,57 @@ class StationMeasurementCargoHeightIntegrationTest {
 
     @Test
     void multipleMeasurements_returnRowsOrderedSoLatestWins() {
-        insertCargo("CARGO-HEIGHT-1");
+        Long cargoId = insertCargo();
         // 같은 화물을 두 번 측정했다(세션이 두 개). 최신 측정이 유효한 높이여야 한다.
-        insertMeasurement("CARGO-HEIGHT-1", "SESSION-H1-A", "M-H1-A", 0.50);
-        insertMeasurement("CARGO-HEIGHT-1", "SESSION-H1-B", "M-H1-B", 1.25);
+        insertMeasurement(cargoId, "SESSION-H1-A", "M-H1-A", 0.50);
+        insertMeasurement(cargoId, "SESSION-H1-B", "M-H1-B", 1.25);
 
-        Map<String, Double> heights = collect(measurementMapper.findLatestCargoHeights(List.of("CARGO-HEIGHT-1")));
+        Map<Long, Double> heights = collect(measurementMapper.findLatestCargoHeights(List.of(cargoId)));
 
         // 호출부(MonitoringService)와 같은 방식으로 뒤 행이 앞 행을 덮는다.
-        assertThat(heights).containsEntry("CARGO-HEIGHT-1", 1.25);
+        assertThat(heights).containsEntry(cargoId, 1.25);
     }
 
     @Test
     void measurementWithoutHeight_isExcluded() {
-        insertCargo("CARGO-HEIGHT-2");
-        insertMeasurement("CARGO-HEIGHT-2", "SESSION-H2", "M-H2", null);
+        Long cargoId = insertCargo();
+        insertMeasurement(cargoId, "SESSION-H2", "M-H2", null);
 
-        List<CargoMeasuredHeight> rows = measurementMapper.findLatestCargoHeights(List.of("CARGO-HEIGHT-2"));
+        List<CargoMeasuredHeight> rows = measurementMapper.findLatestCargoHeights(List.of(cargoId));
 
         assertThat(rows).isEmpty();
     }
 
     @Test
     void multipleCargos_areResolvedInSingleQuery() {
-        insertCargo("CARGO-HEIGHT-3");
-        insertCargo("CARGO-HEIGHT-4");
-        insertMeasurement("CARGO-HEIGHT-3", "SESSION-H3", "M-H3", 0.72);
-        insertMeasurement("CARGO-HEIGHT-4", "SESSION-H4", "M-H4", 1.08);
+        Long firstCargoId = insertCargo();
+        Long secondCargoId = insertCargo();
+        insertMeasurement(firstCargoId, "SESSION-H3", "M-H3", 0.72);
+        insertMeasurement(secondCargoId, "SESSION-H4", "M-H4", 1.08);
 
-        Map<String, Double> heights = collect(measurementMapper.findLatestCargoHeights(
-                List.of("CARGO-HEIGHT-3", "CARGO-HEIGHT-4", "CARGO-NOT-MEASURED")));
+        Map<Long, Double> heights = collect(measurementMapper.findLatestCargoHeights(
+                List.of(firstCargoId, secondCargoId, Long.MAX_VALUE)));
 
-        assertThat(heights).containsEntry("CARGO-HEIGHT-3", 0.72);
-        assertThat(heights).containsEntry("CARGO-HEIGHT-4", 1.08);
+        assertThat(heights).containsEntry(firstCargoId, 0.72);
+        assertThat(heights).containsEntry(secondCargoId, 1.08);
         // 측정 이력이 없는 화물은 아예 행이 없다 → 화면은 "측정 정보 없음"이 된다.
-        assertThat(heights).doesNotContainKey("CARGO-NOT-MEASURED");
+        assertThat(heights).doesNotContainKey(Long.MAX_VALUE);
     }
 
-    private static Map<String, Double> collect(List<CargoMeasuredHeight> rows) {
-        Map<String, Double> heights = new HashMap<>();
+    private static Map<Long, Double> collect(List<CargoMeasuredHeight> rows) {
+        Map<Long, Double> heights = new HashMap<>();
         rows.forEach(row -> heights.put(row.cargoId(), row.cargoHeight()));
         return heights;
     }
 
-    private void insertCargo(String cargoId) {
+    private Long insertCargo() {
         Cargo cargo = new Cargo();
-        cargo.setCargoId(cargoId);
         cargo.setCreatedAt(LocalDateTime.of(2026, 8, 3, 9, 0));
         cargoMapper.insert(cargo);
+        return cargo.getCargoId();
     }
 
-    private void insertMeasurement(String cargoId, String sessionId, String measurementId, Double cargoHeight) {
+    private void insertMeasurement(Long cargoId, String sessionId, String measurementId, Double cargoHeight) {
         StationSession session = new StationSession();
         session.setSessionId(sessionId);
         session.setCargoId(cargoId);

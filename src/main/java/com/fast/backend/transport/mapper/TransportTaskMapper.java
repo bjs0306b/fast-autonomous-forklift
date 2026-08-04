@@ -17,13 +17,13 @@ public interface TransportTaskMapper {
     List<TransportTask> findAll(
             @Param("status") TaskStatus status,
             @Param("vehicleId") String vehicleId,
-            @Param("cargoId") String cargoId,
+            @Param("cargoId") Long cargoId,
             @Param("limit") int limit,
             @Param("offset") int offset);
     long countAll(
             @Param("status") TaskStatus status,
             @Param("vehicleId") String vehicleId,
-            @Param("cargoId") String cargoId);
+            @Param("cargoId") Long cargoId);
     List<TransportTask> findActiveTasksWithVehicle();
     int updateAssignment(
             @Param("taskCode") String taskCode,
@@ -61,11 +61,11 @@ public interface TransportTaskMapper {
             @Param("id") Long id,
             @Param("expiredBefore") LocalDateTime expiredBefore,
             @Param("failedAt") LocalDateTime failedAt);
-    Optional<TransportTask> findPendingMeasurementByCargoId(String cargoId);
+    Optional<TransportTask> findPendingMeasurementByCargoId(Long cargoId);
     Optional<TransportTask> findByMeasurementSessionId(String sessionId);
     int lockMeasurementLane();
     boolean existsMeasurementLaneBusy();
     boolean existsActiveTaskByVehicleId(String vehicleId);
-    boolean existsOpenTaskByCargoId(String cargoId);
+    boolean existsOpenTaskByCargoId(Long cargoId);
     boolean existsActiveTaskBySlotCode(String slotCode);
 }

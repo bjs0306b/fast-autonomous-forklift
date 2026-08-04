@@ -10,5 +10,5 @@ package com.fast.backend.station.dto;
  * @param cargoId    화물 식별자
  * @param cargoHeight 팔레트를 제외한 화물 높이(m). 측정 파이프라인이 저장한 값 그대로다.
  */
-public record CargoMeasuredHeight(String cargoId, Double cargoHeight) {
+public record CargoMeasuredHeight(Long cargoId, Double cargoHeight) {
 }
