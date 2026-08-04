@@ -23,7 +23,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
 
-@SpringBootTest(properties = "station.measurement-request.dispatch-interval-ms=600000")
+@SpringBootTest(properties = {
+        "station.measurement-request.dispatch-interval-ms=600000",
+        "spring.datasource.url=jdbc:h2:mem:station_measurement_ready_after_commit_test;MODE=MySQL;DB_CLOSE_DELAY=-1"
+})
 @ActiveProfiles("test")
 class StationMeasurementReadyAfterCommitIntegrationTest {
 
