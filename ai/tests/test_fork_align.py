@@ -9,9 +9,11 @@ from __future__ import annotations
 import math
 
 from perception.fork_align import (
+    AlignError,
     AlignTarget,
     EntryFace,
     TargetTracker,
+    YawSmoother,
     choose_entry_face,
     eligible_targets,
 )
@@ -217,3 +219,73 @@ def test_reset은_락을_즉시_푼다() -> None:
     tracker.update([PALLET] + FACE_NEAR)
     tracker.reset()
     assert tracker.locked is None
+
+
+# --- 요각 평활 (S15P11A304-152) ---
+#
+# 2026-08-04, 차와 파렛트를 **둘 다 세워둔 채** dry-run 을 돌렸더니 요각이
+# 프레임마다 ±8.8° 튀었고 값이 전부 2.2° 배수였다(bbox 정수 픽셀 양자화).
+# 아래 수치는 그때 로그에서 가져왔다.
+
+
+def align_error(yaw_signal: float, yaw_deg: float | None = None) -> AlignError:
+    return AlignError(lateral_ratio=0.1, yaw_signal=yaw_signal,
+                      approach_px=152.0, yaw_deg=yaw_deg, distance_mm=406.0)
+
+
+def test_창_1이면_생값을_그대로_돌려준다() -> None:
+    smoother = YawSmoother(window=1)
+    error = align_error(0.05, 8.8)
+    assert smoother.update(error) is error
+
+
+def test_평활은_격자_사이_값을_만든다() -> None:
+    """중앙값이 아니라 평균을 쓰는 이유 — 해상도가 실제로 올라가야 한다.
+
+    입력이 전부 2.2° 격자 위에 있어도 결과는 그 사이에 떨어져야 한다.
+    """
+    smoother = YawSmoother(window=5)
+    result = None
+    for degrees in (0.0, -8.8, 0.0, -4.4, -2.2):
+        result = smoother.update(align_error(degrees / 100.0, degrees))
+    assert result is not None
+    # 최대(0.0)·최소(-8.8) 하나씩 버리고 남은 0.0·-4.4·-2.2 의 평균.
+    assert math.isclose(result.yaw_deg, -2.2, abs_tol=1e-6)
+    assert result.yaw_deg not in (0.0, -2.2 * 2, -8.8)
+
+
+def test_평활이_노이즈_폭을_줄인다() -> None:
+    """실제 로그의 생값을 넣어 폭이 줄어드는지 본다."""
+    raw = [0.0, -8.8, 0.0, -4.4, -2.2, 0.0, -6.6, -10.9, -4.4, -6.6]
+    smoother = YawSmoother(window=5)
+    smoothed = [smoother.update(align_error(d / 100.0, d)).yaw_deg for d in raw]
+    settled = smoothed[4:]          # 창이 찬 뒤부터 본다
+    assert max(settled) - min(settled) < (max(raw) - min(raw)) / 2
+
+
+def test_타깃을_놓치면_창을_비운다() -> None:
+    """다른 파렛트·다른 면의 값이 섞이면 안 된다."""
+    smoother = YawSmoother(window=5)
+    for _ in range(5):
+        smoother.update(align_error(0.10, 10.0))
+    assert smoother.update(None) is None
+    after = smoother.update(align_error(0.0, 0.0))
+    assert after.yaw_deg == 0.0     # 앞의 10.0 이 안 섞였다
+
+
+def test_yaw_deg가_없어도_signal은_평활된다() -> None:
+    """캘리브레이션 없이 돌면 yaw_deg 가 None 이다 — 그때도 제어는 돌아야 한다."""
+    smoother = YawSmoother(window=3)
+    result = None
+    for signal in (0.0, 0.06, 0.03):
+        result = smoother.update(align_error(signal))
+    assert result.yaw_deg is None
+    assert math.isclose(result.yaw_signal, 0.03, abs_tol=1e-9)
+
+
+def test_창은_1_미만일_수_없다() -> None:
+    try:
+        YawSmoother(window=0)
+    except ValueError:
+        return
+    raise AssertionError("window 0 은 거부해야 한다")
