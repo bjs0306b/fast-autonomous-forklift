@@ -102,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--burst", type=int, default=5, help="B키 1회에 저장할 장수")
     parser.add_argument("--auto", type=float, metavar="SEC",
                         help="자동 저장 간격(초) — 지정하면 자동 모드로 시작")
+    # SSH 로 젯슨에 붙어 촬영할 때는 창을 띄울 수 없다(GTK 초기화 실패).
+    # 미리보기를 끄고 --auto 로만 저장한다. 종료는 Ctrl-C.
+    parser.add_argument("--headless", action="store_true",
+                        help="미리보기 창 없이 --auto 로만 저장 (SSH·젯슨용). "
+                             "키 입력이 없으므로 --auto 가 필수, 종료는 Ctrl-C")
     # 치수 평가셋(스테이션)은 프레임마다 TF-Nova 실측 거리가 있어야 오프라인 치수
     # 검증이 된다. 이 플래그를 켜면 저장할 때마다 거리를 읽어 session.csv에 남긴다.
     # (온보드 -s 촬영은 detection이라 거리 불필요 → 끄고 쓴다.)
@@ -153,8 +158,17 @@ def main(argv: list[str] | None = None) -> int:
     log_path = args.out / "session.csv"
     new_log = not log_path.exists()
 
+    headless = args.headless
+    if headless and not auto_on:
+        # 키 입력이 없으므로 --auto 없이는 **한 장도 안 찍힌다.** 조용히 도는 대신
+        # 여기서 끊는다 — 다 찍은 줄 알고 나중에 빈 폴더를 발견하는 게 더 나쁘다.
+        raise SystemExit("--headless 는 --auto 가 필요하다 (예: --headless --auto 2)")
+
     print(f"저장 폴더: {args.out.resolve()}")
-    print("SPACE 저장 / B 버스트 / A 자동 / U 취소 / Q 종료")
+    if headless:
+        print(f"headless — {auto_interval:.1f}초마다 자동 저장. 종료는 Ctrl-C")
+    else:
+        print("SPACE 저장 / B 버스트 / A 자동 / U 취소 / Q 종료")
 
     with open(log_path, "a", newline="", encoding="utf-8") as fp:
         log = csv.writer(fp)
@@ -189,17 +203,29 @@ def main(argv: list[str] | None = None) -> int:
                         else f"  !! {width}x{height} 아님")
                 dist_txt = (f"dist {last_dist}cm" if last_dist is not None
                             else ("dist --" if sensor else "dist off"))
-                cv2.imshow("shoot", draw_hud(frame, [
-                    f"saved {len(saved)}   {w}x{h}{warn}   {dist_txt}",
-                    f"auto {'ON ' + format(auto_interval, '.1f') + 's' if auto_on else 'OFF'}"
-                    f"   burst {args.burst}   [SPACE/B/A/U/Q]",
-                ]))
+                if not headless:
+                    cv2.imshow("shoot", draw_hud(frame, [
+                        f"saved {len(saved)}   {w}x{h}{warn}   {dist_txt}",
+                        f"auto {'ON ' + format(auto_interval, '.1f') + 's' if auto_on else 'OFF'}"
+                        f"   burst {args.burst}   [SPACE/B/A/U/Q]",
+                    ]))
 
                 if auto_on and time.monotonic() >= next_auto:
                     d, s = read_distance()
                     last_dist = d if d is not None else last_dist
                     store(frame, "auto", d, s)
                     next_auto = time.monotonic() + (auto_interval or 1.0)
+                    if headless:
+                        # 화면이 없으니 저장 사실을 stdout 으로 알린다. 이게 없으면
+                        # "돌고는 있는데 찍히는지 모르겠는" 상태가 된다.
+                        print(f"[{len(saved):4d}] 저장 {saved[-1].name}  {w}x{h}{warn}  {dist_txt}",
+                              flush=True)
+
+                if headless:
+                    # imshow 를 안 하면 waitKey 가 이벤트를 못 돌려 키 입력이 안 온다.
+                    # headless 는 --auto 전용이므로 그냥 프레임 간격만 쉰다(Ctrl-C 로 종료).
+                    time.sleep(0.03)
+                    continue
 
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
