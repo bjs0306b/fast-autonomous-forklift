@@ -34,13 +34,26 @@ class TeleopLimits:
             raise ValueError("rear steering limit is invalid")
         if not 0 <= self.min_drive_percent <= self.max_drive_percent <= 60:
             raise ValueError("drive percentage limits are invalid")
+        # 서보 물리 안전 범위(펌웨어 config.h: SERVO_MIN/MAX_ANGLE_DEG = 30~150°).
+        # cdeg = 도 × 100 이므로 3000~15000.
+        #
+        # ⚠️ 종전에는 8500~11500 으로 **훨씬 좁게** 박혀 있었다. 그 값은 "서보
+        #    원점이 곧 기구 직진" 이라는 가정에서 나온 것인데, 실제로는 혼이 약 15°
+        #    틀어져 끼워져 있어 **물리 직진이 11500(상한)** 이었다. 그래서 오른쪽
+        #    조향을 표현할 수가 없었다 — 검증이 그 범위를 막고 있었기 때문이다
+        #    (2026-08-04, S15P11A304-197).
+        #
+        # 좁은 상수로 두 번 막을 이유가 없다. 서보 보호는 펌웨어가 한다.
         if not (
-            8500 <= self.steering_min_cdeg
+            3000 <= self.steering_min_cdeg
             <= self.steering_center_cdeg
             <= self.steering_max_cdeg
-            <= 11500
+            <= 15000
         ):
-            raise ValueError("steering limits are invalid")
+            raise ValueError(
+                "steering limits are invalid: "
+                f"min={self.steering_min_cdeg} center={self.steering_center_cdeg} "
+                f"max={self.steering_max_cdeg} (허용 3000~15000, min≤center≤max)")
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
