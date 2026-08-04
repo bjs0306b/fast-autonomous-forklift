@@ -32,15 +32,34 @@ export function SelectedVehicleInfoPanel({
   )
 }
 
+/**
+ * 차량을 아직 클릭하지 않은 상태.
+ *
+ * 값 자리를 비워 두지 않고 <b>모두 `-`</b> 로 채운다. 빈 칸은 "값을 못 받았다"처럼 보이지만
+ * `-` 는 "아직 고르지 않았다"를 뜻한다 — 관제 화면에서 이 둘을 구분하지 못하면 장비 이상을
+ * 의심하게 된다.
+ *
+ * source 배지는 <b>그리지 않는다</b>. 선택된 차량이 없으므로 SIM/REAL 은 물론 "구분 없음"도
+ * 표시할 대상이 없다.
+ */
 function EmptySelection() {
   return (
     <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 xl:grid-cols-4">
-      <InfoField label="차량 ID" empty />
-      <InfoField label="차량 상태" empty />
-      <InfoField label="물건 높이" empty />
-      <InfoField label="적재 여부" empty />
+      <InfoField label="차량 ID">
+        <span className="font-mono text-xs font-semibold text-slate-500">-</span>
+        <span className="mt-0.5 block text-[10px] text-slate-500">-</span>
+      </InfoField>
+      <InfoField label="차량 상태">
+        <span className="text-xs text-slate-500">-</span>
+      </InfoField>
+      <InfoField label="물건 높이">
+        <span className="text-xs text-slate-500">-</span>
+      </InfoField>
+      <InfoField label="적재 여부">
+        <span className="text-xs text-slate-500">-</span>
+      </InfoField>
       <dd className="text-xs text-slate-400 sm:col-span-2 xl:col-span-4">
-        차량을 선택해 주세요.
+        미니맵에서 차량을 선택해 주세요.
       </dd>
     </dl>
   )

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { fetchMonitoringDashboard } from "@/lib/api/monitoringApi"
+import { sortVehicleIds } from "@/lib/monitoring/vehiclePriority"
 import { normalizeLocationEvent, normalizeStatusEvent } from "@/lib/realtimeEvent"
 import { isAbortError } from "@/types/api"
 import type { DashboardResponse, DashboardTask, DashboardVehicle } from "@/types/monitoring"
-import type { RealtimeEvent } from "@/types/websocket"
+import type { RealtimeEvent, TransportTaskEvent } from "@/types/websocket"
+import { TRANSPORT_TASK_FAILED_EVENT_TYPE } from "@/types/websocket"
 
 export type DashboardLoadState = "loading" | "loaded" | "error"
 
@@ -29,16 +31,26 @@ function toMonitoringState(dashboard: DashboardResponse): MonitoringState {
   for (const task of dashboard.tasks) {
     if (task && typeof task.taskId === "string") tasksById[task.taskId] = task
   }
-  return { vehiclesById, vehicleOrder, tasksById }
+  // 주 시연 차량(SIM-F01)이 항상 맨 앞에 오도록 정렬한다. sortVehicleIds 가 복사본을 만들므로
+  // API 응답 배열은 그대로 둔다.
+  return { vehiclesById, vehicleOrder: sortVehicleIds(vehicleOrder), tasksById }
 }
 
+/**
+ * 대시보드를 다시 불러온 뒤 어떤 차량을 선택 상태로 둘지 정한다.
+ *
+ * <b>차량을 자동으로 선택하지 않는다.</b> 선택은 오직 사용자가 마커를 클릭했을 때만 생긴다 —
+ * 자동 선택은 "내가 고르지 않은 차량의 정보"를 상세 패널에 띄우고, 관제 화면에서 그것은 지금
+ * 어느 차량을 보고 있는지 착각하게 만든다. 그래서 목록에 SIM-F01 이 있어도, 차량이 한 대뿐이어도
+ * 고르지 않는다(정렬 우선순위는 목록 표시 순서일 뿐 선택과 무관하다).
+ *
+ * 하는 일은 두 가지뿐이다.
+ *   1. 기존 선택이 목록에 남아 있으면 그대로 유지 — 갱신 때마다 선택이 풀리지 않게
+ *   2. 그 차량이 목록에서 사라졌으면(삭제·비활성) null 로 되돌려 미선택 상태로
+ */
 function resolveSelectedVehicleId(previous: string | null, state: MonitoringState): string | null {
   if (previous && state.vehiclesById[previous]) return previous
-  const located = state.vehicleOrder.find((id) => {
-    const location = state.vehiclesById[id]?.location
-    return location?.x != null && location?.y != null
-  })
-  return located ?? state.vehicleOrder[0] ?? null
+  return null
 }
 
 function isOlder(incoming: string | null, current: string | null | undefined): boolean {
@@ -135,6 +147,21 @@ export function useMonitoringDashboard() {
     [requestCargoHeightRefresh],
   )
 
+  /**
+   * 운반 작업 이벤트 처리.
+   *
+   * 실패 상세(원인 코드·전복 등급·돌출률)는 dashboard 응답에만 있으므로 **실패 이벤트에서만**
+   * 재조회한다 — 모든 작업 이벤트마다 부르면 정상 흐름에서 왕복이 늘기만 한다.
+   * 이 재조회가 있어야 TTL 만료처럼 사용자가 아무 조작도 하지 않은 실패가 화면에 즉시 뜬다.
+   */
+  const applyTaskEvent = useCallback(
+    (event: TransportTaskEvent) => {
+      if (event.eventType !== TRANSPORT_TASK_FAILED_EVENT_TYPE) return
+      void loadDashboard()
+    },
+    [loadDashboard],
+  )
+
   const applyLocationEvent = useCallback((event: RealtimeEvent<unknown>) => {
     const location = normalizeLocationEvent(event)
     if (!location) return
@@ -172,5 +199,6 @@ export function useMonitoringDashboard() {
     loadDashboard,
     applyStatusEvent,
     applyLocationEvent,
+    applyTaskEvent,
   }
 }

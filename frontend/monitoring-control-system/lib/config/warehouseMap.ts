@@ -30,6 +30,14 @@ export const WAREHOUSE_MAP_IMAGE = "/images/warehouse-map.png"
 /** 배경 이미지의 픽셀 크기. 컨테이너를 이 비율로 고정해 마커와 배경이 어긋나지 않게 한다. */
 export const WAREHOUSE_MAP_IMAGE_SIZE = { width: 400, height: 600 } as const
 
+/**
+ * 미니맵 표시 전용 가로 배율.
+ *
+ * 월드 좌표와 viewBox 는 20m x 30m 그대로 유지하고, 배경 SVG와 차량 마커가 공유하는
+ * 렌더링 박스만 함께 15% 넓힌다. 두 레이어가 같은 박스를 쓰므로 위치 정렬은 유지된다.
+ */
+export const WAREHOUSE_MAP_HORIZONTAL_DISPLAY_SCALE = 1.15
+
 /** 창고 월드 좌표 범위(m). make_map.py 의 WORLD_W/WORLD_H/ORIGIN 과 일치시킨다. */
 export const WAREHOUSE_WORLD_BOUNDS: WorldBounds = {
   minX: 0,
@@ -55,12 +63,18 @@ export const WAREHOUSE_INVERT_Y = true
  * 참고로 이 좌표를 변환하면 left = 3/20 = 15%, top = 100 - 2/30*100 ≈ 93.3% 이다.
  *
  * 여기에 없는 차량은 위치를 받기 전까지 미니맵에 표시하지 않는다.
+ *
+ * 실제 위치가 도착하면 그 값이 우선한다 — `MiniMap.tsx` 가 location 을 먼저 보고, 없을 때만
+ * 이 표를 쓴다(초기 위치로 그린 마커는 `pending: true` 로 구분 표시된다).
+ *
+ * 관제 대상은 `SIM-F01` 한 대이고, 그 시작 지점은 맵의 START 표식과 같다
+ * (`isaac_sim/docs/interface-spec.md`).
  */
 export const INITIAL_VEHICLE_POSES: Record<
   string,
   { x: number; y: number; heading: number }
 > = {
-  "REAL-F01": { x: 3, y: 2, heading: 0 },
+  "SIM-F01": { x: 3, y: 2, heading: 0 },
 }
 
 /**

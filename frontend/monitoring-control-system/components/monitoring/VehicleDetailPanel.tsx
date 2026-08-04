@@ -4,6 +4,7 @@ import { Ban, Loader2, OctagonAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatClockTime, formatNumber } from "@/lib/format"
 import type { DashboardVehicle } from "@/types/monitoring"
+import { MeasurementFailureCard } from "./MeasurementFailureCard"
 import { SelectedVehicleInfoPanel } from "./SelectedVehicleInfoPanel"
 
 /**
@@ -48,21 +49,15 @@ export function VehicleDetailPanel({
         <span className="text-xs font-semibold text-slate-100">차량 상세</span>
       </header>
 
-      {vehicle ? (
-        <VehicleDetailContent
-          vehicle={vehicle}
-          onStop={onStop}
-          onEmergencyStop={onEmergencyStop}
-          stopPending={stopPending}
-          emergencyStopPending={emergencyStopPending}
-        />
-      ) : (
-        <div className="flex flex-1 items-center justify-center p-4 text-center">
-          <p className="text-xs text-pretty text-slate-400">
-            미니맵에서 차량을 선택하면 상세 정보가 표시됩니다.
-          </p>
-        </div>
-      )}
+      {/* 미선택이어도 같은 레이아웃을 그대로 그리고 값만 "-" 로 채운다. 안내 문구 하나로
+          갈아 끼우면 어떤 항목이 있는지조차 안 보여, 차량을 고른 뒤에야 화면 구조를 알게 된다. */}
+      <VehicleDetailContent
+        vehicle={vehicle}
+        onStop={onStop}
+        onEmergencyStop={onEmergencyStop}
+        stopPending={stopPending}
+        emergencyStopPending={emergencyStopPending}
+      />
     </section>
   )
 }
@@ -74,14 +69,15 @@ function VehicleDetailContent({
   stopPending,
   emergencyStopPending,
 }: {
-  vehicle: DashboardVehicle
+  /** null 이면 아직 아무 차량도 클릭하지 않은 상태다. 모든 값이 "-" 로 표시된다. */
+  vehicle: DashboardVehicle | null
   onStop?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
   stopPending: boolean
   emergencyStopPending: boolean
 }) {
-  const loc = vehicle.location
-  const task = vehicle.currentTask
+  const loc = vehicle?.location
+  const task = vehicle?.currentTask
   const positionLabel =
     loc?.x != null && loc?.y != null
       ? `X ${formatNumber(loc.x, 2)} · Y ${formatNumber(loc.y, 2)}`
@@ -89,14 +85,19 @@ function VehicleDetailContent({
 
   // 이미 ESTOP 상태면 재발행을 막는다. 이 판단은 오직 차량이 보고한 status 로만 한다 —
   // 명령 발행 성공(PUBLISHED)으로는 절대 ESTOP 으로 간주하지 않는다.
-  const alreadyEstopped = vehicle.status === "ESTOP"
-  const stopDisabled = stopPending || emergencyStopPending || !onStop
-  const estopDisabled = alreadyEstopped || emergencyStopPending || stopPending || !onEmergencyStop
+  const alreadyEstopped = vehicle?.status === "ESTOP"
+  // 선택된 차량이 없으면 보낼 대상이 없다. 제어 버튼은 비활성이어야 한다 —
+  // 활성인 채로 두면 "어느 차량을 세우는 건지" 모르는 명령이 나갈 수 있다.
+  const stopDisabled = !vehicle || stopPending || emergencyStopPending || !onStop
+  const estopDisabled =
+    !vehicle || alreadyEstopped || emergencyStopPending || stopPending || !onEmergencyStop
   const estopLabel = emergencyStopPending
     ? "명령 전송 중..."
     : alreadyEstopped
       ? "비상정지 상태"
-      : `${vehicle.vehicleId} 비상정지`
+      : vehicle
+        ? `${vehicle.vehicleId} 비상정지`
+        : "비상정지"
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2">
@@ -104,6 +105,10 @@ function VehicleDetailContent({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
         {/* ID · 상태 · 화물 높이 · 적재 여부를 반응형 핵심 그리드로 한 번만 표시한다. */}
         <SelectedVehicleInfoPanel vehicle={vehicle} />
+
+        {/* 실패 원인은 스크롤 영역 최상단에 둔다 — 작업자가 가장 먼저 봐야 할 정보다.
+            실패가 없거나 차량 미선택이면 아무것도 렌더링되지 않아 기존 레이아웃이 그대로 유지된다. */}
+        <MeasurementFailureCard failure={vehicle?.lastFailure} />
 
         {/* X/Y는 0을 포함한 두 값이 모두 있을 때만 하나의 위치 칸에 표시한다. */}
         <div>
@@ -132,7 +137,11 @@ function VehicleDetailContent({
           <div className="mb-1 text-[10px] font-medium tracking-wide text-slate-400 uppercase">
             현재 작업
           </div>
-          {task ? (
+          {/* 세 상태를 구분한다. 미선택("-")과 "선택됐지만 작업 없음"을 같은 문구로 묶으면
+              차량을 고르지도 않았는데 "진행 중인 작업이 없습니다"라는 사실 주장을 하게 된다. */}
+          {!vehicle ? (
+            <p className="rounded-md bg-white/5 px-2 py-1.5 text-xs text-slate-500">-</p>
+          ) : task ? (
             <dl className="grid grid-cols-1 gap-1.5 text-xs sm:grid-cols-2">
               <DetailField label="Task" value={task.taskId} mono />
               <DetailField label="작업 상태" value={task.status} />
@@ -149,9 +158,9 @@ function VehicleDetailContent({
       <div className="mt-2 grid shrink-0 grid-cols-1 gap-1.5 border-t border-slate-800 pt-2 sm:grid-cols-2">
         <button
           type="button"
-          onClick={() => onStop?.(vehicle.vehicleId)}
+          onClick={() => vehicle && onStop?.(vehicle.vehicleId)}
           disabled={stopDisabled}
-          aria-label={`${vehicle.vehicleId} 차량 일반 정지`}
+          aria-label={vehicle ? `${vehicle.vehicleId} 차량 일반 정지` : "차량 일반 정지 (차량 미선택)"}
           aria-busy={stopPending}
           data-testid="selected-vehicle-stop-button"
           className={cn(
@@ -170,7 +179,7 @@ function VehicleDetailContent({
         </button>
         <button
           type="button"
-          onClick={() => onEmergencyStop?.(vehicle.vehicleId)}
+          onClick={() => vehicle && onEmergencyStop?.(vehicle.vehicleId)}
           disabled={estopDisabled}
           aria-busy={emergencyStopPending}
           data-testid="vehicle-estop-button"

@@ -45,4 +45,14 @@ public interface StationMeasurementMapper {
      */
     List<CargoMeasuredHeight> findLatestCargoHeights(@Param("cargoIds") List<Long> cargoIds);
 
+    /**
+     * 여러 세션의 측정 결과를 한 번에 조회한다(관제 화면의 실패 원인 표시용).
+     *
+     * <p>실패한 작업은 {@code measurement_id} 가 연결되지 않는다 — 연결은 적재 위치 예약까지 성공해야
+     * 일어나기 때문이다. 그래서 실패 작업의 측정 결과는 <b>세션 식별자</b>로만 찾을 수 있다.
+     *
+     * @param sessionIds 조회할 세션 식별자. <b>비어 있으면 호출하지 말 것</b>(IN () 는 문법 오류다).
+     */
+    List<StationMeasurement> findBySessionIds(@Param("sessionIds") List<String> sessionIds);
+
 }

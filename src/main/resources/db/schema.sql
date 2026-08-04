@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS transport_task (
     measurement_requested_at DATETIME(6) NULL COMMENT 'AI 측정 요청 발행 시각. TTL 실패 판정 기준',
     completed_at          DATETIME(6)  NULL COMMENT '운반 작업 완료 시각',
     failed_at             DATETIME(6)  NULL COMMENT '운반 작업 실패 시각',
+    failure_code          VARCHAR(40)  NULL COMMENT '실패 원인 코드. 관제 화면이 원인별 문구를 고르는 근거',
     created_at            DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '운반 작업 생성 시각',
     CONSTRAINT uk_transport_task_code UNIQUE (task_code),
     CONSTRAINT uk_transport_task_measurement_session UNIQUE (measurement_session_id),
@@ -131,6 +132,13 @@ CREATE TABLE IF NOT EXISTS transport_task (
         'PENDING', 'ASSIGNED', 'MOVING_TO_PICKUP', 'MEASURING', 'PICKING_UP',
         'TRANSPORTING', 'PLACING', 'COMPLETED', 'FAILED', 'CANCELLED'
     )),
+    CONSTRAINT chk_transport_task_failure_code CHECK (
+        failure_code IS NULL OR failure_code IN (
+            'MEASUREMENT_NO_DETECTION', 'MEASUREMENT_DISTANCE_UNRELIABLE',
+            'MEASUREMENT_PALLET_NOT_DETECTED', 'PLACEMENT_INELIGIBLE',
+            'MEASUREMENT_NO_RESPONSE', 'PLACEMENT_SLOT_UNAVAILABLE'
+        )
+    ),
     CONSTRAINT chk_transport_task_placement CHECK (
         (measurement_id IS NULL
             AND destination_slot_code IS NULL

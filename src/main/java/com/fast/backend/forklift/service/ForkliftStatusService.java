@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * 지게차 상태 메시지를 처리한다. {@code forkliftId}는 곧 차량 도메인의 {@code vehicleId}이므로
- * (예: {@code REAL-F01}, {@code SIM-F01}), 이 메시지를 {@link VehicleStatusUpdateCommand}로 변환해
+ * (예: {@code SIM-F01}), 이 메시지를 {@link VehicleStatusUpdateCommand}로 변환해
  * {@link VehicleStatusService#updateCurrentStatus}에 위임한다(prompt20.md 11장) — DB upsert와
  * WebSocket 브로드캐스트는 전부 그 메서드가 책임진다. 이 클래스는 "MQTT 상태 메시지를 어떻게 Command로
  * 바꾸고, Service가 던지는 예외를 어떻게 다운그레이드할지"만 안다(MQTT Receiver/Router가 DB 로직을

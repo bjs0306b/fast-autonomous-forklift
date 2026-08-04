@@ -2,6 +2,7 @@ import type {
   EmergencyStopAllResponse,
   VehicleCommandResponse,
 } from "@/types/command"
+import { getJson } from "./httpClient"
 import { postJson } from "./httpClient"
 
 // 차량 안전 명령 API (FR-503).
@@ -62,4 +63,17 @@ export async function emergencyStopAll(
     undefined,
     signal,
   )
+}
+
+/** 기존 차량별 최근 명령 조회 API를 관제 화면에서 재사용한다. */
+export async function fetchRecentVehicleCommands(
+  vehicleId: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<VehicleCommandResponse[]> {
+  const commands = await getJson<VehicleCommandResponse[]>(
+    `/api/vehicles/${encodeURIComponent(vehicleId)}/commands?limit=${limit}`,
+    signal,
+  )
+  return Array.isArray(commands) ? commands : []
 }
