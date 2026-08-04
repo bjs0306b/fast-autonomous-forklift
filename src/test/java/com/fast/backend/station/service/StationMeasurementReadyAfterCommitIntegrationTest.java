@@ -17,6 +17,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,6 +36,7 @@ class StationMeasurementReadyAfterCommitIntegrationTest {
     @Autowired private ApplicationEventPublisher eventPublisher;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private Clock clock;
     @MockBean private StationMeasureRequestPublisher requestPublisher;
 
     private Long taskId;
@@ -44,7 +46,7 @@ class StationMeasurementReadyAfterCommitIntegrationTest {
     void readyEvent_afterCommit_persistsRequestClaimAndPublishes() {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status -> {
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(clock);
             Cargo cargo = new Cargo();
             cargo.setCreatedAt(now);
             cargoMapper.insert(cargo);
