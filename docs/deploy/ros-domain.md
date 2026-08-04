@@ -1,4 +1,4 @@
-# ROS_DOMAIN_ID 분리 — 실물 34, 시뮬 0
+# ROS_DOMAIN_ID 분리 — 실물 100, 시뮬 0
 
 > 2026-08-04. 관련 이슈: S15P11A304-152
 
@@ -38,18 +38,23 @@ ROS2 는 **같은 네트워크·같은 도메인이면 노드와 토픽을 자�
 
 |대상|ROS_DOMAIN_ID|
 |---|---|
-|**실물 지게차 (젯슨)**|**34**|
+|**실물 지게차 (젯슨)**|**100**|
 |Isaac Sim / 시뮬|0 (기본값 그대로)|
 
-`34` 는 프로젝트 `A304` 에서 땄다. 기본값 0 을 피한 이유는 시뮬뿐 아니라
-**SSAFY 다른 팀과의 충돌**도 막기 위해서다.
+`100` 은 **이미 팀 규약으로 정해져 있던 값**이다 —
+`firmware/esp32/motor_controller/README.md` 의 운용 절차에 *"모든 터미널에서
+`ROS_DOMAIN_ID=100` 을 사용한다"* 로 적혀 있다.
+
+> ⚠️ 이 문서를 처음 쓸 때 그 규약을 못 보고 `34`(A304 에서 딴 값)로 정했다가
+> 되돌렸다. **새 관례를 만들기 전에 기존 문서를 먼저 뒤질 것** — 번호가 갈리면
+> 서로 안 보이는데, 그 증상이 "아무것도 안 뜬다" 라서 원인 찾기가 어렵다.
 
 ## 젯슨 설정 (완료됨)
 
 `~/.bashrc` 와 `~/.profile` **양쪽에** 넣었다.
 
 ```bash
-export ROS_DOMAIN_ID=34
+export ROS_DOMAIN_ID=100
 ```
 
 ⚠️ **양쪽에 넣어야 한다.** 우분투 `~/.bashrc` 는 맨 앞에서 비대화 셸이면 즉시
@@ -59,19 +64,19 @@ export ROS_DOMAIN_ID=34
 확인:
 
 ```bash
-ssh orin 'bash -lc "echo \$ROS_DOMAIN_ID"'      # 34
+ssh orin 'bash -lc "echo \$ROS_DOMAIN_ID"'      # 100
 ```
 
 ## ⚠️ 붙는 쪽도 같은 도메인이어야 한다
 
-젯슨의 ROS 노드와 **대화하려는 모든 것**이 34 여야 한다.
+젯슨의 ROS 노드와 **대화하려는 모든 것**이 100 이어야 한다.
 
-* **ROS2 MQTT 브리지**(`fast_mqtt_bridge`) — 젯슨에서 돌면 자동으로 34 를 상속한다.
-  다른 PC 에서 돌린다면 그쪽도 34 로 맞춰야 백엔드 MOVE 가 전달된다.
+* **ROS2 MQTT 브리지**(`fast_mqtt_bridge`) — 젯슨에서 돌면 자동으로 100 을 상속한다.
+  다른 PC 에서 돌린다면 그쪽도 100 으로 맞춰야 백엔드 MOVE 가 전달된다.
 * **RViz·`ros2 topic echo` 로 디버깅할 때** — 노트북에서 젯슨 토픽이 안 보이면
-  이것부터 의심할 것. `export ROS_DOMAIN_ID=34` 후 다시.
+  이것부터 의심할 것. `export ROS_DOMAIN_ID=100` 후 다시.
 * ⚠️ **systemd 서비스는 `.profile` 을 안 읽는다.** 브리지를 systemd 로 올린다면
-  유닛에 `Environment=ROS_DOMAIN_ID=34` 를 명시해야 한다.
+  유닛에 `Environment=ROS_DOMAIN_ID=100` 를 명시해야 한다.
 
 ## 영향 없는 것
 
