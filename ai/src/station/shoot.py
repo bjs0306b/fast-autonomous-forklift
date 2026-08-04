@@ -44,10 +44,20 @@ HUD_BG = (30, 30, 30)
 
 
 def open_camera(cfg: StationConfig, index: int, width: int, height: int) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
-    if not cap.isOpened():
+    # ⚠️ **CAP_DSHOW 는 윈도우 전용이다**(DirectShow). 리눅스에서 지정하면 카메라가
+    # 멀쩡한데도 열리지 않는다 — 젯슨에서 온보드 촬영을 하려다 걸렸다(2026-08-04).
+    # 스테이션(윈도우)에서는 DSHOW 가 필요하다: 기본 백엔드(MSMF)는 해상도 설정이
+    # 잘 안 먹고 초기화가 느리다. 그래서 플랫폼으로 갈라 준다.
+    backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform == "win32" else [cv2.CAP_ANY]
+    cap = None
+    for backend in backends:
+        cap = cv2.VideoCapture(index, backend)
+        if cap.isOpened():
+            break
+        cap.release()
+    if cap is None or not cap.isOpened():
         raise RuntimeError(f"카메라 index {index}를 열 수 없습니다 "
-                           f"(serve.py --probe로 확인)")
+                           f"(윈도우: serve.py --probe / 리눅스: ls /dev/video*)")
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     for _ in range(cfg.warmup_frames):   # 자동 노출 안정화 (실측: 안 하면 어둡다)
