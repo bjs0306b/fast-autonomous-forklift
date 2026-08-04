@@ -88,6 +88,10 @@ def main(argv=None) -> int:
                          "출발한다 (S15P11A304-198)")
     ap.add_argument("--k-lateral", type=float, default=None,
                     help="좌우 오차 게인. 안 주면 fork_servo 기본값")
+    ap.add_argument("--k-lateral-rate", type=float, default=None,
+                    help="좌우 오차 **변화율**에 걸리는 감쇠 게인. 기본 0(꺼짐). "
+                         "ALIGN 한계진동이 감쇠 부재 때문인지 시험할 때 켠다 — "
+                         "먼저 --k-lateral 0.10 으로 게인 문제인지부터 가른다")
     ap.add_argument("--insert-margin", type=float, default=None,
                     help="진입 목표에서 빼는 여유(mm). 줄일수록 깊이 들어간다. "
                          "⚠️ 한 번에 많이 줄이면 파렛트를 민다 — 한 단계씩")
@@ -133,6 +137,8 @@ def main(argv=None) -> int:
         servo_kwargs["k_lateral"] = a.k_lateral
     if a.insert_margin is not None:
         servo_kwargs["insert_margin_mm"] = a.insert_margin
+    if a.k_lateral_rate is not None:
+        servo_kwargs["k_lateral_rate"] = a.k_lateral_rate
     servo = ForkServo(**servo_kwargs)
     smoother = YawSmoother(a.yaw_window)
     if servo_kwargs:

@@ -247,3 +247,49 @@ def test_reset하면_기록이_새로_시작된다() -> None:
     servo.step(ALIGNED_FAR, DT)
     servo.reset()
     assert servo.episode.samples == []
+
+
+# --- 감쇠항 (S15P11A304-152) ---
+#
+# 08-04 실주행에서 lat 이 주기 1.8초 사인파로 흔들렸다. 조향각 → 요레이트 →
+# 헤딩 → 좌우위치로 적분이 두 번 들어가는 계에 비례항만 걸면 감쇠비가 0 이다.
+# 아래는 **부호와 기본 꺼짐**만 못 박는다 — 효과는 실물로만 확인된다.
+
+
+def test_감쇠는_기본으로_꺼져_있다() -> None:
+    """검증 전까지 기본 거동이 바뀌면 안 된다."""
+    with_rate = steering_for(err(lateral=0.3), lateral_rate=5.0)
+    without = steering_for(err(lateral=0.3), lateral_rate=0.0)
+    assert with_rate == without
+
+
+def test_감쇠는_오차가_커지는_방향을_거스른다() -> None:
+    """오차가 벌어지는 중이면 조향을 더 세게, 좁혀지는 중이면 덜 세게."""
+    base = steering_for(err(lateral=0.3), k_lateral_rate=0.05)
+    widening = steering_for(err(lateral=0.3), lateral_rate=+1.0,
+                            k_lateral_rate=0.05)
+    closing = steering_for(err(lateral=0.3), lateral_rate=-1.0,
+                           k_lateral_rate=0.05)
+    # lateral>0 이면 각속도가 음수(우회전)다. 벌어지는 중이면 더 음수여야 한다.
+    assert widening < base < closing
+
+
+def test_감쇠도_각속도_상한을_넘지_않는다() -> None:
+    assert steering_for(err(lateral=0.3), lateral_rate=1e6,
+                        k_lateral_rate=0.05) >= -MAX_ANGULAR
+
+
+def test_첫_프레임에는_변화율을_지어내지_않는다() -> None:
+    """직전 값이 없는데 변화율을 만들면 출발하자마자 조향이 튄다."""
+    servo = ForkServo(k_lateral_rate=0.05)
+    first = servo.step(err(lateral=0.3, approach=APPROACH_PX), DT)
+    plain = ForkServo().step(err(lateral=0.3, approach=APPROACH_PX), DT)
+    assert first.angular_z == plain.angular_z
+
+
+def test_타깃을_놓친_구간은_변화율에_안_섞인다() -> None:
+    """놓친 프레임을 건너뛴 차이를 변화율로 쓰면 없는 급변을 만들어낸다."""
+    servo = ForkServo(k_lateral_rate=0.05, lost_grace_s=1.0)
+    servo.step(err(lateral=0.1, approach=APPROACH_PX), DT)
+    servo.step(None, DT)                       # 놓침 — 여기서 갱신하면 안 된다
+    assert servo._last_lateral == 0.1

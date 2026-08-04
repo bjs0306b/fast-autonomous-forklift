@@ -134,6 +134,35 @@ K_LATERAL = 0.25
 K_YAW = 0.60
 MAX_ANGULAR = 0.35          # teleop 상한과 동일
 
+K_LATERAL_RATE = 0.0
+"""좌우 오차의 **변화율**에 걸리는 감쇠 게인. **기본 0 = 꺼짐.**
+
+⚠️ **기본값을 0으로 둔 것은 의도다.** 2026-08-04에 넣었지만 실물로 검증하지
+못했다. 검증 없이 켜면 근거 없는 값이 하나 더 박힌다. `--k-lateral-rate` 로
+켜서 시험한 뒤, 효과가 확인되면 그때 기본값을 올린다.
+
+**왜 필요한가** — 08-04 실주행에서 `lat` 이 **주기 1.8초의 깨끗한 사인파**로
+흔들렸다(±0.3~0.4). 신호가 매끈하니 노이즈가 아니라 **폐루프 한계진동**이다.
+속도를 0.02로 낮추고 요각을 평활해도 **안 줄었다.**
+
+구조가 설명한다. 조향각 → 요레이트 → 헤딩 → 좌우위치로 **적분이 두 번** 들어간다.
+이중적분기에 비례제어만 걸면 감쇠비가 0이라 반드시 진동하고, **게인을 낮추면
+주기만 길어진다.**
+
+⚠️ `steering_for` 의 docstring 은 "첫 항이 반대로 작용해 저절로 감쇠한다" 고
+적고 있는데 **그것은 감쇠가 아니다.** 오차를 되돌리는 **복원력**(스프링)이지,
+속도에 반대로 작용하는 **감쇠**(댐퍼)가 아니다. 스프링만 있으면 진동한다.
+
+진짜 감쇠는 **오차의 변화율**에 비례하는 항이다 — 그것이 이 게인이다.
+
+⚠️ **미분은 노이즈를 증폭한다.** 10fps 에서 dt 0.1초면 잡음이 10배가 된다.
+`lateral_ratio` 는 비교적 깨끗하지만(요각과 달리 양자화 계단이 안 보인다),
+켜고 나서 조향 명령이 떨면 이쪽을 의심할 것.
+
+**먼저 할 실험**: `--k-lateral 0.10` 으로 돌린다. 진폭이 확 줄면 게인 문제이고,
+**주기만 길어지고 진폭이 그대로면 감쇠 부재가 확정**된다(이론 예측). 후자일 때
+이 게인을 켠다."""
+
 ALIGN_YAW_BOOST = 2.0
 """ALIGN에서 요 게인에 곱하는 배수.
 
@@ -321,7 +350,9 @@ def _clamp(v: float, lo: float, hi: float) -> float:
 
 
 def steering_for(error: AlignError, k_lateral: float = K_LATERAL,
-                 k_yaw: float = K_YAW, max_angular: float = MAX_ANGULAR) -> float:
+                 k_yaw: float = K_YAW, max_angular: float = MAX_ANGULAR,
+                 lateral_rate: float = 0.0,
+                 k_lateral_rate: float = K_LATERAL_RATE) -> float:
     """정렬 오차 → 각속도(rad/s). 부호 유도가 핵심이라 근거를 적어둔다.
 
     카메라를 원점, 전방을 +Y, 오른쪽을 +X로 둔다. 파렛트 면이 반시계로 θ만큼 돌면
@@ -332,12 +363,22 @@ def steering_for(error: AlignError, k_lateral: float = K_LATERAL,
     좌우 오차도 같다 — 파렛트가 화면 오른쪽에 있으면(`lateral_ratio > 0`) 오른쪽으로
     가야 한다. **두 항의 부호가 같고**, ROS 관례에서 우회전은 음의 각속도다.
 
-    두 항을 더하는 것은 "파렛트 앞 standoff 점을 향해 달린다"의 1차 근사다. 오른쪽으로
-    돌아 들어가면 파렛트가 화면 왼쪽으로 흐르며 첫 항이 반대로 작용해 저절로 감쇠한다.
+    두 항을 더하는 것은 "파렛트 앞 standoff 점을 향해 달린다"의 1차 근사다.
     ⚠️ 대신 **두 항이 균형을 이루는 지점에 수렴할 뿐 둘 다 0이 되지는 않는다** — 그래서
     ALIGN에서 yaw 게인을 키워 요를 먼저 죽이고, 진입은 그 뒤에 직선으로 한다.
+
+    ⚠️ **여기에 적혀 있던 "첫 항이 반대로 작용해 저절로 감쇠한다" 는 틀렸다**
+    (2026-08-04 정정). 그것은 오차를 되돌리는 **복원력**(스프링)이지 **감쇠**(댐퍼)가
+    아니다. 조향각 → 요레이트 → 헤딩 → 좌우위치로 적분이 두 번 들어가는 계에
+    비례항만 걸면 감쇠비가 0이라 **반드시 진동한다.** 실제로 실주행 `lat` 이 주기
+    1.8초 사인파로 흔들렸다.
+
+    `lateral_rate`(좌우 오차의 시간 변화율)와 `k_lateral_rate` 가 그 감쇠항이다.
+    **기본은 꺼져 있다** — `K_LATERAL_RATE` 주석 참조.
     """
-    return _clamp(-(k_lateral * error.lateral_ratio + k_yaw * error.yaw_signal),
+    return _clamp(-(k_lateral * error.lateral_ratio
+                    + k_yaw * error.yaw_signal
+                    + k_lateral_rate * lateral_rate),
                   -max_angular, max_angular)
 
 
@@ -361,7 +402,8 @@ class ForkServo:
                  k_yaw: float = K_YAW,
                  align_yaw_boost: float = ALIGN_YAW_BOOST,
                  align_speed: float = ALIGN_SPEED,
-                 insert_margin_mm: float = INSERT_MARGIN_MM) -> None:
+                 insert_margin_mm: float = INSERT_MARGIN_MM,
+                 k_lateral_rate: float = K_LATERAL_RATE) -> None:
         self.lateral_tolerance = lateral_tolerance
         self.yaw_tolerance = yaw_tolerance
         self.align_enter_px = align_enter_px
@@ -380,8 +422,11 @@ class ForkServo:
         # 진입 깊이를 실주행으로 좁혀 들어가야 해서 같이 뺐다. 줄일수록 깊이
         # 들어간다 — ⚠️ **한 번에 많이 줄이지 말 것.** 너무 줄이면 파렛트를 민다.
         self.insert_margin_mm = insert_margin_mm
+        self.k_lateral_rate = k_lateral_rate
 
         self.phase = Phase.SEARCH
+        # 감쇠항용 — 직전 프레임의 좌우 오차. None 이면 변화율을 못 구한다.
+        self._last_lateral: float | None = None
         self.episode = Episode()
         self._t = 0.0
         self._lost_for = 0.0
@@ -396,6 +441,17 @@ class ForkServo:
         self._t = self._lost_for = self._insert_elapsed = 0.0
         self._insert_target_s = self.insert_duration_s
         self._last = DriveCommand()
+        self._last_lateral = None
+
+    def _lateral_rate(self, error: AlignError, dt: float) -> float:
+        """좌우 오차의 시간 변화율(1/s). 감쇠항의 입력이다.
+
+        직전 값이 없거나 `dt`가 0이면 **0을 돌려준다** — 첫 프레임에 없는 변화율을
+        지어내면 출발하자마자 조향이 튄다.
+        """
+        if self._last_lateral is None or dt <= 0.0:
+            return 0.0
+        return (error.lateral_ratio - self._last_lateral) / dt
 
     def is_finished(self) -> bool:
         return self.phase in (Phase.DONE, Phase.ABORT)
@@ -445,6 +501,11 @@ class ForkServo:
         """
         self._t += dt
         cmd = self._advance(error, dt)
+        # 감쇠항은 **직전 프레임과의 차이**로 구하므로 여기서 갱신한다.
+        # 타깃을 놓친 프레임은 기록하지 않는다 — 놓친 구간을 건너뛴 차이를
+        # 변화율로 쓰면 없는 급변을 만들어낸다.
+        if error is not None:
+            self._last_lateral = error.lateral_ratio
         self._last = cmd
         self.episode.record(self._t, error, cmd)
         return cmd
@@ -494,15 +555,22 @@ class ForkServo:
             return DriveCommand(phase=Phase.ABORT,
                                 reason="진입 거리인데 미정렬 — 재접근 필요")
 
+        lateral_rate = self._lateral_rate(error, dt)
+
         if self._reached(error, self.align_enter_px, self.align_enter_mm):
             self.phase = Phase.ALIGN
             return DriveCommand(
                 linear_x=self.align_speed,
                 angular_z=steering_for(error, self.k_lateral,
-                                       self.k_yaw * self.align_yaw_boost),
+                                       self.k_yaw * self.align_yaw_boost,
+                                       lateral_rate=lateral_rate,
+                                       k_lateral_rate=self.k_lateral_rate),
                 phase=Phase.ALIGN, reason="정렬 중(요 우선)")
 
         self.phase = Phase.APPROACH
         return DriveCommand(linear_x=CRUISE_SPEED,
-                            angular_z=steering_for(error, self.k_lateral, self.k_yaw),
+                            angular_z=steering_for(
+                                error, self.k_lateral, self.k_yaw,
+                                lateral_rate=lateral_rate,
+                                k_lateral_rate=self.k_lateral_rate),
                             phase=Phase.APPROACH, reason="접근 중")
