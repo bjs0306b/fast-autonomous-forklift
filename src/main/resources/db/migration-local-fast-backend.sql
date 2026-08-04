@@ -218,6 +218,16 @@ SET @sql = (
       AND TABLE_NAME = 'transport_task' AND COLUMN_NAME = 'measurement_requested_at');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- 실패 원인 코드 (S15P11A304-114). CHECK 제약은 새 코드 추가 시 함께 넓혀야 하므로
+-- 여기서는 컬럼만 추가한다 — 값 검증은 애플리케이션 enum 이 하고, 신규 DB 는 schema.sql 이 건다.
+SET @sql = (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE transport_task ADD COLUMN failure_code VARCHAR(40) NULL COMMENT ''실패 원인 코드. 관제 화면이 원인별 문구를 고르는 근거''',
+        'SELECT ''SKIP: transport_task.failure_code exists'' AS message')
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'transport_task' AND COLUMN_NAME = 'failure_code');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- 구 필수 컬럼 완화 (현재 코드는 pallet_id / updated_at 을 INSERT 하지 않는다)
 SET @sql = (
     SELECT IF(COUNT(*) = 1, 'ALTER TABLE transport_task MODIFY COLUMN pallet_id VARCHAR(50) NULL COMMENT ''(구 컬럼) 현재 코드 미사용''',
@@ -351,7 +361,9 @@ CREATE TABLE IF NOT EXISTS vehicle_command (
 -- 백엔드는 미등록 vehicleId 의 상태·위치·경로 메시지를 전부 폐기한다
 --   ForkliftLocationService.handleLocation / IsaacForkliftPathService.handlePath
 --   VehicleStatusService.updateCurrentStatus
--- REAL-F01 = ROS2 브리지 기본값(mqtt_bridge.yaml), SIM-F01 = Isaac twin_bridge.py 의 SIM_ID.
+-- SIM-F01 = Isaac twin_bridge.py 의 SIM_ID. 관제 대상은 이 한 대뿐이다.
+-- REAL-F01(ROS2 브리지 mqtt_bridge.yaml 기본값)은 더 이상 등록하지 않는다 — 실물 지게차 연동을
+-- 관제 목록에서 제외했다. 이미 REAL-F01 이 들어간 DB 는 db/migrate-real-f01-to-sim-f01.sql 로 정리한다.
 --
 -- 구 vehicle 테이블에 source NOT NULL 이 남아 있을 수 있으므로, 컬럼 존재 여부에 따라
 -- INSERT 문을 나눠 실행한다.
@@ -359,18 +371,16 @@ CREATE TABLE IF NOT EXISTS vehicle_command (
 SET @has_source = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vehicle' AND COLUMN_NAME = 'source');
 
+-- 이름은 data-local.sql 과 반드시 같은 값을 쓴다(INSERT IGNORE 라 먼저 실행된 쪽이 이긴다).
 SET @sql = IF(@has_source = 1,
     'INSERT IGNORE INTO vehicle (vehicle_id, name, source, active, created_at, updated_at) VALUES
-        (''REAL-F01'', ''Real Forklift 01'', ''REAL'', TRUE, NOW(6), NOW(6)),
-        (''SIM-F01'',  ''Sim Forklift 01'',  ''SIM'',  TRUE, NOW(6), NOW(6))',
+        (''SIM-F01'',  ''시뮬레이션 지게차 1호'', ''SIM'',  TRUE, NOW(6), NOW(6))',
     'INSERT IGNORE INTO vehicle (vehicle_id, name, active, created_at, updated_at) VALUES
-        (''REAL-F01'', ''Real Forklift 01'', TRUE, NOW(6), NOW(6)),
-        (''SIM-F01'',  ''Sim Forklift 01'',  TRUE, NOW(6), NOW(6))');
+        (''SIM-F01'',  ''시뮬레이션 지게차 1호'', TRUE, NOW(6), NOW(6))');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 최신 상태 행. 없어도 위치 수신 시 자동 생성되지만, 대시보드 초기 표시를 위해 넣어 둔다.
 INSERT IGNORE INTO vehicle_current_status (vehicle_id, status, received_at) VALUES
-    ('REAL-F01', 'UNKNOWN', NOW(6)),
     ('SIM-F01',  'UNKNOWN', NOW(6));
 
 

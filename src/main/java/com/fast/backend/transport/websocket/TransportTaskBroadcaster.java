@@ -1,6 +1,7 @@
 package com.fast.backend.transport.websocket;
 
 import com.fast.backend.common.time.CommunicationTime;
+import com.fast.backend.transport.domain.TaskFailureCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -30,8 +31,15 @@ public class TransportTaskBroadcaster {
 
     /** 커밋 이후(트랜잭션 활성 시) 또는 즉시 전송한다. */
     public void broadcastAfterCommit(String eventType, String taskId, String status, String vehicleId) {
+        broadcastAfterCommit(eventType, taskId, status, vehicleId, null);
+    }
+
+    /** 실패 원인 코드를 함께 싣는다. 실패가 아닌 이벤트는 {@code failureCode} 가 null 이다. */
+    public void broadcastAfterCommit(String eventType, String taskId, String status, String vehicleId,
+            TaskFailureCode failureCode) {
         TransportTaskEvent event = new TransportTaskEvent(
-                eventType, taskId, status, vehicleId, CommunicationTime.nowOffset());
+                eventType, taskId, status, vehicleId,
+                failureCode == null ? null : failureCode.name(), CommunicationTime.nowOffset());
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             send(event);
             return;

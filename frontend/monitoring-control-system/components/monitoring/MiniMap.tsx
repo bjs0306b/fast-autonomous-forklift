@@ -6,10 +6,12 @@ import { worldToPercent, type WorldBounds } from "@/lib/coordinate"
 import {
   INITIAL_VEHICLE_POSES,
   WAREHOUSE_INVERT_Y,
+  WAREHOUSE_MAP_HORIZONTAL_DISPLAY_SCALE,
   WAREHOUSE_MAP_IMAGE_SIZE,
   WAREHOUSE_WORLD_BOUNDS,
 } from "@/lib/config/warehouseMap"
 import type { DashboardVehicle, RealtimeConnectionStatus } from "@/types/monitoring"
+import type { VehiclePathSnapshot, VehiclePathWaypoint } from "@/types/websocket"
 import { MiniMapVehicleMarker } from "./MiniMapVehicleMarker"
 import { WarehouseMapSvg } from "./WarehouseMapSvg"
 
@@ -76,10 +78,13 @@ const REALTIME_BADGE: Record<RealtimeConnectionStatus, { label: string; classNam
  *
  * - 배경은 `WarehouseMapSvg` — `isaac_sim/nav2/maps/obstacles.txt` 의 실제 장애물 좌표로 그린다.
  *   PNG 를 쓰지 않는 이유는 그 컴포넌트 주석 참고.
- * - **배경과 마커가 같은 박스를 공유한다.** 컨테이너 비율을 맵 비율(20:30)로 고정하고 그 박스
- *   안에서만 퍼센트 좌표를 계산하므로, 패널 크기가 변해도 마커가 배경과 어긋나지 않는다.
+ * - **배경과 마커가 같은 박스를 공유한다.** 표시 박스는 원본보다 가로로 15% 넓지만 배경 SVG와
+ *   마커 모두 같은 퍼센트 기준을 사용하므로, 패널 크기나 표시 비율이 변해도 서로 어긋나지 않는다.
  * - **차량이 0대여도 배경은 항상 그린다.** 지도가 사라지면 "이미지 문제인가?"로 오해하기 쉽다.
  * - 마커 클릭 시 팝업 없이 onSelectVehicle(vehicleId) 만 호출한다(기존 동작 유지).
+ * - **지도 빈 영역을 클릭하면 선택을 해제한다**(onClearSelection). 지도 본문 전체가 해제 영역이고,
+ *   그 위에 얹힌 마커·새로고침 버튼은 각자 클릭 전파를 막아 예외가 된다. 헤더(제목·배지)는 해제
+ *   영역 밖이라 배지를 눌러도 선택이 풀리지 않는다.
  * - 통합 관제 패널의 상단 지도 영역으로 사용된다. 지도 기준 박스의 비율과 좌표 변환은 그대로
  *   유지하므로 패널이 넓어져도 지도가 왜곡되지 않는다.
  */
@@ -87,8 +92,11 @@ export function MiniMap({
   vehicles,
   selectedVehicleId,
   onSelectVehicle,
+  onClearSelection,
   realtimeStatus,
   onRefresh,
+  path,
+  visitedPath = [],
   bounds = WAREHOUSE_WORLD_BOUNDS,
   invertY = WAREHOUSE_INVERT_Y,
   className,
@@ -96,10 +104,16 @@ export function MiniMap({
   vehicles: DashboardVehicle[]
   selectedVehicleId?: string | null
   onSelectVehicle?: (vehicleId: string) => void
+  /** 지도 빈 영역 클릭. 선택 해제용이며, 주지 않으면 배경 클릭이 아무 일도 하지 않는다. */
+  onClearSelection?: () => void
   /** STOMP 연결 상태. 주면 헤더에 배지로 표시한다. */
   realtimeStatus?: RealtimeConnectionStatus
   /** 차량이 0대일 때 보여 줄 재조회 동작. 없으면 버튼을 숨긴다. */
   onRefresh?: () => void
+  /** 실시간 경로 토픽에서 받은 선택 차량의 현재 계획 경로. */
+  path?: VehiclePathSnapshot | null
+  /** 현재 페이지가 위치 이벤트로 누적한 최근 이동 궤적(최대 개수는 상위에서 제한). */
+  visitedPath?: VehiclePathWaypoint[]
   bounds?: WorldBounds
   invertY?: boolean
   className?: string
@@ -111,9 +125,9 @@ export function MiniMap({
   return (
     <section
       className={cn(
-        // 단독/세로 배치에서는 읽을 수 있는 최소 높이를 확보한다. 데스크톱 통합 패널에서는
-        // 호출부의 min-h-0/flex 비율이 이 값을 덮어써 남은 viewport 높이에 맞춰 줄어든다.
-        "flex h-full min-h-[280px] flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220] md:min-h-[360px] lg:min-h-[420px]",
+        // 높이는 사용 위치가 소유한다. 자체 최소 높이를 두면 부모가 줄어들어도 지도가 버티면서
+        // 상세 패널과 하단 제어 버튼을 밀어낼 수 있으므로, 여기서는 부모 높이에 정확히 맞춘다.
+        "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220]",
         className,
       )}
       aria-label="창고 미니맵"
@@ -148,22 +162,36 @@ export function MiniMap({
 
       {/* 통합 패널의 지도 본문. */}
       <div className="min-h-0 flex-1 overflow-hidden p-1.5">
-        {/* 지도 자체는 전체 너비 영역 안에서 비율을 지키며 커진다(가로로 늘리지 않는다). */}
+        {/* 지도와 마커가 공유하는 표시 박스를 함께 넓힌다. */}
         <div className="relative h-full min-h-0 overflow-hidden">
         {/* 지도 스테이지: 지도 영역 전체를 덮고 그 안에서 지도를 가운데 정렬한다.
             absolute 로 깔아야 부모 높이 계산에 지도가 영향을 주지 않아, 지도가 스스로를 작게 만드는
-            순환(높이 → 비율 → 높이)이 생기지 않는다. */}
-        <div className="absolute inset-0 flex items-center justify-center p-1">
+            순환(높이 → 비율 → 높이)이 생기지 않는다.
+
+            선택 해제 영역이기도 하다. 지도 배경 SVG(랙·바닥·경로)와 지도 좌우 여백이 모두 이
+            div 안에 있으므로, 그 어디를 눌러도 버블링으로 여기까지 올라와 해제된다. 반대로
+            해제되면 안 되는 요소(차량 마커, 새로고침 버튼)는 자기 쪽에서 전파를 끊는다 —
+            여기서 target === currentTarget 으로 걸러 내면 배경 SVG 클릭이 해제되지 않는다.
+
+            role="presentation": 이 div 는 컨트롤이 아니라 "빈 곳"이다. 키보드 대체 동작은 두지
+            않았다(포인터 전용). 키보드 사용자는 마커에서 Tab/Enter 로 선택을 바꾸면 된다. */}
+        <div
+          className="absolute inset-0 flex items-center justify-center p-1"
+          role="presentation"
+          onClick={onClearSelection}
+        >
           {/* 배경과 마커가 공유하는 단 하나의 기준 박스.
-              h-full + aspectRatio 로 세로를 가득 쓰고, max-w-full 이 가로를 넘칠 때만 줄인다(= contain).
-              고정 px 크기를 쓰지 않으므로 카드가 커지면 지도도 그대로 커진다. */}
+              원본 400:600 비율의 가로만 15% 넓혀 좌우 빈 공간을 줄인다. SVG와 마커가 모두 이
+              박스를 기준으로 렌더링되므로 시각 비율을 바꿔도 위치 정렬은 유지된다. */}
           <div
             className="relative h-full max-h-full max-w-full"
             style={{
-              aspectRatio: `${WAREHOUSE_MAP_IMAGE_SIZE.width} / ${WAREHOUSE_MAP_IMAGE_SIZE.height}`,
+              aspectRatio: `${WAREHOUSE_MAP_IMAGE_SIZE.width * WAREHOUSE_MAP_HORIZONTAL_DISPLAY_SCALE} / ${WAREHOUSE_MAP_IMAGE_SIZE.height}`,
             }}
           >
             <WarehouseMapSvg className="absolute inset-0 size-full rounded-sm" />
+
+            <RouteOverlay path={path} visitedPath={visitedPath} bounds={bounds} invertY={invertY} />
 
             {placedVehicles.map((placed) => {
               const pos = worldToPercent(placed.x, placed.y, { bounds, invertY })
@@ -190,7 +218,11 @@ export function MiniMap({
                 {onRefresh ? (
                   <button
                     type="button"
-                    onClick={onRefresh}
+                    // 컨트롤 버튼이므로 배경 클릭(선택 해제)으로 번지지 않게 막는다.
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onRefresh()
+                    }}
                     className="inline-flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800/90 px-2 py-1 text-[10px] font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
                   >
                     <RefreshCw className="size-3" aria-hidden="true" />
@@ -230,6 +262,76 @@ export function MiniMap({
 
       </div>
     </section>
+  )
+}
+
+function RouteOverlay({
+  path,
+  visitedPath,
+  bounds,
+  invertY,
+}: {
+  path?: VehiclePathSnapshot | null
+  visitedPath: VehiclePathWaypoint[]
+  bounds: WorldBounds
+  invertY: boolean
+}) {
+  const toPoint = (point: VehiclePathWaypoint) => {
+    const percent = worldToPercent(point.x, point.y, { bounds, invertY })
+    return `${percent.left},${percent.top}`
+  }
+  const planned = path?.waypoints ?? []
+  if (planned.length === 0 && visitedPath.length < 2 && !path?.goal) return null
+
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0 z-[1] size-full overflow-visible"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      {visitedPath.length >= 2 ? (
+        <polyline
+          points={visitedPath.map(toPoint).join(" ")}
+          fill="none"
+          stroke="#38bdf8"
+          strokeWidth="0.7"
+          strokeDasharray="1.5 1"
+          vectorEffect="non-scaling-stroke"
+          opacity="0.65"
+        />
+      ) : null}
+      {planned.length >= 2 ? (
+        <polyline
+          points={planned.map(toPoint).join(" ")}
+          fill="none"
+          stroke="#a78bfa"
+          strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
+          opacity="0.9"
+        />
+      ) : null}
+      {planned[0] ? (
+        <circle
+          cx={worldToPercent(planned[0].x, planned[0].y, { bounds, invertY }).left}
+          cy={worldToPercent(planned[0].x, planned[0].y, { bounds, invertY }).top}
+          r="1.2"
+          fill="#22c55e"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+      {path?.goal ? (
+        <circle
+          cx={worldToPercent(path.goal.x, path.goal.y, { bounds, invertY }).left}
+          cy={worldToPercent(path.goal.x, path.goal.y, { bounds, invertY }).top}
+          r="1.7"
+          fill="#f59e0b"
+          stroke="#fef3c7"
+          strokeWidth="0.5"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+    </svg>
   )
 }
 

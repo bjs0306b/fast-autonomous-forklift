@@ -37,7 +37,7 @@ export function normalizeVehicleStatus(value: unknown): VehicleStatus {
   return VEHICLE_STATUS_SET.has(normalized) ? (normalized as VehicleStatus) : "UNKNOWN"
 }
 
-/** 차량 ID에서 미니맵 마커용 짧은 라벨을 만든다. 예: "REAL-F01" → "F01", "SIM-F01" → "F01" */
+/** 차량 ID에서 미니맵 마커용 짧은 라벨을 만든다. 예: "SIM-F01" → "F01" */
 export function toShortLabel(vehicleId: string): string {
   const trimmed = vehicleId.trim()
   if (!trimmed) {

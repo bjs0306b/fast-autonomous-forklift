@@ -4,8 +4,10 @@ import com.fast.backend.common.time.CommunicationTime;
 import com.fast.backend.monitoring.dto.DashboardResponse;
 import com.fast.backend.monitoring.dto.VehicleLocationLatestResponse;
 import com.fast.backend.monitoring.dto.VehicleStatusMonitorResponse;
+import com.fast.backend.station.domain.StationMeasurement;
 import com.fast.backend.station.dto.CargoMeasuredHeight;
 import com.fast.backend.station.mapper.StationMeasurementMapper;
+import com.fast.backend.station.service.StationMeasurementPlacementEligibility;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.vehicle.dto.VehicleDetailResponse;
@@ -28,21 +30,26 @@ import java.util.Map;
 public class MonitoringService {
 
     private static final int DASHBOARD_TASK_LIMIT = 100;
+    /** 실패 경고는 차량당 1건만 쓴다. 차량 수보다 넉넉하되 무한정 읽지 않도록 상한을 둔다. */
+    private static final int RECENT_FAILED_TASK_LIMIT = 50;
 
     private final VehicleService vehicleService;
     private final LatestVehicleLocationProvider locationProvider;
     private final TransportTaskMapper transportTaskMapper;
     private final StationMeasurementMapper stationMeasurementMapper;
+    private final StationMeasurementPlacementEligibility placementEligibility;
 
     public MonitoringService(
             VehicleService vehicleService,
             LatestVehicleLocationProvider locationProvider,
             TransportTaskMapper transportTaskMapper,
-            StationMeasurementMapper stationMeasurementMapper) {
+            StationMeasurementMapper stationMeasurementMapper,
+            StationMeasurementPlacementEligibility placementEligibility) {
         this.vehicleService = vehicleService;
         this.locationProvider = locationProvider;
         this.transportTaskMapper = transportTaskMapper;
         this.stationMeasurementMapper = stationMeasurementMapper;
+        this.placementEligibility = placementEligibility;
     }
 
     @Transactional(readOnly = true)
@@ -90,6 +97,7 @@ public class MonitoringService {
             }
         }
         Map<Long, Double> cargoHeights = findCargoHeights(cargoIdByVehicleId.values());
+        Map<String, DashboardResponse.FailureView> failures = findLatestFailures(currentTasks);
 
         List<DashboardResponse.VehicleView> vehicles = activeVehicles.stream()
                 .map(vehicle -> {
@@ -99,7 +107,8 @@ public class MonitoringService {
                             locations.get(vehicle.vehicleId()),
                             currentTasks.get(vehicle.vehicleId()),
                             cargoId,
-                            cargoId == null ? null : cargoHeights.get(cargoId));
+                            cargoId == null ? null : cargoHeights.get(cargoId),
+                            failures.get(vehicle.vehicleId()));
                 })
                 .toList();
         List<DashboardResponse.TaskView> tasks = recentTasks.stream().map(this::toTaskView).toList();
@@ -157,12 +166,68 @@ public class MonitoringService {
         return heights;
     }
 
+    /**
+     * 차량별 "지금 보여줘야 할" 실패 1건.
+     *
+     * <p><b>진행 중인 작업이 있으면 실패를 보여주지 않는다</b> — 실패 후 다음 작업이 배차됐다면 그
+     * 경고는 이미 지나간 상황이고, 화면에 남겨 두면 작업자가 현재 상태를 오해한다.
+     *
+     * <p>측정 상세(전복 등급·돌출률·적재 적합 여부)는 세션 식별자로 한 번에 조회한다. 실패 작업은
+     * {@code measurement_id} 가 연결되지 않으므로 그 경로로는 찾을 수 없다.
+     */
+    private Map<String, DashboardResponse.FailureView> findLatestFailures(
+            Map<String, TransportTask> currentTasks) {
+        // 쿼리가 최신 순이므로 putIfAbsent 로 차량당 첫(=가장 최근) 실패만 남는다.
+        Map<String, TransportTask> failedByVehicle = new HashMap<>();
+        for (TransportTask task : transportTaskMapper.findLatestFailedTasksWithVehicle(
+                RECENT_FAILED_TASK_LIMIT)) {
+            if (!currentTasks.containsKey(task.getVehicleId())) {
+                failedByVehicle.putIfAbsent(task.getVehicleId(), task);
+            }
+        }
+        if (failedByVehicle.isEmpty()) {
+            return Map.of();
+        }
+
+        List<String> sessionIds = failedByVehicle.values().stream()
+                .map(TransportTask::getMeasurementSessionId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<String, StationMeasurement> measurements = new HashMap<>();
+        if (!sessionIds.isEmpty()) {
+            // 오래된 것 → 최신 순이라 뒤 행이 앞 행을 덮어 세션당 최신 1건만 남는다.
+            stationMeasurementMapper.findBySessionIds(sessionIds)
+                    .forEach(m -> measurements.put(m.getSessionId(), m));
+        }
+
+        Map<String, DashboardResponse.FailureView> views = new HashMap<>();
+        failedByVehicle.forEach((vehicleId, task) -> views.put(vehicleId, toFailureView(task,
+                task.getMeasurementSessionId() == null ? null
+                        : measurements.get(task.getMeasurementSessionId()))));
+        return views;
+    }
+
+    private DashboardResponse.FailureView toFailureView(TransportTask task, StationMeasurement measurement) {
+        return new DashboardResponse.FailureView(
+                task.getTaskCode(),
+                task.getFailureCode() == null ? null : task.getFailureCode().name(),
+                measurement == null || measurement.getStatus() == null
+                        ? null : measurement.getStatus().rawValue(),
+                // 측정 결과가 없으면 적합 여부를 판정한 적이 없다 — false 로 단정하지 않는다.
+                measurement == null ? null : placementEligibility.isEligible(measurement),
+                measurement == null ? null : measurement.getOverhangRatio(),
+                measurement == null ? null : measurement.getTippingLevel(),
+                CommunicationTime.toOffset(task.getFailedAt()));
+    }
+
     private DashboardResponse.VehicleView toVehicleView(
             VehicleResponse vehicle,
             VehicleLocationSnapshot location,
             TransportTask currentTask,
             Long cargoId,
-            Double cargoHeight) {
+            Double cargoHeight,
+            DashboardResponse.FailureView lastFailure) {
         VehicleStatusResponse status = vehicle.status();
         DashboardResponse.LocationView locationView = location == null ? null
                 : new DashboardResponse.LocationView(
@@ -176,13 +241,14 @@ public class MonitoringService {
         return new DashboardResponse.VehicleView(
                 vehicle.vehicleId(), vehicle.name(), vehicle.active(), status.status(),
                 locationView, taskView,
-                resolveHasCargo(vehicle, currentTask), cargoId, cargoHeight,
+                resolveHasCargo(vehicle, currentTask), cargoId, cargoHeight, lastFailure,
                 lastUpdatedAt);
     }
 
     private DashboardResponse.TaskView toTaskView(TransportTask task) {
         return new DashboardResponse.TaskView(
                 task.getTaskCode(), task.getVehicleId(), task.getStatus().name(),
+                task.getFailureCode() == null ? null : task.getFailureCode().name(),
                 CommunicationTime.toOffset(task.getUpdatedAt()));
     }
 }

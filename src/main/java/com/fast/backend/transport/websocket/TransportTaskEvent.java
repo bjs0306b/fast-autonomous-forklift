@@ -9,11 +9,17 @@ import java.time.OffsetDateTime;
  * <p>{@code eventType} 예: {@code TASK_DISPATCHED}, {@code TASK_STATUS_CHANGED}, {@code TASK_COMPLETED},
  * {@code TASK_FAILED}.
  */
+/**
+ * @param failureCode 실패 이벤트일 때만 채워진다({@link com.fast.backend.transport.domain.TaskFailureCode}
+ *                    이름). 다른 이벤트에서는 {@code null} 이며, 기존 구독자는 모르는 필드를 무시하므로
+ *                    토픽·구조 변경 없이 추가된다.
+ */
 public record TransportTaskEvent(
         String eventType,
         String taskId,
         String status,
         String vehicleId,
+        String failureCode,
         OffsetDateTime occurredAt
 ) {
 }

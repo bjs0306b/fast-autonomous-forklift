@@ -22,6 +22,8 @@ public class TransportTask {
     private LocalDateTime measurementRequestedAt;
     private LocalDateTime completedAt;
     private LocalDateTime failedAt;
+    /** 실패 원인 코드({@link TaskFailureCode} 이름). 실패한 적이 없으면 null. */
+    private TaskFailureCode failureCode;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -60,6 +62,8 @@ public class TransportTask {
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
     public LocalDateTime getFailedAt() { return failedAt; }
     public void setFailedAt(LocalDateTime failedAt) { this.failedAt = failedAt; }
+    public TaskFailureCode getFailureCode() { return failureCode; }
+    public void setFailureCode(TaskFailureCode failureCode) { this.failureCode = failureCode; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 

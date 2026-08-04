@@ -11,7 +11,8 @@ import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
  * 차량이 실물인지 시뮬인지 구분한다.
  *
  * 백엔드에 `source` 같은 구분 필드가 없어(vehicle 테이블 2컬럼 + 상태) **vehicleId 접두어 관례**로만
- * 판별할 수 있다. ROS2 브리지는 `REAL-F01`, Isaac 은 `SIM-F01` 을 쓴다.
+ * 판별할 수 있다. 현재 관제 대상은 Isaac 의 `SIM-F01` 한 대이지만, 나중에 실물 차량이 다시
+ * 붙을 수 있으므로 `REAL-` 접두어 판정은 남겨 둔다.
  * 접두어가 없는 식별자(FORKLIFT-01 등)는 어느 쪽인지 알 수 없으므로 "unknown" 으로 둔다.
  */
 export type VehicleSource = "real" | "sim" | "unknown"
@@ -100,7 +101,12 @@ export function MiniMapVehicleMarker({
   return (
     <button
       type="button"
-      onClick={() => onSelect?.(vehicle.vehicleId)}
+      // 전파를 막지 않으면 미니맵 배경의 "선택 해제" 핸들러가 이어서 실행돼, 방금 고른 차량이
+      // 같은 클릭으로 즉시 해제된다(선택 → 해제가 한 프레임에 일어나 아무 반응이 없어 보인다).
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect?.(vehicle.vehicleId)
+      }}
       title={tooltipText}
       className="group absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-200 ease-linear focus:outline-none"
       style={{ left: `${left}%`, top: `${top}%` }}

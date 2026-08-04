@@ -137,10 +137,10 @@ public class StationMeasurementService {
         if (before != null && before.isOccupied() && before.isExpired(expiredBefore)) {
             // 스케줄러 실행 사이에 직접 새 세션이 만료 점유를 회수한 경우에도 이전 작업을 남기지 않는다.
             transportTaskMapper.findByMeasurementSessionId(before.getActiveSessionId()).ifPresent(task ->
-                    transportTaskMapper.updateStatusIfCurrent(
+                    // 스케줄러가 도는 TTL 만료와 같은 사유다 — 결과가 오지 않은 채 세션이 회수됐다.
+                    transportTaskMapper.failWithCode(
                             task.getId(), com.fast.backend.transport.domain.TaskStatus.MEASURING,
-                            com.fast.backend.transport.domain.TaskStatus.FAILED,
-                            null, now));
+                            now, com.fast.backend.transport.domain.TaskFailureCode.MEASUREMENT_NO_RESPONSE));
             // 정상 종료를 못 하고 죽은 세션을 회수한 경우다. 조용히 넘어가면 "왜 남의 세션이
             // 끊겼는지" 추적할 수 없으므로 WARN 으로 남긴다.
             log.warn("Station session expired and released: expiredSessionId={}, acquiredAt={}, "

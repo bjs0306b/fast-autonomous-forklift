@@ -37,7 +37,7 @@ spring:
   sql:
     init:
       mode: always
-      # 스키마와 시드 차량(REAL-F01/SIM-F01/SIM-F02)을 함께 적용한다. 시드가 있어야
+      # 스키마와 시드 차량(SIM-F01)을 함께 적용한다. 시드가 있어야
       # 상태 메시지가 "미등록 차량"으로 폐기되지 않고 DB까지 도달하는지 확인할 수 있다.
       schema-locations: classpath:db/schema.sql
       data-locations: classpath:db/data-local.sql

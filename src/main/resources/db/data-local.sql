@@ -32,25 +32,33 @@
 -- 스키마 보정은 migration 파일이 담당하고, 이 파일은 시드만 넣는다.
 -- ─────────────────────────────────────────────────────────────────────────────
 --
--- REAL-F01 / SIM-F01은 통신 규격에서 실제로 사용하는 차량 식별자다
--- (ROS2 브리지 mqtt_bridge.yaml의 vehicle_id 기본값, Isaac twin_bridge.py의 SIM_ID/REAL_ID).
--- 백엔드는 미등록 vehicleId의 상태·위치·경로 메시지를 전부 폐기하므로, 이 두 행이 없으면
--- ROS2와 Isaac이 보낸 메시지가 한 건도 화면에 도달하지 않는다.
--- FORKLIFT-01/02는 기존 문서 예시와 테스트가 쓰는 값이라 그대로 남긴다.
+-- SIM-F01은 관제 대상 대표 차량이다 (Isaac twin_bridge.py의 SIM_ID).
+-- 백엔드는 미등록 vehicleId의 상태·위치·경로 메시지를 전부 폐기하므로, 이 행이 없으면
+-- Isaac이 보낸 메시지가 한 건도 화면에 도달하지 않는다.
+-- REAL-F01은 더 이상 등록하지 않는다. 실물 지게차 연동을 관제 목록에서 제외했다.
+--   · ROS2 브리지(ros2_ws mqtt_bridge.yaml)는 여전히 forklift/REAL-F01/* 로 발행하지만,
+--     미등록 차량이므로 백엔드가 그 메시지를 폐기한다 — 의도된 동작이다.
+--   · Isaac twin_bridge.py 는 브로커에서 직접 forklift/REAL-F01/location 을 구독해 씬의
+--     미러 prim 을 움직이므로, DB 에서 빼도 트윈 표시는 그대로 동작한다.
+--   · 실물 차량을 다시 관제에 올릴 때는 별칭 매핑이 아니라 이 시드에 행을 다시 추가할 것.
+-- FORKLIFT-01/02는 넣지 않는다. 실제 장비가 없는 더미인데 MonitoringService 가 active=true 인
+-- 차량을 전부 내려주는 탓에, 관제 화면에 "연동된 차량"처럼 섞여 보였다. 테스트는 DB 시드가 아니라
+-- 코드 안의 리터럴을 쓰므로 이 두 행을 빼도 영향이 없다.
+--
+-- 차량 이름은 화면 표시용이다(vehicle_id 가 시스템 식별자). 여기와 migration-local-fast-backend.sql,
+-- DEPLOY_GPU_SERVER.md 가 서로 다른 이름을 넣으면 먼저 실행된 쪽이 이겨 화면 문구가 달라진다 —
+-- 세 곳을 같은 값으로 유지할 것.
+--
+-- 이미 REAL-F01 이 들어간 기존 DB 는 이 시드만으로 정리되지 않는다(INSERT IGNORE 는 기존 행을
+-- 지우지 않는다). db/migrate-real-f01-to-sim-f01.sql 을 수동으로 실행할 것.
 USE fast_backend;
 
 INSERT IGNORE INTO vehicle (vehicle_id, name, active) VALUES
-    ('REAL-F01', 'Real Forklift 01', TRUE),
-    ('SIM-F01', 'Sim Forklift 01', TRUE),
-    ('FORKLIFT-01', 'Forklift 01', TRUE),
-    ('FORKLIFT-02', 'Forklift 02', TRUE);
+    ('SIM-F01', '시뮬레이션 지게차 1호', TRUE);
 
 INSERT IGNORE INTO vehicle_current_status
     (vehicle_id, status, received_at) VALUES
-    ('REAL-F01', 'UNKNOWN', NOW(6)),
-    ('SIM-F01', 'UNKNOWN', NOW(6)),
-    ('FORKLIFT-01', 'IDLE', NOW(6)),
-    ('FORKLIFT-02', 'UNKNOWN', NOW(6));
+    ('SIM-F01', 'UNKNOWN', NOW(6));
 
 INSERT IGNORE INTO storage_slot
     (slot_code, usable_height, fork_height, destination_x, destination_y,

@@ -19,8 +19,9 @@ import { WAREHOUSE_WORLD_BOUNDS } from "@/lib/config/warehouseMap"
  * SVG 관례라, 그룹 전체에 `translate(0,30) scale(1,-1)` 을 걸어 월드 좌표(Y 위로 증가)를 그대로 쓴다.
  * 덕분에 이 파일 안의 모든 좌표는 obstacles.txt 의 숫자와 1:1 로 같다.
  *
- * `preserveAspectRatio="none"` 을 쓰지만 왜곡되지 않는다 — 부모(MiniMap)가 컨테이너 비율을
- * 20:30 으로 고정하기 때문이다. 이 방식이라야 SVG 렌더 영역과 마커의 % 기준 영역이 정확히 일치한다.
+ * `preserveAspectRatio="none"` 은 부모(MiniMap)의 표시 박스를 그대로 채운다. 표시 박스는 가독성을
+ * 위해 월드 비율보다 가로로 15% 넓지만, 마커도 같은 박스의 퍼센트 좌표를 사용하므로 SVG 도형과
+ * 차량 위치는 계속 정확히 일치한다. viewBox 와 원본 월드 좌표는 변경하지 않는다.
  */
 export function WarehouseMapSvg({ className }: { className?: string }) {
   const { minX, maxX, minY, maxY } = WAREHOUSE_WORLD_BOUNDS

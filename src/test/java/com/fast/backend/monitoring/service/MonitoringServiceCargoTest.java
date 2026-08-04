@@ -3,6 +3,7 @@ package com.fast.backend.monitoring.service;
 import com.fast.backend.monitoring.dto.DashboardResponse;
 import com.fast.backend.station.dto.CargoMeasuredHeight;
 import com.fast.backend.station.mapper.StationMeasurementMapper;
+import com.fast.backend.station.service.StationMeasurementPlacementEligibility;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
@@ -52,11 +53,13 @@ class MonitoringServiceCargoTest {
         transportTaskMapper = mock(TransportTaskMapper.class);
         stationMeasurementMapper = mock(StationMeasurementMapper.class);
         service = new MonitoringService(
-                vehicleService, locationProvider, transportTaskMapper, stationMeasurementMapper);
+                vehicleService, locationProvider, transportTaskMapper, stationMeasurementMapper,
+                new StationMeasurementPlacementEligibility(null));
 
         when(locationProvider.findAllLatest()).thenReturn(List.of());
         when(transportTaskMapper.findAll(any(), any(), any(), anyInt(), anyInt())).thenReturn(List.of());
         when(transportTaskMapper.findActiveTasksWithVehicle()).thenReturn(List.of());
+        when(transportTaskMapper.findLatestFailedTasksWithVehicle(anyInt())).thenReturn(List.of());
         when(stationMeasurementMapper.findLatestCargoHeights(any())).thenReturn(List.of());
     }
 
