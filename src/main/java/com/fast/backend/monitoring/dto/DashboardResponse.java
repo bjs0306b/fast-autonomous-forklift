@@ -21,7 +21,7 @@ public record DashboardResponse(List<VehicleView> vehicles, List<TaskView> tasks
             LocationView location,
             CurrentTaskView currentTask,
             Boolean hasCargo,
-            String cargoId,
+            Long cargoId,
             Double cargoHeight,
             OffsetDateTime lastUpdatedAt) {
     }

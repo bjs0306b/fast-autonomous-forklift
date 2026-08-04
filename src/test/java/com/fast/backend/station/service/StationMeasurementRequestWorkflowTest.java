@@ -36,7 +36,7 @@ class StationMeasurementRequestWorkflowTest {
         TransportTask task = new TransportTask();
         task.setId(7L);
         task.setTaskCode("TASK-01");
-        task.setCargoId("CARGO-01");
+        task.setCargoId(1L);
         task.setVehicleId("FORKLIFT-01");
         task.setStatus(TaskStatus.MOVING_TO_PICKUP);
         when(taskMapper.findById(7L)).thenReturn(Optional.of(task));
@@ -56,7 +56,7 @@ class StationMeasurementRequestWorkflowTest {
         verify(publisher).publish(captor.capture());
         verify(taskMapper).markMeasurementRequested(org.mockito.ArgumentMatchers.eq(7L),
                 requestedAtCaptor.capture());
-        assertThat(captor.getValue().cargoId()).isEqualTo("CARGO-01");
+        assertThat(captor.getValue().cargoId()).isEqualTo(1L);
         assertThat(requestedAtCaptor.getValue()).isEqualTo(LocalDateTime.of(2026, 8, 3, 12, 0));
     }
 }

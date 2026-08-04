@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 
 public record TransportTaskResponse(
         String taskId,
-        String cargoId,
+        Long cargoId,
         String measurementSessionId,
         String measurementId,
         String vehicleId,

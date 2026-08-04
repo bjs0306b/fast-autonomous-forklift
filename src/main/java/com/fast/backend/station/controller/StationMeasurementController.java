@@ -56,7 +56,7 @@ public class StationMeasurementController {
 
     /** 측정 세션을 연다. 설비가 이미 점유 중이면 409({@code STATION_ALREADY_OCCUPIED}). */
     @PostMapping("/sessions")
-    public ResponseEntity<ApiResponse<StationSession>> openSession(@RequestParam String cargoId) {
+    public ResponseEntity<ApiResponse<StationSession>> openSession(@RequestParam Long cargoId) {
         StationSession session = stationMeasurementService.openSession(cargoId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(session));

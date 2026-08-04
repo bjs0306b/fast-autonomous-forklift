@@ -91,17 +91,19 @@ MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다
 
 | Method | 경로 | 역할 |
 |---|---|---|
-| `POST` | `/api/cargos` | 측정 전 화물 등록 |
+| `POST` | `/api/cargos` | 화물 ID 자동 생성 및 대기 운반 작업 원자적 생성 |
 | `POST` | `/api/stations/sessions?cargoId=...` | 측정 세션 생성 |
 | `GET` | `/api/stations/sessions/active` | 현재 측정 중인 세션 조회 |
 | `GET` | `/api/stations/sessions/{sessionId}/measurements/latest` | 세션 측정 결과 조회 |
 | `POST` | `/api/stations/measurements` | 측정 결과 등록 |
-| `POST` | `/api/transport-tasks` | 측정 전 운반 작업 생성 |
+| `POST` | `/api/transport-tasks` | 기존 화물에 운반 작업을 수동 생성하는 호환 API |
 | `PATCH` | `/api/transport-tasks/{taskId}/assign` | 차량 배정 |
 | `PATCH` | `/api/transport-tasks/{taskId}/status` | 작업 상태 전이 |
 | `POST` | `/api/vehicles/{vehicleId}/commands` | 차량 명령 생성·MQTT 발행. 측정 위치 MOVE에는 `taskId` 포함 |
 
-측정 위치 MOVE 요청 예시는 다음과 같다. `taskId`는 `POST /api/transport-tasks` 응답의 문자열 작업 식별자다.
+신규 입하는 본문 없이 `POST /api/cargos`를 호출한다. 백엔드는 `BIGINT AUTO_INCREMENT` 화물 ID와
+`PENDING` 운반 작업을 같은 트랜잭션에서 만들고 `cargoId`, `taskId`, `taskStatus`를 반환한다.
+측정 위치 MOVE 요청의 `taskId`는 이 응답에 포함된 문자열 작업 식별자다.
 
 ```json
 {

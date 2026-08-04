@@ -49,7 +49,7 @@
     <!-- record 는 setter 가 없으므로 생성자 매핑을 명시한다(자동 추론에 기대지 않는다). -->
     <resultMap id="cargoMeasuredHeightResultMap" type="com.fast.backend.station.dto.CargoMeasuredHeight">
         <constructor>
-            <idArg column="cargo_id" javaType="java.lang.String"/>
+            <idArg column="cargo_id" javaType="java.lang.Long"/>
             <arg column="cargo_height" javaType="java.lang.Double"/>
         </constructor>
     </resultMap>

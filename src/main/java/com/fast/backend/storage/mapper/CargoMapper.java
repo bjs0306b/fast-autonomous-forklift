@@ -9,9 +9,7 @@ import java.util.Optional;
 public interface CargoMapper {
 
     int insert(Cargo cargo);
-    int insertIfAbsent(Cargo cargo);
+    Optional<Cargo> findByCargoId(Long cargoId);
 
-    Optional<Cargo> findByCargoId(String cargoId);
-
-    boolean existsByCargoId(String cargoId);
+    boolean existsByCargoId(Long cargoId);
 }

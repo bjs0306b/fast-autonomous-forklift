@@ -5,11 +5,9 @@
         <id property="cargoId" column="cargo_id"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
-    <insert id="insert" parameterType="com.fast.backend.storage.domain.Cargo">
-        INSERT INTO cargo (cargo_id, created_at) VALUES (#{cargoId}, #{createdAt})
-    </insert>
-    <insert id="insertIfAbsent" parameterType="com.fast.backend.storage.domain.Cargo">
-        INSERT IGNORE INTO cargo (cargo_id, created_at) VALUES (#{cargoId}, #{createdAt})
+    <insert id="insert" parameterType="com.fast.backend.storage.domain.Cargo"
+            useGeneratedKeys="true" keyProperty="cargoId" keyColumn="cargo_id">
+        INSERT INTO cargo (created_at) VALUES (#{createdAt})
     </insert>
     <select id="findByCargoId" resultMap="result">
         SELECT cargo_id, created_at FROM cargo WHERE cargo_id = #{cargoId}

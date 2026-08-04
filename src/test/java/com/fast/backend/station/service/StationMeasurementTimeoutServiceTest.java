@@ -115,7 +115,7 @@ class StationMeasurementTimeoutServiceTest {
         TransportTask task = new TransportTask();
         task.setId(id);
         task.setTaskCode(taskCode);
-        task.setCargoId("CARGO-1");
+        task.setCargoId(1L);
         task.setStatus(status);
         return task;
     }

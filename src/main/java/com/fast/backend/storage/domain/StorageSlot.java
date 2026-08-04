@@ -10,7 +10,7 @@ public class StorageSlot {
     private double destinationHeading;
     private StorageSlotStatus status;
     private Long reservedTaskId;
-    private String storedCargoId;
+    private Long storedCargoId;
 
     public String getSlotCode() { return slotCode; }
     public void setSlotCode(String slotCode) { this.slotCode = slotCode; }
@@ -28,6 +28,6 @@ public class StorageSlot {
     public void setStatus(StorageSlotStatus status) { this.status = status; }
     public Long getReservedTaskId() { return reservedTaskId; }
     public void setReservedTaskId(Long reservedTaskId) { this.reservedTaskId = reservedTaskId; }
-    public String getStoredCargoId() { return storedCargoId; }
-    public void setStoredCargoId(String storedCargoId) { this.storedCargoId = storedCargoId; }
+    public Long getStoredCargoId() { return storedCargoId; }
+    public void setStoredCargoId(Long storedCargoId) { this.storedCargoId = storedCargoId; }
 }

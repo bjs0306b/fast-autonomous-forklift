@@ -48,7 +48,12 @@ public class TransportTaskService {
 
     @Transactional
     public TransportTaskResponse createTask(TransportTaskCreateRequest request) {
-        String cargoId = request.cargoId();
+        return createTaskForCargo(request.cargoId());
+    }
+
+    /** 이미 등록된 화물에 대한 대기 작업을 생성한다. 화물 등록 트랜잭션에서도 함께 사용한다. */
+    @Transactional
+    public TransportTaskResponse createTaskForCargo(Long cargoId) {
         if (!cargoMapper.existsByCargoId(cargoId)) {
             throw new BusinessException(ErrorCode.CARGO_NOT_FOUND, "등록되지 않은 화물입니다: " + cargoId);
         }
@@ -93,7 +98,7 @@ public class TransportTaskService {
 
     @Transactional(readOnly = true)
     public TransportTaskListResponse list(
-            int page, int size, TaskStatus status, String vehicleId, String cargoId) {
+            int page, int size, TaskStatus status, String vehicleId, Long cargoId) {
         int safePage = Math.max(page, 0);
         int safeSize = size <= 0 ? 20 : Math.min(size, 200);
         int offset = safePage * safeSize;

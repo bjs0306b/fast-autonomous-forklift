@@ -10,12 +10,12 @@ package com.fast.backend.station.domain;
 public class StationSession {
 
     private String sessionId;
-    private String cargoId;
+    private Long cargoId;
 
     public StationSession() {
     }
 
-    public StationSession(String sessionId, String cargoId) {
+    public StationSession(String sessionId, Long cargoId) {
         this.sessionId = sessionId;
         this.cargoId = cargoId;
     }
@@ -28,11 +28,11 @@ public class StationSession {
         this.sessionId = sessionId;
     }
 
-    public String getCargoId() {
+    public Long getCargoId() {
         return cargoId;
     }
 
-    public void setCargoId(String cargoId) {
+    public void setCargoId(Long cargoId) {
         this.cargoId = cargoId;
     }
 }

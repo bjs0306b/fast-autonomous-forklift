@@ -31,5 +31,5 @@ export interface NormalizedVehicleStatusUpdate {
    * (대시보드 값은 운반 작업에서 유도될 수 있는데, 이벤트의 null 이 그걸 지우면 안 된다.)
    */
   hasCargo: boolean | null
-  cargoId: string | null
+  cargoId: number | null
 }

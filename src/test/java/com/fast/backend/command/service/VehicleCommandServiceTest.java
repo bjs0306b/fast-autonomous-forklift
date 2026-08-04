@@ -66,7 +66,7 @@ class VehicleCommandServiceTest {
         TransportTask task = new TransportTask();
         task.setId(7L);
         task.setTaskCode("TASK-01");
-        task.setCargoId("CARGO-01");
+        task.setCargoId(1L);
         task.setVehicleId("FORKLIFT-01");
         task.setStatus(TaskStatus.ASSIGNED);
         when(taskMapper.findByTaskCode("TASK-01")).thenReturn(Optional.of(task));

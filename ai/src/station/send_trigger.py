@@ -1,6 +1,6 @@
 """측정 요청을 손으로 발행한다 — 리허설·장애 대비용.
 
-    python -m station.send_trigger --cargo-id CARGO-001
+    python -m station.send_trigger --cargo-id 1
 
 정상 흐름에서는 **백엔드가 발행한다**(운반 작업 생성 → 측정 위치 MOVE →
 ROS2가 도착을 SUCCESS로 회신 → 백엔드가 발행). 이 도구는 그 앞단 없이
@@ -15,9 +15,8 @@ ROS2가 도착을 SUCCESS로 회신 → 백엔드가 발행). 이 도구는 그 
 그래서 **전 구간 시연에는 백엔드 발행을 쓰고**, 이 도구는 스테이션 쪽만
 확인할 때 쓴다.
 
-⚠️ 없는 `cargoId`를 주면 백엔드가 그 이름으로 **화물을 새로 만든다**(의도된
-설계). 오타를 치면 유령 화물이 생기고 측정이 거기 붙으므로, 실제 화물 ID를
-쓰거나 눈에 띄는 이름(`RIG-TEST-...`)을 쓴다.
+⚠️ `cargoId`는 `POST /api/cargos`가 자동 생성한 숫자 ID를 사용한다. 없는 ID를
+주면 백엔드가 세션 생성을 거부한다.
 """
 
 from __future__ import annotations
@@ -41,8 +40,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description="측정 요청 수동 발행 (리허설용)")
     ap.add_argument("--cargo-id", required=True,
-                    help="측정할 화물 ID. 백엔드가 아는 값을 쓴다 — "
-                         "없는 값이면 그 이름으로 화물이 새로 생긴다")
+                    help="측정할 화물 ID. POST /api/cargos가 반환한 숫자 값을 쓴다")
     ap.add_argument("--topic", default=DEFAULT_TOPIC)
     ap.add_argument("--broker", default=cfg["broker"])
     ap.add_argument("--port", type=int, default=cfg["port"])

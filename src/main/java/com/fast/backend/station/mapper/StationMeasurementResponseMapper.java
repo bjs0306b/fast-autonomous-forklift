@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 public class StationMeasurementResponseMapper {
 
     public StationMeasurementResponse toResponse(
-            StationMeasurement entity, String cargoId, boolean placementEligible) {
+            StationMeasurement entity, Long cargoId, boolean placementEligible) {
         return new StationMeasurementResponse(
                 entity.getMeasurementId(),
                 entity.getSessionId(),

@@ -96,9 +96,9 @@ export function useMonitoringDashboard() {
    * 이벤트에서만** dashboard 를 다시 부른다 — 매 이벤트마다 재조회하면 초당 수십 번 왕복한다.
    * 같은 화물로 두 번 요청하지 않도록 차량별 마지막 요청 화물을 기억한다.
    */
-  const requestedCargoRef = useRef<Record<string, string>>({})
+  const requestedCargoRef = useRef<Record<string, number>>({})
   const requestCargoHeightRefresh = useCallback(
-    (vehicleId: string, cargoId: string) => {
+    (vehicleId: string, cargoId: number) => {
       if (requestedCargoRef.current[vehicleId] === cargoId) return
       requestedCargoRef.current[vehicleId] = cargoId
       void loadDashboard()
