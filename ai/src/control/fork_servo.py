@@ -40,11 +40,46 @@ from perception.fork_align import AlignError
 
 # --- 속도(m/s). 상한은 teleop과 같은 0.20을 넘지 않는다. ---
 CRUISE_SPEED = 0.12
+
 ALIGN_SPEED = 0.06
+"""정렬 구간 전진 속도.
+
+⚠️ **되돌림 (2026-08-04).** 0.06 → 0.03 → 0.02 로 낮춰봤으나 **진폭이 ±0.5 로
+전혀 안 변했다.** 제어 파라미터를 바꿔도 진폭이 반응하지 않으면 원인이 제어 루프
+밖에 있다는 뜻이다. 오히려 **뒷바퀴 조향은 차가 움직여야 방향이 바뀌므로**,
+0.02m/s(프레임당 2mm)는 조향이 거의 안 먹는 속도일 수 있다. 원래 값으로 되돌린다.
+
+아래는 낮출 때의 근거이며 기록으로 남긴다: 설계는 22fps(dt 45ms) 전제인데 젯슨 실측이
+5~10fps(dt 100~200ms) 다. 프레임 사이에 차가 너무 많이 가면 다음 프레임에서 본
+오차가 이미 낡은 값이라, 같은 게인으로도 **과보정하고 진동한다.** 실제로 lat 부호가
+매 프레임 뒤집혔다(+0.20 → -0.30 → -0.08 → +0.28).
+
+게인이 아니라 속도를 줄인 이유: 게인은 "오차 대비 얼마나 꺾을까" 로 기하에서 나온
+값이고, 문제는 **프레임당 이동 거리**다. 속도를 줄이면 fps 가 낮아도 프레임당 이동이
+줄어 제어가 따라간다. 정렬 구간은 어차피 천천히 가는 것이 맞다.
+
+⚠️ 근본 해결은 fps 를 올리는 것이다(전처리 GPU 이관 등). 그때는 이 값을 되돌린다."""
+
 INSERT_SPEED = 0.05
 
-# --- 제어 게인 (rad/s per 단위 오차). 미조정. ---
-K_LATERAL = 0.45
+# --- 제어 게인 (rad/s per 단위 오차) ---
+K_LATERAL = 0.25
+"""좌우 오차 → 각속도 게인.
+
+⚠️ **0.45 → 0.25 (2026-08-04 실주행 조정).** 0.45 는 명백히 과했다 — 오차를
+0.67 → 0.08 까지 잘 줄이다가 **그대로 지나쳐 -0.52 까지 넘어갔다.** 전형적인
+오버슈트다.
+
+    프레임 19   lat +0.08   ← 거의 맞음
+    프레임 24   lat -0.52   ← 반대편으로 크게 벗어남
+
+⚠️ 이건 fps 문제가 아니다. ALIGN_SPEED 를 절반으로 낮춰 fps 를 10 으로 회복한
+뒤에도 같은 진동이 남았다.
+
+**가까울수록 과해지는 구조**라는 점을 유의할 것 — `lateral_ratio` 는 진입면
+반폭으로 정규화돼 있어 거리가 줄면 같은 실제 오차가 큰 비율로 나온다. 고정 게인은
+근처에서 세진다. 필요하면 거리에 따라 게인을 줄이는 쪽으로 확장한다."""
+
 K_YAW = 0.60
 MAX_ANGULAR = 0.35          # teleop 상한과 동일
 
@@ -56,12 +91,28 @@ ALIGN_YAW_BOOST = 2.0
 불가), 마지막 구간에서는 **요를 먼저 죽이는 쪽으로 가중치를 옮긴다.**"""
 
 # --- 수렴 판정 ---
-LATERAL_TOLERANCE = 0.12
-"""|lateral_ratio| 허용치. 진입면 반폭의 12%.
+LATERAL_TOLERANCE = 0.25
+"""|lateral_ratio| 허용치. 진입면 반폭 대비 비율.
 
-여유 ±11.5mm를 개구 폭 35mm의 반(17.5mm)으로 나누면 0.66이라 기하학적 한계는 훨씬
-느슨하다. 0.12는 그 한계의 1/5로 잡은 **보수적 값**이다 — 카메라·포크 장착 오차와
-진입 중 슬립이 그 사이를 먹는다. 실물에서 실패율을 보고 풀 것."""
+기하학적 한계는 **0.66** 이다 — 여유 ±11.5mm 를 개구 반폭 17.5mm 로 나눈 값.
+그보다 훨씬 좁게 잡는 이유는 카메라·포크 장착 오차와 진입 중 슬립이 그 사이를
+먹기 때문이다.
+
+⚠️ **0.12 → 0.25 (2026-08-04 실주행).** 0.12 로는 세 번 연속 ABORT 했다. 원인은
+정렬 능력이 아니라 **조향 서보가 제어 주기(100ms)를 못 따라가 오차가 계속
+출렁이는 것**이다:
+
+    [19] lat -0.06   맞음
+    [24] lat +0.57   5프레임 만에 반대편 끝
+    [28] lat +0.16   진입 거리 도달 → ABORT (0.04 차이)
+
+0.5초 주기로 맞는 순간이 오는데, 그 순간과 진입 거리가 겹칠 확률이 낮았다.
+`INSERT_ENTER_MM` 을 180 → 210 으로 옮겨봐도 타이밍은 운에 맡기는 셈이었다.
+
+0.25 는 여전히 기하학적 한계의 **1/2.6** 이라 물리적 여유가 남는다.
+
+🔴 **이것은 진동을 고친 것이 아니라 우회한 것이다.** 근본 원인(서보 응답 속도)은
+그대로다 — S15P11A304-152 에 남긴다. 서보·기구가 개선되면 이 값을 되돌릴 것."""
 
 YAW_TOLERANCE = 0.08
 """|yaw_signal| 허용치. 폭 비 기준이라 각도가 아니다.
@@ -88,14 +139,69 @@ ALIGN_ENTER_PX = 260.0
 INSERT_ENTER_PX = 420.0
 """(캘리 전) 진입면 폭이 이보다 크면 진입 가능 거리."""
 
-ALIGN_ENTER_MM = 350.0
-"""(캘리 후) 파렛트까지 이 거리 이내면 정렬 단계로. **실측 대상** — 최소 회전반경
-53.7cm 기준으로 좌우 오프셋 10cm를 지우는 데 전진 45cm가 필요하므로, 정렬 시작은
-그보다 앞이어야 한다. 35cm는 시작값일 뿐이다."""
+ALIGN_ENTER_MM = 700.0
+"""(캘리 후) 파렛트까지 이 거리 이내면 정렬 단계로.
 
-INSERT_ENTER_MM = 180.0
+⚠️ 값은 임의로 고르면 안 되고 **아래 산수를 만족해야 한다.** 최소 회전반경 53.7cm
+기준 좌우 오프셋 10cm 를 지우는 데 **전진 45cm** 가 필요하다. 그 거리는 ALIGN
+구간에서만 벌 수 있으므로(INSERT 는 직선 개루프),
+
+    ALIGN_ENTER_MM ≥ INSERT_ENTER_MM + 450 = 210 + 450 = 660
+
+종전 값 350 은 이 조건을 깨고 있었다 — ALIGN 구간이 350-180 = **170mm 뿐**이라
+10cm 틀어져 있으면 기하학적으로 못 고치고 **반드시 ABORT** 했다.
+
+**2026-08-04 실측으로 확인됨**: 구멍 2개가 안정적으로 보이는 한계가 약 750~800mm
+이므로 700 은 그 안쪽이다. 실주행에서 574mm 부터 정상 추종했다.
+
+⚠️ 650 → 700 으로 올린 것은 `INSERT_ENTER_MM` 을 180 → 210 으로 올리면서
+부등식(≥660)이 10mm 모자라게 됐기 때문이다. **두 값은 함께 움직인다.**"""
+
+INSERT_ENTER_MM = 210.0
 """(캘리 후) 이 거리 이내면 진입 가능. 여기서 정렬이 안 돼 있으면 ABORT.
-**실측 대상** — 너무 가까우면 구멍이 화면 밖으로 나가 정렬 판정 자체를 못 한다."""
+
+⚠️ **180 → 210 (2026-08-04 실주행 조정).** 180 이면 **정렬이 맞은 순간을 놓친다.**
+실측 로그:
+
+    203mm   lat +0.02   ← 정렬 맞음. 그런데 아직 진입 거리가 아니다
+    189mm   lat +0.13
+    179mm   lat +0.21   ← 진입 거리 도달. 이미 벌어져서 ABORT
+
+조향 서보 응답이 제어 주기(100ms)보다 느려 오차가 계속 출렁이므로, **맞는 순간에
+바로 진입해야 한다.** 더 가까이 갈수록 다시 벌어질 확률이 올라간다.
+
+검출 여유는 충분하다 — 2026-08-04 실측에서 구멍 2개가 **50mm 까지도 100% 검출**됐다.
+210 은 한계에서 한참 먼 값이다.
+
+⚠️ 이 값을 올리면 `ALIGN_ENTER_MM ≥ INSERT_ENTER_MM + 450` 부등식을 다시 봐야 한다.
+650 ≥ 210 + 450 = 660 → **6.5mm 모자란다.** 회전 여유가 그만큼 줄어드는 것이므로,
+좌우 오프셋이 10cm 를 넘으면 못 지울 수 있다. 실주행에서 초기 오프셋이 그보다
+작으면 문제없다."""
+
+INSERT_MARGIN_MM = 130.0
+"""진입 목표 거리에서 빼는 여유(mm). = 포크 오프셋 90 + 안전 여유 40.
+
+`distance_mm` 은 **카메라 렌즈 → 파렛트 진입면** 거리인데, **포크 끝은 카메라보다
+90mm 앞에 있다**(2026-08-04 실측). 그만큼 빼지 않으면 포크가 이미 구멍을 통과한
+뒤에도 계속 밀고 들어간다.
+
+    카메라 ──── 90mm ────[포크끝]── 남은거리 ──파렛트
+           └────── distance_mm ──────────────┘
+
+조정 이력 (래치 200mm 기준 전진 거리):
+
+    15   → 185mm   파렛트를 크게 밀고 나감
+    105  → 95mm    많이 줄었으나 아직 조금 밀림
+    130  → 70mm    ← 지금
+
+⚠️ **더 줄이면 안 꽂힐 수 있다.** 포크가 구멍에 걸치기만 하고 덜 들어가는 지점이
+어딘가에 있다. 안 꽂히기 시작하면 이 값을 도로 낮춘다.
+
+⚠️ **모자란 쪽이 안전하다.** 덜 들어가면 다시 밀면 되지만, 더 들어가면 파렛트를
+밀어내 위치가 틀어진다. 안전 여유 40mm 는 그 방향으로 잡은 것이다
+(거리 자체도 ±수 mm 흔들린다 — 실측 σ 1.3mm @30cm).
+
+⚠️ 카메라를 옮기거나 포크를 교체하면 **다시 재야 한다.**"""
 
 INSERT_DURATION_S = 2.5
 """개루프 직진 시간. 거리/속도로 잡되 실물에서 잰다."""
@@ -200,6 +306,7 @@ class ForkServo:
         self._t = 0.0
         self._lost_for = 0.0
         self._insert_elapsed = 0.0
+        self._insert_target_s = insert_duration_s
         self._last = DriveCommand()
 
     def reset(self) -> None:
@@ -207,6 +314,7 @@ class ForkServo:
         self.phase = Phase.SEARCH
         self.episode = Episode()
         self._t = self._lost_for = self._insert_elapsed = 0.0
+        self._insert_target_s = self.insert_duration_s
         self._last = DriveCommand()
 
     def is_finished(self) -> bool:
@@ -215,6 +323,26 @@ class ForkServo:
     def aligned(self, error: AlignError) -> bool:
         return (abs(error.lateral_ratio) <= self.lateral_tolerance
                 and abs(error.yaw_signal) <= self.yaw_tolerance)
+
+    def _insert_seconds_for(self, error: AlignError) -> float:
+        """진입에 쓸 시간(초). **래치 시점의 실측 거리 ÷ 진입 속도.**
+
+        거리를 모르면(캘리브레이션 전) `insert_duration_s` 자리표시자로 떨어진다.
+
+        ⚠️ 왜 고정 시간이면 안 되나 — 래치 거리는 매번 다르다. `INSERT_ENTER_MM`
+        은 "이 안쪽이면 진입해도 된다" 는 상한이지 정확한 래치 거리가 아니라,
+        정렬이 늦게 맞으면 훨씬 가까이서 래치된다. 2026-08-04 실주행에서 103mm
+        에서 래치됐는데 고정 2.5초(=12.5cm)를 그대로 가서 **파렛트를 밀고
+        나갔다.** 거리로 계산하면 그 오차가 사라진다.
+
+        여유(`INSERT_MARGIN_MM`)를 빼는 이유는 **모자란 쪽이 안전**하기 때문이다.
+        덜 들어가면 포크가 구멍에 걸쳐 있어 다시 밀면 되지만, 더 들어가면 파렛트를
+        밀어내 위치가 틀어지고 화물이 흔들린다.
+        """
+        if error.distance_mm is None:
+            return self.insert_duration_s
+        travel_mm = max(0.0, error.distance_mm - INSERT_MARGIN_MM)
+        return travel_mm / 1000.0 / INSERT_SPEED
 
     def _reached(self, error: AlignError, px_threshold: float,
                  mm_threshold: float) -> bool:
@@ -245,7 +373,7 @@ class ForkServo:
         # INSERT는 개루프다 — 검출이 끊겨도(정상이다) 계속 간다.
         if self.phase is Phase.INSERT:
             self._insert_elapsed += dt
-            if self._insert_elapsed >= self.insert_duration_s:
+            if self._insert_elapsed >= self._insert_target_s:
                 self.phase = Phase.DONE
                 self.episode.outcome = "inserted"
                 return DriveCommand(phase=Phase.DONE, reason="개루프 진입 완료")
@@ -272,6 +400,11 @@ class ForkServo:
             if self.aligned(error):
                 self.phase = Phase.INSERT
                 self._insert_elapsed = 0.0
+                # **래치 시점의 실측 거리로 진입 시간을 정한다.**
+                # 고정 시간(INSERT_DURATION_S)만 쓰면 어느 거리에서 래치되든 같은
+                # 거리를 밀고 들어가, 가까이서 래치되면 파렛트를 밀어낸다
+                # (2026-08-04 실주행: 103mm 에서 래치 → 2.5초 = 12.5cm 전진 → 관통).
+                self._insert_target_s = self._insert_seconds_for(error)
                 return DriveCommand(linear_x=INSERT_SPEED, angular_z=0.0,
                                     phase=Phase.INSERT, reason="정렬 완료 — 직선 진입")
             # 뒷바퀴 조향은 제자리 회전이 안 되므로 **여기서는 못 고친다.**
