@@ -77,27 +77,38 @@ ALIGN_SPEED = 0.06
 INSERT_SPEED = 0.05
 """진입 시 `linear.x` 로 내보내는 값. ⚠️ **실제 속도가 아니다** — 아래 참조."""
 
-INSERT_SPEED_ACTUAL = 0.138
-"""진입 시 **실제로 나오는 속도**(m/s). 2026-08-04 오후 재실측.
+INSERT_SPEED_ACTUAL = 0.110
+"""진입 시 **실제로 나오는 속도**(m/s). 2026-08-04 실주행 로그에서 뽑았다.
+
+⚠️ **재는 방법이 중요하다.** 이 값은 **실주행 로그의 `distance_mm` 시계열**에서
+뽑는다 — 재려는 동작 그 자체를 재는 것이라 가장 정확하다:
+
+    INSERT 구간   207 196 185 175 167 157 147 136 124 112 (mm)
+    프레임당 약 11mm · 10fps  →  0.110 m/s
+
+지게차를 따로 세워두고 잰 값(0.138)은 **21% 높았다.** INSERT 는 정지에서
+출발하는 게 아니라 **ALIGN 속도로 굴러가던 중 전환**되는 것이라 조건이 다르다.
+따로 재면 그 차이를 못 잡는다.
+
+값이 실제보다 크면 "이 거리는 이만큼 걸린다" 를 짧게 잡아 **일찍 멈춘다** —
+0.138 로 돌렸을 때 142mm 밀어야 할 것을 120mm 만 갔다(실측 22mm 부족).
 
 ⚠️ **여전히 명령값(`INSERT_SPEED=0.05`)과 다르다.** `linear.x` 는 PWM 퍼센트로
 매핑될 뿐 속도 단위가 아니다. 진입 시간을 명령값으로 계산하면 안 된다.
 
-**0.244 → 0.138 로 바뀐 이유**: `teleop.yaml` 의 `min_drive_percent` 를 50 → 35
+**0.244 → 0.110 으로 바뀐 이유**: `teleop.yaml` 의 `min_drive_percent` 를 50 → 35
 로 내려(S15P11A304-198) 매핑이 달라졌다. `INSERT_SPEED=0.05` 는 이제
 `35 + (0.05/0.20)×25 = 41%` 로 간다.
 
     drive 35%  →  0.070 m/s   (구르는 중에만. 이 값으론 출발 못 한다)
-    drive 41%  →  0.138 m/s   ← INSERT 가 여기
+    drive 41%  →  0.110 m/s   ← INSERT 가 여기 (실주행 로그 실측)
     drive 50%  →  0.178 m/s
 
 ⚠️ **0.244 는 과대평가였다.** 그때는 1초로 쟀는데, 짧게 잴수록 기동 구간 비중이
 커져 평균이 **낮게** 나와야 정상이다. 반대로 나왔으므로 옛 값 자체가 틀렸다.
-지금 값은 킥(55% 0.6초) 뒤 **유지 시간만 2.0/4.0초로 바꿔 차이로** 뽑아 기동
-구간을 상쇄한 것이다.
 
 ⚠️ **환경 의존 상수다.** 배터리 전압·바닥 마찰·모터 발열에 따라 달라진다.
-시연 장소가 바뀌면 다시 잰다. 재는 법은 `teleop.yaml` 의 구동 PWM 주석 참조.
+시연 장소가 바뀌면 **실주행 로그로 다시 뽑는다**(따로 세워두고 재지 말 것).
 
 ⚠️ 진입은 개루프라 이 값이 틀리면 **깊이가 그대로 틀린다.** 값이 실제보다 크면
 덜 들어가고(포크가 걸쳐짐), 작으면 파렛트를 밀어낸다."""
@@ -193,7 +204,7 @@ INSERT_ENTER_MM = 210.0
 180 → 210 으로 올리면서 하한이 630 → 660 이 됐고, 그래서 `ALIGN_ENTER_MM` 도
 650 → **700** 으로 함께 올렸다. **두 값은 따로 못 움직인다.**"""
 
-INSERT_MARGIN_MM = 65.0
+INSERT_MARGIN_MM = 40.0
 """진입 목표 거리에서 빼는 여유(mm). 포크 오프셋 90 실측이 기준이지만 **최종값은
 실주행으로 잡았다** — 아래 이력 참조.
 
@@ -210,14 +221,21 @@ INSERT_MARGIN_MM = 65.0
     105  → 95mm    많이 줄었으나 아직 조금 밀림
     130  → 70mm    안 밀림. 그런데 5cm 덜 들어감
     80   → 120mm   거의 맞음. 좌 2cm / 우 1cm 부족
-    65   → 135mm   ← 지금. 깊이 맞음
+    65   → 135mm   깊이 맞음 — 다만 좌우 포크가 4~5cm 덜 들어감
+    40   → 160mm   ← 지금. 좌우 둘 다 제대로 물림. 파렛트가 **살짝 밀린다**
 
-⚠️ **더 줄이면 파렛트를 밀기 시작한다.** 130 까지는 안 밀렸고 65 에서 깊이가
-맞았으니 여유가 크지 않다. 파렛트가 밀리기 시작하면 도로 올린다.
+⚠️ 위 다섯 줄은 `INSERT_SPEED_ACTUAL` 이 **틀렸던 시절**의 값이다(0.244·0.138).
+속도 상수가 크면 실제보다 짧게 가므로, 그때의 "여유" 는 속도 오차와 섞여 있다.
+2026-08-04 오후에 속도를 실주행 로그로 바로잡은 뒤 다시 잡은 값이 **40** 이다.
 
-⚠️ **모자란 쪽이 안전하다.** 덜 들어가면 다시 밀면 되지만, 더 들어가면 파렛트를
-밀어내 위치가 틀어진다. 여유를 위에서부터 줄여 내려온 것은 그 방향으로 잡은
-것이다 (거리 자체도 ±수 mm 흔들린다 — 실측 σ 1.3mm @30cm).
+**살짝 미는 것은 허용한다.** 실제 지게차도 포크가 자리를 잡으면서 파렛트를 민다 —
+테이퍼가 좌우·수평 잔여 오차를 흡수하는 과정이 곧 그것이다. 덜 물리는 쪽이
+화물을 포크 끝에 걸쳐 무게중심을 앞으로 빼는 것보다 나쁘다.
+
+⚠️ **단, 빈 파렛트로 잡은 값이다.** 화물이 실리면 질량·마찰이 달라져 같은 힘에
+파렛트가 안 밀리고 **화물이 흔들릴 수 있다.** 적재 상태로 재확인해야 확정이다.
+
+⚠️ 거리 자체도 ±수 mm 흔들린다 (실측 σ 1.3mm @30cm).
 
 ⚠️ 카메라를 옮기거나 포크를 교체하면 **다시 재야 한다.**"""
 
@@ -341,7 +359,9 @@ class ForkServo:
                  lost_grace_s: float = LOST_GRACE_S,
                  k_lateral: float = K_LATERAL,
                  k_yaw: float = K_YAW,
-                 align_yaw_boost: float = ALIGN_YAW_BOOST) -> None:
+                 align_yaw_boost: float = ALIGN_YAW_BOOST,
+                 align_speed: float = ALIGN_SPEED,
+                 insert_margin_mm: float = INSERT_MARGIN_MM) -> None:
         self.lateral_tolerance = lateral_tolerance
         self.yaw_tolerance = yaw_tolerance
         self.align_enter_px = align_enter_px
@@ -353,6 +373,13 @@ class ForkServo:
         self.k_lateral = k_lateral
         self.k_yaw = k_yaw
         self.align_yaw_boost = align_yaw_boost
+        # 진동 조사 때 값을 바꿔가며 돌려야 해서 생성자로 뺐다(S15P11A304-152).
+        # ⚠️ 0.02 미만은 drive 35% 아래라 구르던 차도 멎고, 멎으면 정지마찰 때문에
+        #    **스스로 못 출발한다**. 아래 ALIGN_SPEED 주석 참조.
+        self.align_speed = align_speed
+        # 진입 깊이를 실주행으로 좁혀 들어가야 해서 같이 뺐다. 줄일수록 깊이
+        # 들어간다 — ⚠️ **한 번에 많이 줄이지 말 것.** 너무 줄이면 파렛트를 민다.
+        self.insert_margin_mm = insert_margin_mm
 
         self.phase = Phase.SEARCH
         self.episode = Episode()
@@ -394,7 +421,7 @@ class ForkServo:
         """
         if error.distance_mm is None:
             return self.insert_duration_s
-        travel_mm = max(0.0, error.distance_mm - INSERT_MARGIN_MM)
+        travel_mm = max(0.0, error.distance_mm - self.insert_margin_mm)
         return travel_mm / 1000.0 / INSERT_SPEED_ACTUAL
 
     def _reached(self, error: AlignError, px_threshold: float,
@@ -470,7 +497,7 @@ class ForkServo:
         if self._reached(error, self.align_enter_px, self.align_enter_mm):
             self.phase = Phase.ALIGN
             return DriveCommand(
-                linear_x=ALIGN_SPEED,
+                linear_x=self.align_speed,
                 angular_z=steering_for(error, self.k_lateral,
                                        self.k_yaw * self.align_yaw_boost),
                 phase=Phase.ALIGN, reason="정렬 중(요 우선)")

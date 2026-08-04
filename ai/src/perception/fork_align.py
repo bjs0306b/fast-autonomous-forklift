@@ -94,6 +94,89 @@ class AlignError:
     """`focal_px`를 주면 채워지는 진입면까지의 거리(mm). 없으면 None."""
 
 
+class YawSmoother:
+    """요각을 시간 평균해 픽셀 양자화 노이즈를 줄인다 (S15P11A304-152).
+
+    **왜 필요한가** — 2026-08-04, 차와 파렛트를 **둘 다 세워둔 채** dry-run 을
+    돌렸더니 요각이 프레임마다 튀었다:
+
+        +0.0  +8.8  -8.7  -4.4  -6.6  +0.0  +2.2  +2.2  -4.4  +4.4  +6.6  (도)
+
+    차가 안 움직였으므로 **전부 측정 노이즈**다. 그리고 값이 **2.2° 배수로만**
+    나온다 — 연속 분포가 아니라 등간격으로 끊긴다. bbox 가 정수 픽셀로 나오고
+    **1px 이 2.2° 에 해당**한다는 뜻이다(순수 픽셀 양자화).
+
+    증폭원은 추정식 자체다:
+
+        yaw_signal = (wl − wr) / (wl + wr)
+        tanθ       = 2·focal_px / span · yaw_signal      ← 2f/span ≈ 17배
+
+    두 구멍 폭 차이라는 작은 양을 17배로 키우므로, 1px 오차가 곧 2.2° 가 된다.
+
+    ⚠️ **모델 재학습·초점 조정으로는 안 준다.** 어떤 검출기든 bbox 는 ±1px 떨고,
+    픽셀 격자는 모델 품질과 무관하다. 값이 연속이 아니라 격자에 딱 걸려 있다는
+    것이 그 증거다.
+
+    **왜 중앙값이 아니라 평균인가** — 값이 2.2° 격자 위에만 존재하므로 중앙값은
+    격자 위로만 떨어져 **해상도가 안 는다.** 평균은 격자 사이 값을 내므로 실질
+    서브픽셀 해상도를 얻는다. 대신 튀는 값 방어로 **최대·최소 하나씩 버린다**
+    (창이 3 이상일 때).
+
+    ⚠️ **지연이 생긴다.** 창 N 이면 대략 N/2 프레임 늦다 — 10fps·0.10 m/s 에서
+    창 5 는 약 25mm 다. 창을 키울수록 조용해지지만 제어가 늦게 반응한다.
+    """
+
+    def __init__(self, window: int = 5) -> None:
+        if window < 1:
+            raise ValueError("window 는 1 이상이어야 한다 (1 이면 평활 없음)")
+        self.window = window
+        self._signals: list[float] = []
+        self._degrees: list[float] = []
+
+    def reset(self) -> None:
+        self._signals.clear()
+        self._degrees.clear()
+
+    @staticmethod
+    def _trimmed_mean(values: list[float]) -> float:
+        if len(values) >= 3:
+            ordered = sorted(values)[1:-1]
+        else:
+            ordered = values
+        return sum(ordered) / len(ordered)
+
+    def update(self, error: AlignError | None) -> AlignError | None:
+        """평활된 요각으로 바꾼 오차를 돌려준다.
+
+        타깃을 놓치면 창을 비운다 — 다른 파렛트·다른 면의 값이 섞이면 안 된다.
+        """
+        if error is None:
+            self.reset()
+            return None
+        if self.window == 1:
+            return error
+
+        self._signals.append(error.yaw_signal)
+        if len(self._signals) > self.window:
+            self._signals.pop(0)
+        signal = self._trimmed_mean(self._signals)
+
+        degrees = error.yaw_deg
+        if degrees is not None:
+            self._degrees.append(degrees)
+            if len(self._degrees) > self.window:
+                self._degrees.pop(0)
+            degrees = self._trimmed_mean(self._degrees)
+
+        return AlignError(
+            lateral_ratio=error.lateral_ratio,
+            yaw_signal=signal,
+            approach_px=error.approach_px,
+            yaw_deg=degrees,
+            distance_mm=error.distance_mm,
+        )
+
+
 @dataclass(frozen=True)
 class EntryFace:
     """진입면 — 포크 2개가 들어갈 구멍 2개."""
