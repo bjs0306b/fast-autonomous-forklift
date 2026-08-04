@@ -17,7 +17,9 @@ class TeleopLimits:
     linear_deadband_mps: float = 0.01
     wheelbase_m: float = 0.144
     rear_steering_limit_deg: float = 15.0
-    min_drive_percent: int = 50
+    # 2026-08-04 실측으로 50 → 35 (S15P11A304-198). 근거·측정표는
+    # config/teleop.yaml 주석에 있다 — 여기 옮겨 적으면 갈라진다.
+    min_drive_percent: int = 35
     max_drive_percent: int = 60
     steering_center_cdeg: int = 10000
     steering_min_cdeg: int = 8500

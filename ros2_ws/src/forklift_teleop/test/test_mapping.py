@@ -52,8 +52,18 @@ class MappingTest(unittest.TestCase):
 
     def test_partial_input_uses_minimum_drive(self):
         command = map_twist(0.02, 0.0, self.limits)
-        self.assertGreaterEqual(command.drive_percent, 50)
+        self.assertGreaterEqual(command.drive_percent, 35)
         self.assertLessEqual(command.drive_percent, 60)
+
+    def test_low_and_high_commands_map_to_different_drive(self):
+        """명령이 실제로 갈리는지 — 이게 S15P11A304-198 의 완료 조건이다.
+
+        하한이 50 이던 동안 0.05 와 0.20 이 52% 와 60% 로 8%p 차이였고, 그
+        폭 안에서는 실제 속도가 사실상 구분되지 않았다.
+        """
+        slow = map_twist(0.05, 0.0, self.limits).drive_percent
+        fast = map_twist(0.20, 0.0, self.limits).drive_percent
+        self.assertGreaterEqual(fast - slow, 15)
 
     def test_stale_command_stops_and_centers(self):
         command = select_command(0.2, 0.35, 0.501, 0.5, self.limits)
