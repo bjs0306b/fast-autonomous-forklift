@@ -176,7 +176,20 @@ def main(argv=None) -> int:
         print(f"마지막 프레임 → {out}", flush=True)
 
     print(f"프레임 {frames}장 · 기록 {len(servo.episode.samples)}건", flush=True)
-    return 0 if servo.phase in (Phase.DONE, Phase.SEARCH) else 2
+
+    # 종료 코드는 **성공한 것만 0**이다. 종전에 SEARCH 도 0 이었는데, 그러면
+    # *파렛트를 한 번도 못 보고 제한 시간을 넘긴 실행*이 성공으로 보고된다 —
+    # 154 의 성공률 집계가 조용히 부풀려진다. 원인별로 나눠 사람이 볼 곳을 가른다.
+    #
+    #   0  DONE    진입 완료
+    #   2  ABORT   진입 거리에서 미정렬 — 물러나 재접근(154)
+    #   3  SEARCH  타깃을 못 찾고 종료 — 조명·파렛트 배치·검출을 본다
+    if servo.phase is Phase.DONE:
+        return 0
+    if servo.phase is Phase.SEARCH:
+        print("⚠️ 파렛트를 찾지 못한 채 끝났다 — 실패로 집계한다", flush=True)
+        return 3
+    return 2
 
 
 if __name__ == "__main__":
