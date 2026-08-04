@@ -3,6 +3,8 @@
 > 확정일: 2026-07-31 · 대상: S15P11A304-143(오차 산출) → 152(제어 루프)
 > 구현: `ai/src/perception/fork_align.py` · 채점: `ai/scripts/eval_entry_face.py`
 > 선행 문서: `onboard-hole-label-guide.md`(라벨 규약) · `onboard-tensorrt-runbook.md`(성능)
+>
+> **이 문서는 설계 근거다. 실물에서 돌리는 절차는 `onboard-fork-align-runbook.md`.**
 
 152 제어 루프를 짜기 전에 **"어느 파렛트의 어느 면으로 갈지"** 를 먼저 정한다. 이걸
 정하지 않으면 프레임마다 다른 대상을 쫓아 제어가 발산한다.
