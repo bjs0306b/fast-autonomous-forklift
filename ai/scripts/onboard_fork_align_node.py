@@ -3,11 +3,21 @@
 `onboard_live.py`가 검출까지 관통한 그 경로에 타깃 선택(143)과 제어 루프(152)를 이어
 붙인 것이다. 젯슨에서 돈다.
 
-    # 젯슨에서, ai/ 를 PYTHONPATH에 두고
-    PYTHONPATH=src python3 scripts/onboard_fork_align_node.py \
+    # 젯슨에서, ai/ 에서
+    export ROS_DOMAIN_ID=100
+    PYTHONPATH=src:$PYTHONPATH python3 scripts/onboard_fork_align_node.py \
         --engine ~/trt_test/onboard_s640_ep116_fp16.engine \
         --plugin ~/mmdeploy/build_trt/lib/libmmdeploy_tensorrt_ops.so \
         --camera 0 --rotate180 --dry-run
+
+⚠️ **`PYTHONPATH=src:$PYTHONPATH` 다 — `PYTHONPATH=src` 가 아니다.** 맨 앞만 쓰면 ROS
+경로를 통째로 덮어써 `ModuleNotFoundError: rclpy` 가 난다. 종전에 이 docstring 이
+`PYTHONPATH=src` 로 적혀 있어 2026-08-04 에 그대로 따라 하다 두 번 밟았다.
+
+⚠️ **`ROS_DOMAIN_ID=100` 이 필요하다**(`docs/deploy/ros-domain.md`). 안 맞으면
+`/cmd_vel` 구독자가 0이라 **차가 안 움직이는데 에러도 안 난다.**
+
+준비·함정·반복 시험 절차는 `docs/ai/onboard-fork-align-runbook.md` 참조.
 
 ⚠️ **처음에는 반드시 `--dry-run`으로 돌린다.** 명령을 계산해 찍기만 하고 `/cmd_vel`을
 내보내지 않는다. 부호가 반대면 지게차가 파렛트로 돌진한다 — 화면 로그로 좌우 부호부터
