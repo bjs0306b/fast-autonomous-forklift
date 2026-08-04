@@ -16,7 +16,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** MOVE 결과, 측정 요청 또는 활성 측정 세션이 각 TTL을 넘으면 작업을 실패 처리하고 차선을 비운다. */
+/** MOVE 결과·설비 대기·측정 요청·활성 세션이 각 TTL을 넘으면 작업을 실패 처리하고 차선을 비운다. */
 @Service
 public class StationMeasurementTimeoutService {
 
@@ -53,6 +53,7 @@ public class StationMeasurementTimeoutService {
 
         expireActiveSession(sessionExpiredBefore, now);
         expireUnopenedRequests(sessionExpiredBefore, now);
+        expireMeasurementLaneWaits(moveExpiredBefore, now);
         expireMovesAwaitingResult(moveExpiredBefore, now);
     }
 
@@ -83,10 +84,21 @@ public class StationMeasurementTimeoutService {
         List<TransportTask> expired = taskMapper.findExpiredMeasurementRequests(expiredBefore);
         for (TransportTask task : expired) {
             if (taskMapper.updateStatusIfCurrent(
-                    task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.FAILED,
+                    task.getId(), TaskStatus.MEASURING, TaskStatus.FAILED,
                     null, failedAt) == 1) {
                 log.warn("Measurement request expired before session open: taskId={}, cargoId={}, requestedAt={}",
                         task.getTaskCode(), task.getCargoId(), task.getMeasurementRequestedAt());
+            }
+        }
+    }
+
+    private void expireMeasurementLaneWaits(LocalDateTime expiredBefore, LocalDateTime failedAt) {
+        List<TransportTask> expired = taskMapper.findExpiredMeasurementLaneWaits(expiredBefore);
+        for (TransportTask task : expired) {
+            if (taskMapper.failMeasurementLaneWaitIfExpired(
+                    task.getId(), expiredBefore, failedAt) == 1) {
+                log.warn("Measurement lane wait timed out: taskId={}, cargoId={}, startedAt={}, ttlSeconds={}",
+                        task.getTaskCode(), task.getCargoId(), task.getStartedAt(), moveProperties.ttlSeconds());
             }
         }
     }

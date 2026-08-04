@@ -3,20 +3,20 @@ package com.fast.backend.station.service;
 import com.fast.backend.command.domain.VehicleCommand;
 import com.fast.backend.command.domain.VehicleCommandStatus;
 import com.fast.backend.command.domain.VehicleCommandType;
-import com.fast.backend.station.dto.StationMeasureRequestMessage;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -27,11 +27,11 @@ class StationMeasurementRequestWorkflowTest {
             Instant.parse("2026-08-03T03:00:00Z"), ZoneId.of("Asia/Seoul"));
 
     @Test
-    void successfulMove_publishesCargoMeasurementRequest() {
+    void successfulMove_marksTaskAsWaitingForMeasurement() {
         TransportTaskMapper taskMapper = mock(TransportTaskMapper.class);
-        StationMeasureRequestPublisher publisher = mock(StationMeasureRequestPublisher.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
         StationMeasurementRequestWorkflow workflow = new StationMeasurementRequestWorkflow(
-                taskMapper, publisher, CLOCK);
+                taskMapper, eventPublisher, CLOCK);
 
         TransportTask task = new TransportTask();
         task.setId(7L);
@@ -40,8 +40,9 @@ class StationMeasurementRequestWorkflowTest {
         task.setVehicleId("FORKLIFT-01");
         task.setStatus(TaskStatus.MOVING_TO_PICKUP);
         when(taskMapper.findById(7L)).thenReturn(Optional.of(task));
-        when(taskMapper.markMeasurementRequested(org.mockito.ArgumentMatchers.eq(7L),
-                org.mockito.ArgumentMatchers.any())).thenReturn(1);
+        when(taskMapper.updateStatusIfCurrent(
+                7L, TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING,
+                null, null)).thenReturn(1);
 
         VehicleCommand command = new VehicleCommand();
         command.setCommandId("COMMAND-01");
@@ -50,13 +51,12 @@ class StationMeasurementRequestWorkflowTest {
 
         workflow.handleMoveResult(command, VehicleCommandStatus.SUCCESS);
 
-        ArgumentCaptor<StationMeasureRequestMessage> captor =
-                ArgumentCaptor.forClass(StationMeasureRequestMessage.class);
-        ArgumentCaptor<LocalDateTime> requestedAtCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(publisher).publish(captor.capture());
-        verify(taskMapper).markMeasurementRequested(org.mockito.ArgumentMatchers.eq(7L),
-                requestedAtCaptor.capture());
-        assertThat(captor.getValue().cargoId()).isEqualTo(1L);
-        assertThat(requestedAtCaptor.getValue()).isEqualTo(LocalDateTime.of(2026, 8, 3, 12, 0));
+        verify(taskMapper).updateStatusIfCurrent(
+                eq(7L), eq(TaskStatus.MOVING_TO_PICKUP), eq(TaskStatus.MEASURING),
+                eq(null), eq(null));
+        ArgumentCaptor<StationMeasurementReadyEvent> event =
+                ArgumentCaptor.forClass(StationMeasurementReadyEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().taskId()).isEqualTo(7L);
     }
 }
