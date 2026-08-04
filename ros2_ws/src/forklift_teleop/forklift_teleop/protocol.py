@@ -2,6 +2,18 @@
 
 from dataclasses import dataclass
 
+# 🔗 **펌웨어 `main/config.h` 의 TELEOP_STEERING_MIN/MAX_CDEG 와 반드시 같아야 한다.**
+#
+# 두 값이 어긋나면 증상이 갈린다:
+#   여기가 더 좁다  → 브리지가 ValueError 로 **죽는다** (2026-08-04 실제로 겪음)
+#   여기가 더 넓다  → 브리지는 통과시키는데 ESP32 가 프레임을 버려 **조향이 조용히
+#                     안 먹는다**. 이쪽이 더 나쁘다 — 에러가 안 난다.
+#
+# 2026-08-04: 8500~11500 → 6600~12600 (중립 9600 기준 ±30°, S15P11A304-197).
+# ⚠️ 바꿀 때는 **펌웨어를 재플래시**해야 실제로 반영된다.
+STEERING_MIN_CDEG = 6600
+STEERING_MAX_CDEG = 12600
+
 
 @dataclass(frozen=True)
 class AckFrame:
@@ -49,8 +61,14 @@ def encode_command(sequence: int, drive_percent: int, steering_cdeg: int) -> byt
         raise ValueError("sequence must fit uint32")
     if not -60 <= drive_percent <= 60:
         raise ValueError("drive_percent must be between -60 and 60")
-    if not 8500 <= steering_cdeg <= 11500:
-        raise ValueError("steering_cdeg must be between 8500 and 11500")
+    # 펌웨어 config.h 의 TELEOP_STEERING_MIN/MAX_CDEG 와 **같은 값이어야 한다.**
+    # 한쪽만 넓히면 브리지는 통과시키는데 ESP32 가 프레임을 버려, 조향이 조용히
+    # 안 먹는다. 반대로 한쪽만 좁으면 여기서 ValueError 가 나며 브리지가 죽는다
+    # (2026-08-04 실제로 겪었다 — mapping.py 만 넓히고 여기를 놓쳤다).
+    if not STEERING_MIN_CDEG <= steering_cdeg <= STEERING_MAX_CDEG:
+        raise ValueError(
+            f"steering_cdeg must be between {STEERING_MIN_CDEG} and "
+            f"{STEERING_MAX_CDEG} (got {steering_cdeg})")
     return frame_body(f"CMD,{sequence},{drive_percent},{steering_cdeg}")
 
 
