@@ -39,7 +39,7 @@ from pathlib import Path
 import cv2
 
 from control.fork_servo import ForkServo, Phase
-from perception.fork_align import TargetTracker
+from perception.fork_align import TargetTracker, YawSmoother
 from perception.trt_detector import TrtDetector
 
 FORK_CENTER_X = 670.0
@@ -82,6 +82,23 @@ def main(argv=None) -> int:
     ap.add_argument("--cmd-topic", default="/cmd_vel")
     ap.add_argument("--dry-run", action="store_true",
                     help="계산만 하고 /cmd_vel을 내보내지 않는다 (첫 실행은 반드시 이걸로)")
+    ap.add_argument("--align-speed", type=float, default=None,
+                    help="ALIGN 구간 전진 속도(m/s). 안 주면 fork_servo 기본값. "
+                         "⚠️ 0.02 미만은 drive 35% 아래라 차가 멎고 스스로 못 "
+                         "출발한다 (S15P11A304-198)")
+    ap.add_argument("--k-lateral", type=float, default=None,
+                    help="좌우 오차 게인. 안 주면 fork_servo 기본값")
+    ap.add_argument("--k-lateral-rate", type=float, default=None,
+                    help="좌우 오차 **변화율**에 걸리는 감쇠 게인. 기본 0(꺼짐). "
+                         "ALIGN 한계진동이 감쇠 부재 때문인지 시험할 때 켠다 — "
+                         "먼저 --k-lateral 0.10 으로 게인 문제인지부터 가른다")
+    ap.add_argument("--insert-margin", type=float, default=None,
+                    help="진입 목표에서 빼는 여유(mm). 줄일수록 깊이 들어간다. "
+                         "⚠️ 한 번에 많이 줄이면 파렛트를 민다 — 한 단계씩")
+    ap.add_argument("--yaw-window", type=int, default=5,
+                    help="요각 시간 평활 창(프레임). 1 이면 평활 없음(생값). "
+                         "정지 상태에서도 요각이 ±8.8° 튀는 픽셀 양자화 노이즈를 "
+                         "줄인다 — 대신 창의 절반만큼 반응이 늦다")
     ap.add_argument("--max-seconds", type=float, default=60.0)
     ap.add_argument("--save-dir", type=Path, help="ABORT/DONE 시 마지막 프레임 저장")
     a = ap.parse_args(argv)
@@ -113,7 +130,23 @@ def main(argv=None) -> int:
     detector = TrtDetector(a.engine, a.plugin, class_names=("pallet", "hole"),
                            rotate180=a.rotate180)
     tracker = TargetTracker()
-    servo = ForkServo()
+    servo_kwargs = {}
+    if a.align_speed is not None:
+        servo_kwargs["align_speed"] = a.align_speed
+    if a.k_lateral is not None:
+        servo_kwargs["k_lateral"] = a.k_lateral
+    if a.insert_margin is not None:
+        servo_kwargs["insert_margin_mm"] = a.insert_margin
+    if a.k_lateral_rate is not None:
+        servo_kwargs["k_lateral_rate"] = a.k_lateral_rate
+    servo = ForkServo(**servo_kwargs)
+    smoother = YawSmoother(a.yaw_window)
+    if servo_kwargs:
+        # 기본값과 다른 값으로 돌고 있다는 것을 화면에 남긴다 — 나중에 로그만
+        # 보고 "그때 무슨 값이었지" 를 되짚을 수 있어야 한다.
+        print("설정 덮어씀: "
+              + ", ".join(f"{k}={v}" for k, v in servo_kwargs.items()),
+              flush=True)
 
     def publish(linear_x: float, angular_z: float) -> None:
         if publisher is None:
@@ -147,6 +180,10 @@ def main(argv=None) -> int:
                 error = target.error(image_width=got_w,
                                      fork_center_x=a.fork_center_x,
                                      focal_px=a.focal_px)
+            raw_yaw_deg = error.yaw_deg if error is not None else None
+            # 제어도 로그도 **평활된 값**을 본다. 생값과 섞어 쓰면 나중에 로그를
+            # 보고 "제어가 무엇을 봤나" 를 되짚을 수 없다.
+            error = smoother.update(error)
             cmd = servo.step(error, dt)
             publish(cmd.linear_x, cmd.angular_z)
 
@@ -157,6 +194,10 @@ def main(argv=None) -> int:
                           f"폭 {error.approach_px:5.0f}px")
                 if error.yaw_deg is not None:
                     detail += f" ({error.yaw_deg:+.1f}° {error.distance_mm:.0f}mm)"
+                    # 평활 전 값도 같이 남긴다 — 노이즈가 얼마나 줄었는지 로그만
+                    # 보고 판단할 수 있어야 한다.
+                    if raw_yaw_deg is not None and a.yaw_window > 1:
+                        detail += f" [생 {raw_yaw_deg:+.1f}°]"
             print(f"[{frames:4d}] {1/dt if dt else 0:4.1f}fps  {cmd.phase.value:8s} "
                   f"v {cmd.linear_x:+.2f} w {cmd.angular_z:+.2f}  {detail}  {cmd.reason}",
                   flush=True)

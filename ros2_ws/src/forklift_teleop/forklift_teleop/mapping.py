@@ -16,12 +16,25 @@ class TeleopLimits:
     max_angular_rps: float = 0.35
     linear_deadband_mps: float = 0.01
     wheelbase_m: float = 0.144
-    rear_steering_limit_deg: float = 15.0
-    min_drive_percent: int = 50
+    rear_steering_limit_deg: float = 28.0
+    # 2026-08-04 실측으로 50 → 35 (S15P11A304-198). 근거·측정표는
+    # config/teleop.yaml 주석에 있다 — 여기 옮겨 적으면 갈라진다.
+    min_drive_percent: int = 35
     max_drive_percent: int = 60
-    steering_center_cdeg: int = 10000
-    steering_min_cdeg: int = 8500
-    steering_max_cdeg: int = 11500
+    # ⚠️ **이 기본값들은 2026-08-04 오후까지 낡은 채 방치돼 있었다** (10000/8500/
+    #    11500, 중립 ±15°). 그 사이 실제 설정은 197 로 9600/6600/12600 이 됐고
+    #    198 로 다시 9400/6600/12200 이 됐는데 여기만 안 따라왔다.
+    #
+    #    브리지는 항상 teleop.yaml 을 명시적으로 넘기므로 **지금 동작에는 영향이
+    #    없었다.** 그래서 아무도 안 봤고, 테스트가 오히려 낡은 값을 고정하고
+    #    있었다. 인자 없이 `TeleopLimits()` 를 만드는 코드가 하나 생기는 순간
+    #    **조용히 틀린 조향값**을 쓰게 된다 — 중립이 2.3° 틀어지고 가동 범위가
+    #    ±15° 로 좁아져 정렬이 수렴하지 않는다(197 에서 겪은 그 증상이다).
+    #
+    # 🔗 값의 근거는 config/teleop.yaml 주석에 있다. **바꿀 때 두 곳을 같이 고친다.**
+    steering_center_cdeg: int = 9400
+    steering_min_cdeg: int = 6600
+    steering_max_cdeg: int = 12200
 
     def validate(self) -> None:
         if self.max_linear_mps <= 0.0 or self.max_angular_rps <= 0.0:
