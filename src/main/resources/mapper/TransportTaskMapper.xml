@@ -108,22 +108,47 @@
     </update>
     <update id="startMeasurement">
         UPDATE transport_task
-        SET measurement_session_id=#{sessionId}, status='MEASURING'
-        WHERE id=#{id} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
+        SET measurement_session_id=#{sessionId}
+        WHERE id=#{id}
+          AND status='MEASURING'
+          AND measurement_requested_at IS NOT NULL
+          AND measurement_session_id IS NULL
     </update>
     <update id="markMeasurementRequested">
         UPDATE transport_task
         SET measurement_requested_at=#{measurementRequestedAt}
         WHERE id=#{id}
-          AND status='MOVING_TO_PICKUP'
+          AND status='MEASURING'
           AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &gt; #{waitExpiredBefore}
     </update>
+    <select id="findOldestMeasurementAwaitingRequest" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='MEASURING'
+          AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+        ORDER BY started_at, id
+        LIMIT 1
+        FOR UPDATE
+    </select>
     <select id="findExpiredMeasurementRequests" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
-        WHERE status='MOVING_TO_PICKUP'
+        WHERE status='MEASURING'
           AND measurement_requested_at IS NOT NULL
+          AND measurement_session_id IS NULL
           AND measurement_requested_at &lt;= #{expiredBefore}
         ORDER BY measurement_requested_at, id
+    </select>
+    <select id="findExpiredMeasurementLaneWaits" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='MEASURING'
+          AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &lt;= #{expiredBefore}
+        ORDER BY started_at, id
     </select>
     <select id="findExpiredMovesAwaitingResult" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
@@ -142,9 +167,22 @@
           AND started_at IS NOT NULL
           AND started_at &lt;= #{expiredBefore}
     </update>
+    <update id="failMeasurementLaneWaitIfExpired">
+        UPDATE transport_task
+        SET status='FAILED', failed_at=#{failedAt}
+        WHERE id=#{id}
+          AND status='MEASURING'
+          AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &lt;= #{expiredBefore}
+    </update>
     <select id="findPendingMeasurementByCargoId" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
-        WHERE cargo_id=#{cargoId} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
+        WHERE cargo_id=#{cargoId}
+          AND status='MEASURING'
+          AND measurement_requested_at IS NOT NULL
+          AND measurement_session_id IS NULL
         ORDER BY id DESC
         LIMIT 1
         FOR UPDATE

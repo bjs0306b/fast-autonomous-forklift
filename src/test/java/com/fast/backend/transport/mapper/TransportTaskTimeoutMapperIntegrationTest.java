@@ -37,13 +37,46 @@ class TransportTaskTimeoutMapperIntegrationTest {
         task.setCreatedAt(startedAt);
         taskMapper.insert(task);
 
+        assertThat(taskMapper.updateStatusIfCurrent(
+                task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING,
+                null, null)).isEqualTo(1);
         assertThat(taskMapper.markMeasurementRequested(
-                task.getId(), LocalDateTime.of(2026, 8, 3, 12, 0))).isEqualTo(1);
+                task.getId(), LocalDateTime.of(2026, 8, 3, 12, 0),
+                LocalDateTime.of(2026, 8, 3, 11, 45))).isEqualTo(1);
 
         assertThat(taskMapper.failMoveIfAwaitingResult(
                 task.getId(), LocalDateTime.of(2026, 8, 3, 11, 55),
                 LocalDateTime.of(2026, 8, 3, 12, 0))).isZero();
         assertThat(taskMapper.findById(task.getId()).orElseThrow().getStatus())
-                .isEqualTo(TaskStatus.MOVING_TO_PICKUP);
+                .isEqualTo(TaskStatus.MEASURING);
+    }
+
+    @Test
+    void measurementLaneWait_canBeSelectedAndExpired() {
+        LocalDateTime startedAt = LocalDateTime.of(2026, 8, 3, 11, 50);
+        Cargo cargo = new Cargo();
+        cargo.setCreatedAt(startedAt);
+        cargoMapper.insert(cargo);
+
+        TransportTask task = new TransportTask();
+        task.setTaskCode("TASK-MEASUREMENT-LANE-WAIT");
+        task.setCargoId(cargo.getCargoId());
+        task.setStatus(TaskStatus.MEASURING);
+        task.setStartedAt(startedAt);
+        task.setCreatedAt(startedAt);
+        taskMapper.insert(task);
+
+        assertThat(taskMapper.findOldestMeasurementAwaitingRequest())
+                .get()
+                .extracting(TransportTask::getId)
+                .isEqualTo(task.getId());
+        assertThat(taskMapper.markMeasurementRequested(
+                task.getId(), LocalDateTime.of(2026, 8, 3, 12, 0),
+                LocalDateTime.of(2026, 8, 3, 11, 55))).isZero();
+        assertThat(taskMapper.failMeasurementLaneWaitIfExpired(
+                task.getId(), LocalDateTime.of(2026, 8, 3, 11, 55),
+                LocalDateTime.of(2026, 8, 3, 12, 0))).isEqualTo(1);
+        assertThat(taskMapper.findById(task.getId()).orElseThrow().getStatus())
+                .isEqualTo(TaskStatus.FAILED);
     }
 }

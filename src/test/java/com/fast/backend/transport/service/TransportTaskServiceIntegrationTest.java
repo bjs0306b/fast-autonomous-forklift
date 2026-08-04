@@ -109,6 +109,10 @@ class TransportTaskServiceIntegrationTest {
                 task.getId(), TaskStatus.PENDING, TaskStatus.ASSIGNED, null, null)).isEqualTo(1);
         assertThat(taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP, now, null)).isEqualTo(1);
+        assertThat(taskMapper.updateStatusIfCurrent(
+                task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING, null, null)).isEqualTo(1);
+        assertThat(taskMapper.markMeasurementRequested(
+                task.getId(), now, now.minusMinutes(5))).isEqualTo(1);
         StationSession session = measurementService.openSession(cargo.getCargoId());
         TransportTask measuring = taskMapper.findById(task.getId()).orElseThrow();
         assertThat(measuring.getStatus()).isEqualTo(TaskStatus.MEASURING);

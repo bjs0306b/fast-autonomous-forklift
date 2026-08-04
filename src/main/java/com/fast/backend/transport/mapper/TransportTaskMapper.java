@@ -52,12 +52,20 @@ public interface TransportTaskMapper {
     int startMeasurement(@Param("id") Long id, @Param("sessionId") String sessionId);
     int markMeasurementRequested(
             @Param("id") Long id,
-            @Param("measurementRequestedAt") LocalDateTime measurementRequestedAt);
+            @Param("measurementRequestedAt") LocalDateTime measurementRequestedAt,
+            @Param("waitExpiredBefore") LocalDateTime waitExpiredBefore);
+    Optional<TransportTask> findOldestMeasurementAwaitingRequest();
     List<TransportTask> findExpiredMeasurementRequests(
+            @Param("expiredBefore") LocalDateTime expiredBefore);
+    List<TransportTask> findExpiredMeasurementLaneWaits(
             @Param("expiredBefore") LocalDateTime expiredBefore);
     List<TransportTask> findExpiredMovesAwaitingResult(
             @Param("expiredBefore") LocalDateTime expiredBefore);
     int failMoveIfAwaitingResult(
+            @Param("id") Long id,
+            @Param("expiredBefore") LocalDateTime expiredBefore,
+            @Param("failedAt") LocalDateTime failedAt);
+    int failMeasurementLaneWaitIfExpired(
             @Param("id") Long id,
             @Param("expiredBefore") LocalDateTime expiredBefore,
             @Param("failedAt") LocalDateTime failedAt);

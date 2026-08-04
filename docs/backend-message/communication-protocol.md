@@ -6,7 +6,7 @@
 
 ```text
 차량 제어: 관제 REST 요청 → Spring Boot MQTT 명령 → ROS2 처리 → MQTT 상태/결과 수신
-화물 측정: taskId 연결 MOVE 성공 → 백엔드 MQTT 측정 요청 → AI 세션 생성 및 1회 측정
+화물 측정: taskId 연결 MOVE 성공 → 설비 해제 대기 → 백엔드 MQTT 측정 요청 → AI 세션 생성 및 1회 측정
              → AI REST 결과 등록
   → MySQL 저장
   → REST 조회 및 STOMP WebSocket 갱신
@@ -63,11 +63,17 @@ Isaac 호환 형식은 MQTT 수신 경계에서 `frameId=map`인 표준 위치�
 아직 `UnavailableCommandAdapter`이므로, 물리 실행 완료로 간주하면 안 된다.
 
 MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다. 이 안에 결과가 없으면 운반 작업을
-`FAILED`로 종료한다. MOVE 성공 뒤 AI 측정 요청·활성 세션에는 별도 60초 TTL을 적용한다.
+`FAILED`로 종료한다. MOVE 성공 상태를 커밋한 직후 설비를 확인하고, 점유 중이면 MQTT를 발행하지 않고
+1초마다 다시 확인한다. 이 대기까지 `started_at` 기준 300초를 넘으면 실패 처리한다. AI 측정 요청·활성
+세션에는 별도 60초 TTL을 적용한다.
 
 ### 측정 결과
 
-백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 `cargoId`로 MQTT 측정 요청을 발행한다. 측정 AI는 세션 생성 API를 호출하고, 응답으로 받은 `sessionId`를 포함해 `POST /api/stations/measurements`로 최종 결과를 등록한다. 세션 생성 시 백엔드는 같은 화물의 측정 대기 작업과 세션을 연결한다.
+백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 작업을 `MEASURING`으로 커밋한다. 커밋 직후 활성
+세션을 확인하고, 비어 있을 때만 `cargoId`로 MQTT 측정 요청을 발행한다. 점유 중이면 요청을 보내지 않고
+1초마다 다시 확인한다. 측정 AI는 세션
+생성 API를 호출하고, 응답으로 받은 `sessionId`를 포함해 `POST /api/stations/measurements`로 최종 결과를
+등록한다. 세션 생성 시 백엔드는 같은 화물의 측정 대기 작업과 세션을 연결한다.
 
 ```json
 {

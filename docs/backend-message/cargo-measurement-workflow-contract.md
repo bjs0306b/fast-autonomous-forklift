@@ -8,6 +8,8 @@
 화물 등록과 운반 작업 원자적 생성 및 차량 배정
 → taskId가 포함된 측정 위치 MOVE 명령 발행
 → ROS2가 MOVE 결과 SUCCESS 반환
+→ 백엔드가 작업을 MEASURING으로 커밋하고 측정 설비가 비기를 기다림
+→ 활성 세션이 없을 때
 → 백엔드가 cargoId로 fast/station/measure_request 발행
 → AI 측정 프로그램이 기존 REST API로 측정 세션 생성
 → 백엔드가 세션과 대기 중인 운반 작업 연결
@@ -17,7 +19,9 @@
 → AI의 기존 세션 종료 DELETE는 이미 자동 해제된 세션으로 안전하게 처리
 ```
 
-작업 상태는 `ASSIGNED → MOVING_TO_PICKUP → MEASURING → PICKING_UP` 순서로 진행한다. 측정 결과가 안전 조건을 만족하지 않거나 빈 적재 위치가 없으면 `FAILED`로 종료한다.
+작업 상태는 `ASSIGNED → MOVING_TO_PICKUP → MEASURING → PICKING_UP` 순서로 진행한다.
+`MEASURING`에서 `measurement_requested_at`이 null이면 측정 위치 도착 후 설비 해제를 기다리는 상태다.
+측정 결과가 안전 조건을 만족하지 않거나 빈 적재 위치가 없으면 `FAILED`로 종료한다.
 
 ## ROS2 담당 계약
 
@@ -62,6 +66,8 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 - 요청 한 건당 한 번 측정하고 최종 결과 한 건만 전송한다.
 - `cargoId`는 백엔드가 `POST /api/cargos`에서 자동 생성한 64비트 정수다.
 - AI는 기존 `POST /api/stations/sessions?cargoId=...` API로 세션을 생성한다.
+- 운영 환경에서는 백엔드 MQTT 요청을 받은 경우에만 세션 생성 API를 호출한다. 수동 테스트 호출은
+  다음 측정 요청보다 먼저 설비를 점유할 수 있으므로 운영 흐름과 분리한다.
 - 백엔드는 생성된 세션을 같은 `cargoId`의 측정 대기 작업과 연결한다.
 - 이미지 파일은 저장하지 않는다. 실시간 영상 표시가 필요하면 측정 결과 계약과 별도 스트림으로 구현한다.
 
@@ -74,15 +80,22 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 
 ### TTL 실패 처리
 
-- 백엔드가 측정 위치 MOVE 명령을 발행한 뒤 300초 안에 최종 결과를 받지 못하면 작업을
+- 백엔드가 측정 위치 MOVE 명령을 발행한 뒤 300초 안에 MOVE 결과를 받지 못하면 작업을
   `FAILED`로 종료한다. 기준 시각은 `transport_task.started_at`이다.
+- MOVE 성공 시 설비 상태를 즉시 확인하고, 이전 세션이 남아 있으면 MQTT를 발행하지 않고 1초마다
+  다시 확인한다.
+  이 대기까지 `started_at` 기준 300초를 넘으면 작업을 `FAILED`로 종료한다.
+- 요청 발행 조건에도 같은 300초 경계를 적용하므로 정리 스케줄러보다 발행 스케줄러가 먼저 실행돼도
+  만료 작업은 MQTT로 내보내지 않는다.
 - 백엔드가 측정 요청을 발행하면 `transport_task.measurement_requested_at`을 기록한다.
 - 설정된 TTL 안에 AI가 세션을 열지 않으면 작업을 `FAILED`로 종료한다.
 - AI가 세션을 열었지만 TTL 안에 최종 결과를 저장하지 못해도 세션을 자동 해제하고 작업을 `FAILED`로 종료한다.
 - 실패한 작업은 재측정하지 않으며 다음 대기 작업이 측정 차선을 사용할 수 있다.
+- 설비 점유 중에는 아직 측정 요청을 발행하지 않은 것이므로 재측정으로 보지 않는다.
+- 측정 요청 발행 주기는 `STATION_MEASUREMENT_REQUEST_DISPATCH_INTERVAL_MS`(기본 1초)다.
 - 정리 주기는 `STATION_SESSION_CLEANUP_INTERVAL_MS`(기본 5초)다.
-- MOVE 결과 대기 TTL은 `STATION_MOVE_TTL_SECONDS`(기본 300초), 측정 요청·활성 세션 TTL은
-  `STATION_SESSION_TTL_SECONDS`(기본 60초)로 설정한다.
+- MOVE 결과와 설비 해제 대기 상한은 `STATION_MOVE_TTL_SECONDS`(기본 300초), 측정 요청·활성 세션
+  TTL은 `STATION_SESSION_TTL_SECONDS`(기본 60초)로 설정한다.
 
 ### 최종 결과 등록
 
@@ -126,9 +139,15 @@ ROS2가 Nav2 실행 결과를 백엔드에 반환한다. Isaac Sim이 `fast/stat
 
 - 한 번에 하나의 작업만 측정 위치로 이동하거나 측정할 수 있다.
 - `vehicle_command.task_id`로 MOVE 결과와 운반 작업을 연결한다.
+- MOVE 성공 후 활성 세션이 남아 있으면 요청을 유실하지 않고 설비 해제까지 대기한다.
 - AI가 세션을 생성하면 같은 `cargoId`의 측정 대기 작업에 연결한다.
 - `transport_task.measurement_session_id`로 측정 결과의 대상 작업을 확정한다.
 - 측정 요청 실패, MOVE 실패, 부적합 측정 결과는 작업을 `FAILED`로 종료한다.
 - MOVE 결과, 측정 요청 또는 활성 측정 세션이 각각의 TTL을 넘으면 작업을 `FAILED`로 종료하고
   차선을 자동 해제한다.
 - AI 측정 결과는 MQTT가 아니라 REST 한 경로로만 받는다.
+
+## 배포 유의 사항
+
+변경 전 버전이 만든 `MOVING_TO_PICKUP + measurement_requested_at 존재` 작업은 새 상태 규칙과 호환되지
+않는다. MVP DB를 초기화하지 않고 배포한다면 진행 중인 측정 작업이 없는 것을 확인한 뒤 교체한다.
