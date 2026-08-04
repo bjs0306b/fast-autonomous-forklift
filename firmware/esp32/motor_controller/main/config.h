@@ -84,9 +84,28 @@
 /* Tele-operation safety limits */
 #define TELEOP_WATCHDOG_TIMEOUT_MS      500U
 #define TELEOP_MAX_DRIVE_PERCENT        60
-#define TELEOP_STEERING_CENTER_CDEG     10000U
-#define TELEOP_STEERING_MIN_CDEG        8500U
-#define TELEOP_STEERING_MAX_CDEG        11500U
+/*
+ * 조향 원점·범위 — 2026-08-04 실측으로 갱신 (S15P11A304-197).
+ *
+ * CENTER 는 **서보 원점(100도)이 아니라 기구 직진(96도)** 이다. 서보 혼이
+ * 스플라인에 약 4도 틀어져 끼워져 있다. 종전 10000 으로 두면 정지 상태에서
+ * 바퀴가 좌 4도 로 꺾인 채 있고, 상한(11500)이 직진 근처라 **오른쪽으로 꺾을
+ * 여유가 거의 없었다.**
+ *
+ * MIN/MAX 는 종전 8500~11500 (중립 +-15도) 이었는데, 이는 기구 한계를 재서 정한
+ * 값이 아니라 "서보 원점이 곧 직진" 이라는 가정 위의 보수적 초기값이었다
+ * (README: "초기 안전 범위"). 원점이 96도 로 바뀌면서 대칭 가용 범위가 +-11도 로
+ * 줄어 정렬 제어에 부족해 +-30도 로 넓힌다.
+ *
+ * 서보 물리 한계는 SERVO_MIN/MAX_ANGLE_DEG (30~150도) 이므로 66~126 은 그 안이다.
+ *
+ * !! 링키지가 실제로 +-30도 를 못 가면 서보가 스톨한다. 전류·발열이 오르고 기어가
+ *    상할 수 있다. 첫 시험은 반드시 지게차를 들고, 양 끝에서 소리·떨림이 있으면
+ *    즉시 멈추고 이 값을 줄일 것.
+ */
+#define TELEOP_STEERING_CENTER_CDEG     9600U
+#define TELEOP_STEERING_MIN_CDEG        6600U
+#define TELEOP_STEERING_MAX_CDEG        12600U
 
 /* I2C */
 #define I2C_SDA_GPIO                    GPIO_NUM_8
