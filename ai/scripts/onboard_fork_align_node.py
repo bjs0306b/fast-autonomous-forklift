@@ -32,6 +32,28 @@ from control.fork_servo import ForkServo, Phase
 from perception.fork_align import TargetTracker
 from perception.trt_detector import TrtDetector
 
+FORK_CENTER_X = 670.0
+"""포크 중심선의 화면 x (1280 폭 기준). **2026-08-04 실측.**
+
+카메라가 포크 중심선에서 약 **7mm 오른쪽**에 달려 있다. 화면 중앙(640)이 아니다.
+
+측정법: 포크를 구멍에서 빼고 **좌우로는 안 움직인 채 뒤로만** 물린 뒤
+(= "이대로 직진하면 꽂히는" 정렬 상태) 진입면 중심 x 를 읽는다.
+184프레임 중앙값 670.3, 흔들림 1.2px.
+⚠️ 포크를 꽂은 채로는 못 잰다 — 포크가 구멍을 가려 검출이 0 이 된다.
+
+⚠️ **이 값을 안 주고 640 을 쓰면 정렬이 영영 안 끝난다.** 진입면 반폭이 약 102px
+이므로 30px 오프셋은 `lateral_ratio ≈ +0.30` 이고, 허용치는 0.12 다. 즉 **완벽히
+정렬해도 항상 미정렬로 판정**돼 진입 거리에서 ABORT 한다. 게인을 아무리 만져도
+안 고쳐지는 종류다.
+
+카메라를 다시 달았으면 반드시 재측정한다."""
+
+FOCAL_PX = 1277.7
+"""가로 초점거리(px). 체커보드 캘리브레이션 값 — `docs/ai/measurement/camera-calibration.md`.
+
+거리·요각 계산에 쓴다. 안 주면 화면 폭(px) 기준 상대값으로만 돌아간다."""
+
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="포크 정렬 제어 루프")
@@ -41,12 +63,12 @@ def main(argv=None) -> int:
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--rotate180", action="store_true")
-    ap.add_argument("--fork-center-x", type=float, default=None,
-                    help="포크 중심선의 화면 x. 기본은 이미지 중앙 — 카메라를 차체 "
-                         "중심에서 벗어나게 달았다면 반드시 실측값을 넣는다")
-    ap.add_argument("--focal-px", type=float, default=None,
-                    help="가로 초점거리(px). 주면 요각을 도(deg)로, 거리를 mm로 낸다. "
-                         "scripts/calibrate_camera.py 로 구한다. 없으면 상대값만 쓴다")
+    ap.add_argument("--fork-center-x", type=float, default=FORK_CENTER_X,
+                    help=f"포크 중심선의 화면 x (기본 {FORK_CENTER_X:.0f}, 2026-08-04 실측). "
+                         "카메라를 다시 달았으면 반드시 재측정한다")
+    ap.add_argument("--focal-px", type=float, default=FOCAL_PX,
+                    help=f"가로 초점거리(px) (기본 {FOCAL_PX:.1f}, 체커보드 캘리브레이션). "
+                         "주면 요각을 도(deg)로, 거리를 mm로 낸다")
     ap.add_argument("--cmd-topic", default="/cmd_vel")
     ap.add_argument("--dry-run", action="store_true",
                     help="계산만 하고 /cmd_vel을 내보내지 않는다 (첫 실행은 반드시 이걸로)")
