@@ -49,6 +49,9 @@ class MqttBridgeNode(Node):
         "command_cache_ttl_sec": 3600.0,
         "command_cache_max_entries": 1000,
         "path_max_points": 1000,
+        "nav2_enabled": True,
+        "nav2_action_name": "navigate_to_pose",
+        "nav2_server_wait_s": 5.0,
     }
 
     def __init__(self, mqtt_client: Optional[mqtt.Client] = None) -> None:
@@ -79,7 +82,7 @@ class MqttBridgeNode(Node):
         self._configure_mqtt()
         self._core = BridgeCore(
             vehicle_id,
-            UnavailableCommandAdapter(),
+            self._build_command_adapter(),
             self._publish,
             self._config.location_publish_interval_ms,
             self._config.command_cache_ttl_sec,
@@ -229,6 +232,41 @@ class MqttBridgeNode(Node):
 
     def publish_path(self, path: PathMessage) -> bool:
         return self._core.publish_path(path)
+
+    def _build_command_adapter(self):
+        """MOVE 를 실행할 어댑터를 고른다 — Nav2 가 있으면 Nav2, 없으면 거절 모드.
+
+        ⚠️ **어느 쪽으로 떨어졌는지 반드시 로그에 남긴다.** 종전에는 거절 모드가
+        기본값이라 브리지가 정상으로 보이는데 MOVE 만 전부 `REJECTED` 였고, 그
+        사실이 아무 데도 안 찍혔다. 그래서 "브로커 문제인가" 하고 엉뚱한 데를
+        팠다(S15P11A304-192). 조용히 무력한 상태로 도는 일은 없어야 한다.
+        """
+        if not bool(self._parameter_value("nav2_enabled", True)):
+            self.get_logger().warn(
+                "nav2_enabled=false — MOVE 명령을 전부 REJECTED 로 돌려보낸다. "
+                "백엔드는 도착 SUCCESS 를 못 받아 측정 요청을 발행하지 않는다."
+            )
+            return UnavailableCommandAdapter()
+
+        try:
+            from fast_mqtt_bridge.nav2_adapter import Nav2CommandAdapter
+            from fast_mqtt_bridge.nav2_goal_sender import Nav2GoalSender
+        except ImportError as error:
+            # nav2_msgs 가 없는 환경(개발 노트북 등). 브리지는 계속 돌지만
+            # 주행은 못 한다 — 그 사실을 시끄럽게 알린다.
+            self.get_logger().error(
+                f"Nav2 연동을 불러오지 못했다 ({error}) — MOVE 는 REJECTED 된다. "
+                "nav2_msgs 설치와 워크스페이스 source 를 확인할 것."
+            )
+            return UnavailableCommandAdapter()
+
+        action_name = str(self._parameter_value("nav2_action_name", "navigate_to_pose"))
+        self.get_logger().info(f"Nav2 연동 활성 — 액션 '{action_name}'")
+        return Nav2CommandAdapter(
+            Nav2GoalSender(self, action_name),
+            server_wait_s=float(self._parameter_value("nav2_server_wait_s", 5.0)),
+            logger=self.get_logger(),
+        )
 
     def _configure_optional_ros_adapters(self) -> None:
         """Only bind standard types when the team explicitly configures source topics."""
