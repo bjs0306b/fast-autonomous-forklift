@@ -2,6 +2,11 @@
 
 > 대상: `frontend/monitoring-control-system` (Next.js 16 App Router · React 19 · TS · Tailwind v4 · SockJS/STOMP)
 > 기준일: 2026-07-29 · **실제 코드 검증 기준**
+>
+> ⚠️ **그 뒤 프론트가 한 번 움직였다** — 2026-08-04 에 측정 실패 원인 코드 대시보드·
+> 관제 실패 카드가 들어갔다(Jira 190). 아래 §2 "구현·미구현" 표는 **07-29 스냅샷**이다.
+> 2026-08-05 확인 기준 `RESET_ESTOP` 은 여전히 `types/command.ts` 의 타입일 뿐이고
+> `/topic/vehicles/result` 구독도 없다 — 그 항목들은 아직 유효하다.
 > 선행 문서: `wireframe-monitoring.md`(유지, 삭제하지 않음) → 이 문서가 구현용 최종본
 > 코드 수정·Git 명령·서버 실행·API 호출 **없음**
 
