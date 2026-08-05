@@ -83,7 +83,24 @@
 
 /* Tele-operation safety limits */
 #define TELEOP_WATCHDOG_TIMEOUT_MS      500U
-#define TELEOP_MAX_DRIVE_PERCENT        60
+/*
+ * !! 60 -> 100 (2026-08-05, S15P11A304-152). **여기는 허용 봉투이지 운전값이
+ *    아니다.** 실제로 쓰는 값은 teleop.yaml 의 max_drive_percent(전진 60 유지) 와
+ *    max_drive_percent_reverse(후진 100) 이고, 그쪽은 재플래시 없이 바꾼다.
+ *
+ *    종전 60 은 "Tele-operation safety limits" 아래에 근거 없이 박혀 있던
+ *    보수값이었다. 실측으로 후진이 전진의 19% 밖에 안 나온다는 것이 드러나
+ *    (60% 3초에 100mm = 0.033 m/s, 전진은 같은 60% 로 0.178 m/s) 후진만
+ *    올릴 수 있게 봉투를 넓혔다.
+ *
+ *    뒷바퀴 조향차는 후진할 때 뒷바퀴가 **앞장서서**(leading) 바닥을 파고들어
+ *    저항이 크다. 전진에서는 끌려오므로(trailing) 훨씬 가볍다. 바닥을 바꿔도
+ *    같은 값이 나와, 바닥이 아니라 구조에서 오는 차이로 확인됐다.
+ *
+ * !! 전진 상한은 **올리지 않는다.** 오늘 실측한 INSERT_SPEED_ACTUAL · 진입 깊이 ·
+ *    조향 중립이 전부 전진 60% 기준이라, 여기를 건드리면 그 값들이 무효가 된다.
+ */
+#define TELEOP_MAX_DRIVE_PERCENT        100
 /*
  * 조향 원점·범위 — 2026-08-04 실측으로 갱신 (S15P11A304-197).
  *
@@ -122,9 +139,35 @@
  *    조향각은 브리지가 매 프레임 명시적으로 보내므로, 재플래시 전에도 주행
  *    자체는 teleop.yaml 값(9400)으로 이미 맞게 돈다.
  */
-#define TELEOP_STEERING_CENTER_CDEG     9400U
-#define TELEOP_STEERING_MIN_CDEG        6600U
-#define TELEOP_STEERING_MAX_CDEG        12600U
+/*
+ * !! 2026-08-05 (S15P11A304-152). 두 가지가 같이 바뀌었다.
+ *
+ * 1) 중립 9400 -> 9000. SERVO_MIN/MAX_PULSE_US 를 고치면서 같은 cdeg 가 다른 서보
+ *    위치를 뜻하게 됐다. 실주행 재실측:
+ *
+ *      중립   전진거리   좌우편차   뒷바퀴각
+ *      9400    580mm      50mm 왼쪽   2.45도   <- 옛 매핑의 값
+ *      9200    562mm      18mm 왼쪽   0.94도
+ *      9080    605mm      12mm 왼쪽   0.54도
+ *      9000    630mm       8mm 왼쪽   0.33도   <- 지금
+ *      8960    635mm      28mm 왼쪽   1.15도   <- 지나쳤다
+ *
+ * 2) MIN/MAX 를 6600~12600 -> 4000~14000 으로 넓혔다. **여기는 안전 봉투이지
+ *    운전 범위가 아니다.** 실제로 쓰는 범위는 teleop.yaml 의
+ *    steering_min/max_cdeg 이고, 그쪽은 재플래시 없이 바꿀 수 있다. 종전에는 두
+ *    값이 붙어 있어 조향 범위를 넓힐 때마다 플래시가 필요했다.
+ *
+ *    4000~14000 = 서보 40~140도 = 중립 9000 기준 +-50도. 펄스로는 944~2056us 라
+ *    MG996R 정격(500~2500) 안이고, SERVO_MIN/MAX_ANGLE_DEG(30~150) 안이다.
+ *
+ * !! **링키지가 +-50도 를 실제로 가는지는 아직 안 쟀다.** 못 가면 서보가 스톱에
+ *    박혀 스톨한다(MG996R 스톨 전류 약 2.5A - 발열·기어 손상). yaml 범위를
+ *    **한 단계씩** 넓히며 양 끝에서 소리·떨림을 확인할 것. 봉투를 넓힌 것은
+ *    "여기까지 허용" 이지 "여기까지 쓰라" 가 아니다.
+ */
+#define TELEOP_STEERING_CENTER_CDEG     9000U
+#define TELEOP_STEERING_MIN_CDEG        4000U
+#define TELEOP_STEERING_MAX_CDEG        14000U
 
 /* I2C */
 #define I2C_SDA_GPIO                    GPIO_NUM_8
@@ -140,9 +183,36 @@
 #define SERVO_MIN_ANGLE_DEG             30.0f
 #define SERVO_MAX_ANGLE_DEG             150.0f
 
-#define SERVO_MIN_PULSE_US              1000U
+/*
+ * ⚠️ 1000~2000 → 500~2500 (2026-08-05, S15P11A304-152).
+ *
+ * servo_set_angle() 은 각도를 180 으로 정규화해 이 두 값 사이에 매핑한다:
+ *
+ *     pulse = MIN + (angle / 180) * (MAX - MIN)
+ *
+ * 즉 이 범위가 **180도에 해당하는 펄스 폭**이어야 식이 성립한다. MG996R 은
+ * 500~2500us 가 180도이고, 1000~2000us 로는 90~120도밖에 안 돈다. 그래서 종전
+ * 값에서는 코드가 믿는 각도의 **절반만 실제로 돌았다.**
+ *
+ * 실측 (2026-08-05):
+ *
+ *     중립 9400cdeg = 94도  →  1522us
+ *     최대 12200    = 122도 →  1678us      차이 156us
+ *
+ *   156us 는 MG996R 기준 실제 **14도** 다. 코드는 28도로 알고 있었다.
+ *   그 결과가 뒷바퀴 실측 8도, 실효 회전반경 1200~1450mm(설계값 537mm 의 2~3배),
+ *   명령 대비 실제 회전 21~26% 다. tan(8)/tan(28)=25% 로 세 숫자가 맞물린다.
+ *
+ * 고친 뒤 같은 명령이 1544~1856us(312us)가 되어 가동폭이 두 배가 된다.
+ * ⚠️ **극단값(500·2500)은 쓰지 않는다** — 명령 구간이 1544~1856 이라 종전 창
+ *    (1000~2000) 안에 그대로 들어온다. 스톱에 박을 위험이 없다.
+ *
+ * ⚠️ **재플래시 후 직진 중립을 다시 잡아야 한다.** 9400 은 옛 매핑에서 실측한
+ *    값이고, 새 매핑에서 같은 펄스(1522us)를 내는 것은 **9200** 근처다.
+ */
+#define SERVO_MIN_PULSE_US              500U
 #define SERVO_CENTER_PULSE_US           1500U
-#define SERVO_MAX_PULSE_US              2000U
+#define SERVO_MAX_PULSE_US              2500U
 
 /* Waveshare Motor Driver HAT */
 #define MOTOR_HAT_PCA9685_ADDRESS       0x40
