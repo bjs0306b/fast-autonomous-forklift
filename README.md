@@ -9,7 +9,10 @@ WebSocket 이벤트 중계가 구현되어 있습니다. 실제 Mosquitto/ROS2/�
 ## 시스템 구성 (최종 목표)
 
 ```
-ROS2 / Jetson / Isaac Sim → MQTT Broker → Spring Boot → MySQL → REST API / WebSocket → React 관제 화면
+ROS2 / Jetson / Isaac Sim → MQTT Broker → Spring Boot → MySQL → REST API / WebSocket → Next.js 관제 화면
+                                              ↑
+                        AI 측정 스테이션은 MQTT 가 아니라 REST 로 올린다
+                        (POST /api/stations/measurements, 2026-07-31 전환)
 ```
 
 ## 개발 환경
@@ -129,8 +132,16 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck" "-Dspring-boot.run.us
 | retained false 실동작(재구독 시 과거 명령 미전달) | 성공 |
 | 잘못된 JSON 폐기 후 consumer 계속 동작 | 성공 |
 
-**미검증**: Docker Compose 기동(개발 PC에 Docker 없음), 브로커 중지·재시작 재연결 실동작,
-EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 명령 수신·결과 회신.
+**당시 미검증이던 것 중 이후 해소된 것**(2026-08-05 기준):
+
+| 항목 | 현재 |
+|---|---|
+| Docker Compose 기동 | ✅ EC2에서 Compose 로 상시 구동, `develop` 푸시 자동배포(S15P11A304-179·182) |
+| EC2 인증 적용 | ✅ **TLS 8883 + 계정 인증**으로 일원화(S15P11A304-188). 아래 "EC2 브로커" 절 참조 |
+| 백엔드 → 스테이션 측정 요청 | ✅ MQTT TLS 왕복 검증(2026-08-03) |
+| 백엔드 → Nav2 MOVE → 도착 회신 | ⚠️ **배선까지만** 검증(S15P11A304-192·193). 실주행 미검증 |
+| 실제 차량의 명령 수신·결과 회신 | ⚠️ 미검증 |
+| 브로커 중지·재시작 재연결 실동작 | ⚠️ 미검증(로컬 브로커로만 확인) |
 
 ### 확정 통신 규격 요약 (2026-07-24)
 

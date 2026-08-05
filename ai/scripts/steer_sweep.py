@@ -1,5 +1,12 @@
 """조향 훑기 — 명령을 단계별로 바꿔가며 **바퀴가 어디까지 따라오나**를 본다.
 
+> ✅ **아래 "왜"의 증상은 2026-08-05에 원인이 밝혀져 고쳐졌다** — 펌웨어
+> `SERVO_MIN/MAX_PULSE_US` 가 1000~2000µs 였고 MG996R 은 500~2500µs 가 180°라
+> 서보가 명령의 절반만 돌았다. 지금은 500~2500, 뒷바퀴 실각도 **36°**, 중립 **9000**,
+> `rear_steering_limit_deg: 36.0` 이다. 이 스크립트는 진단 도구로 남긴 것이고,
+> **아래 본문의 8°·28°·±30° 는 고치기 전 상태를 설명하는 기록**이다.
+> 다시 쓸 때는 `--center-cdeg` 기본값이 현재 `teleop.yaml` 과 맞는지 확인할 것.
+
 **왜.** 2026-08-05 실측에서 최대 조향을 명령했는데 뒷바퀴가 **8°** 밖에 안 꺾였다
 (명령 28°). 실효 회전반경도 1200~1450mm 로 설계값 537mm 의 2~3배였고, 세 숫자가
 `tan(8°)/tan(28°) = 25%` 로 정확히 맞물린다. 남은 질문은 **어디서 안 따라오기
@@ -76,12 +83,13 @@ def main(argv=None) -> int:
                     help="각 단계를 유지하는 시간(초). 눈으로 보고 잴 만큼 준다")
     ap.add_argument("--rate", type=float, default=20.0,
                     help="발행 주기(Hz). 브리지 워치독이 0.5초라 그보다 빨라야 한다")
-    # 기본값은 teleop.yaml 과 같다. 그쪽을 바꿨으면 여기도 같이 준다.
+    # 기본값은 teleop.yaml 과 같다(2026-08-05 펄스 범위 수정 이후 값).
+    # 그쪽을 바꿨으면 여기도 같이 준다.
     ap.add_argument("--wheelbase", type=float, default=0.144)
-    ap.add_argument("--limit-deg", type=float, default=28.0)
-    ap.add_argument("--center-cdeg", type=int, default=9400)
-    ap.add_argument("--min-cdeg", type=int, default=6600)
-    ap.add_argument("--max-cdeg", type=int, default=12200)
+    ap.add_argument("--limit-deg", type=float, default=36.0)
+    ap.add_argument("--center-cdeg", type=int, default=9000)
+    ap.add_argument("--min-cdeg", type=int, default=5400)
+    ap.add_argument("--max-cdeg", type=int, default=12600)
     ap.add_argument("--dry-run", action="store_true",
                     help="발행 없이 표만 찍는다 — 어느 구간이 포화인지 먼저 볼 때")
     a = ap.parse_args(argv)
