@@ -39,6 +39,7 @@ static int s_level_when_ready[TOF_SENSOR_COUNT] = { -1, -1 };
 static uint32_t s_poll_ready[TOF_SENSOR_COUNT];
 static uint32_t s_poll_idle[TOF_SENSOR_COUNT];
 static uint32_t s_poll_error[TOF_SENSOR_COUNT];
+static uint32_t s_published[TOF_SENSOR_COUNT];
 
 static const gpio_num_t s_int_gpio[TOF_SENSOR_COUNT] = {
     [TOF_SENSOR_LEFT] = TOF_LEFT_INT_GPIO,
@@ -131,6 +132,7 @@ static void tof_publish(
     memcpy(sample.status, zones.status, sizeof(sample.status));
 
     telemetry_submit_tof(&sample);
+    s_published[sensor]++;
     sequence[sensor]++;
 }
 
@@ -146,6 +148,7 @@ static void tof_task(void *argument)
      * has not had a chance to not happen yet.
      */
     TickType_t last_warning_tick = xTaskGetTickCount();
+    TickType_t last_status_tick = xTaskGetTickCount();
 
     ESP_LOGI(TAG, "Front ToF ranging started");
 
@@ -204,6 +207,29 @@ static void tof_task(void *argument)
         }
 
         TickType_t now = xTaskGetTickCount();
+
+        if (now - last_status_tick >=
+            pdMS_TO_TICKS(TELEMETRY_STATUS_PERIOD_MS)) {
+            last_status_tick = now;
+
+            for (uint32_t sensor = 0; sensor < TOF_SENSOR_COUNT; sensor++) {
+                tof_bus_stats_t bus;
+
+                tof_pair_get_stats((tof_sensor_id_t)sensor, &bus);
+
+                tof_status_t status = {
+                    .sensor_id = (uint8_t)sensor,
+                    .present = tof_pair_is_present((tof_sensor_id_t)sensor),
+                    .read_errors = bus.read_errors,
+                    .data_ready_errors = bus.data_ready_errors,
+                    .interrupts = s_isr_count[sensor],
+                    .published = s_published[sensor],
+                    .polled = s_poll_ready[sensor]
+                };
+
+                telemetry_publish_tof_status(&status);
+            }
+        }
 
         if (now - last_warning_tick <
             pdMS_TO_TICKS(TOF_LOST_INTERRUPT_LOG_MS)) {

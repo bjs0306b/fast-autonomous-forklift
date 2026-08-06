@@ -19,6 +19,19 @@ typedef struct {
 } tof_zone_data_t;
 
 /*
+ * Bus health per sensor.
+ *
+ * This exists to turn wiring quality into a number. A count that sits at zero
+ * while the vehicle is still and climbs the moment the stepper or drive motor
+ * runs is EMI, which is otherwise only visible as data that is "sometimes
+ * wrong" and cannot be argued about.
+ */
+typedef struct {
+    uint32_t read_errors;        /* vl53l8cx_get_ranging_data failures */
+    uint32_t data_ready_errors;  /* vl53l8cx_check_data_ready failures */
+} tof_bus_stats_t;
+
+/*
  * Bring up I2C1, move each sensor onto its own address, upload firmware and
  * start 8x8 ranging.
  *
@@ -35,5 +48,8 @@ bool tof_pair_is_present(tof_sensor_id_t sensor);
 esp_err_t tof_pair_data_ready(tof_sensor_id_t sensor, bool *ready);
 
 esp_err_t tof_pair_read(tof_sensor_id_t sensor, tof_zone_data_t *out);
+
+/* Cumulative since boot; never reset, so rates are taken by differencing */
+void tof_pair_get_stats(tof_sensor_id_t sensor, tof_bus_stats_t *out);
 
 #endif

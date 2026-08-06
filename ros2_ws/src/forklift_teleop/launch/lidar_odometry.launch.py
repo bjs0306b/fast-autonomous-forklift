@@ -12,7 +12,14 @@ from launch_ros.actions import LifecycleNode, Node
 #   +X: fork direction, +Y: left, +Z: up
 # Measured base_link -> laser_frame translation in meters.
 LIDAR_TRANSLATION = ("-0.025", "0.0", "0.202")
-LIDAR_ROTATION = ("0.0", "0.0", "0.0")  # roll, pitch, yaw
+# The X4 is mounted turned a quarter turn, so its zero angle points along
+# base_link +Y instead of +X. Found in RViz: a wall behind the vehicle drew
+# itself on the left. Only yaw is affected -- the unit is still level.
+#
+# This is not cosmetic. rf2o measures displacement in the laser frame, so
+# without the yaw the odometry has the vehicle sliding sideways whenever it
+# drives forward, and every pose the EKF builds on that is wrong too.
+LIDAR_ROTATION = ("0.0", "0.0", "1.5708")  # roll, pitch, yaw
 
 
 def generate_launch_description():

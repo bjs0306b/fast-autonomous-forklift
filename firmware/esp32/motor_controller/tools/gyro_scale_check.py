@@ -202,14 +202,22 @@ def main():
           f"(크면 스케일이 아니라 바이어스 흡수를 의심)")
 
     target_deg = SEGMENT_TARGET_DEG * len(segments)
-    error_percent = total.firmware_deg / target_deg * 100 - 100
+    # Scale is a magnitude question; which way it was turned is a separate
+    # one. Mixing them makes a clockwise run look like a 200% error.
+    measured_deg = abs(total.firmware_deg)
+    error_percent = measured_deg / target_deg * 100 - 100
     print()
     print(f" 총 회전 목표: {target_deg:.0f} deg "
           f"({math.radians(target_deg):.3f} rad)")
     print()
-    print(f"   측정값: {total.firmware_deg:+.1f} deg "
-          f"({math.radians(total.firmware_deg):+.3f} rad)  "
+    print(f"   측정 크기: {measured_deg:.1f} deg "
+          f"({math.radians(measured_deg):.3f} rad)  "
           f"오차 {error_percent:+.1f}%   [허용 +-{TOLERANCE_PERCENT:.0f}%]")
+    print()
+    turned = "시계" if total.firmware_deg < 0 else "반시계"
+    print(f"   부호: {total.firmware_deg:+.1f} deg 이므로 **{turned}방향**으로")
+    print(f"         돌렸다면 REP-103 대로다 (반시계 = 양수).")
+    print(f"         반대로 돌렸다면 sensors.yaml 의 gyro_z_sign 을 뒤집는다.")
     if abs(FIRMWARE_SENSITIVITY - DATASHEET_SENSITIVITY) > 0.01:
         print(f"   참고: datasheet 값 {DATASHEET_SENSITIVITY}이면 "
               f"{total.datasheet_deg:+.1f} deg "

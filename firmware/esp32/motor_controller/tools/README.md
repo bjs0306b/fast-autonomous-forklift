@@ -32,6 +32,24 @@ python3 tools/tof_probe.py [초]      # 기본 60초
 | `sensor init failed` | 84KB 펌웨어 업로드 실패, 풀업 |
 | `is being polled` | INT 배선 (동작은 하되 지터 증가) |
 
+## `tof_mask_learn.py`
+
+포크·섀시를 항상 보는 존을 찾아 마스크 목록을 출력합니다. ROS2를 띄운 상태에서:
+
+```bash
+python3 tools/tof_mask_learn.py --topic /tof/left/points --seconds 10
+```
+
+자기 가림은 **거리로 못 거릅니다** — 포크는 고정 거리라 멀쩡한 장애물처럼 보입니다.
+구분되는 건 **움직이지 않는다**는 점이라, 앞을 비운 채 관찰해 계속 같은 짧은 값을
+내는 존을 찾습니다.
+
+**포크는 travel 높이로 두고** 학습하세요. 리프트를 올리면 포크가 시야에서 빠지므로
+높은 상태로 학습하면 주행 중에 놓칩니다.
+
+출력을 `sensors.yaml`의 `tof_masked_zones_left`/`_right`에 붙여넣되, 가까운 벽을
+잘못 잡은 것은 아닌지 눈으로 확인하세요.
+
 ## `gyro_scale_check.py`
 
 자이로 스케일을 90도씩 네 번 끊어 돌려 검증합니다.

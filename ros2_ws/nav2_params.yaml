@@ -199,7 +199,12 @@ local_costmap:
         z_voxels: 16
         max_obstacle_height: 2.0
         mark_threshold: 0
-        observation_sources: scan
+        # LiDAR 와 ToF 는 판단을 나누지도 측정을 융합하지도 않는다. 같은
+        # 레이어에 각자 등록되고 플래너는 병합된 격자 하나만 본다.
+        # VoxelLayer 여야 하는 이유: 평면 레이어라면 LiDAR(z 약 0.20m)가
+        # 낮은 상자 위를 지나며 그 칸을 비었다고 raytrace clearing 해서,
+        # ToF 가 marking 해둔 상자를 지운다. 복셀 단위라 서로 침범하지 않는다.
+        observation_sources: scan tof_left tof_right
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -210,6 +215,34 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
+        # ToF 는 clearing: False 로 시작한다. 45도 원뿔이 공격적으로 clearing
+        # 하면 시야 가장자리 밖의 유효한 LiDAR 장애물을 지운다. 거동을 확인한
+        # 뒤에 좁은 raytrace 범위와 함께 켠다.
+        #
+        # raytrace_max_range > obstacle_max_range 를 지킨다. 어기면 그 사이
+        # 거리의 장애물이 영영 안 지워져 유령 벽이 남는다.
+        tof_left:
+          topic: /tof/left/points
+          data_type: "PointCloud2"
+          marking: True
+          clearing: False
+          min_obstacle_height: 0.03
+          max_obstacle_height: 0.30
+          obstacle_max_range: 2.0
+          obstacle_min_range: 0.02
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.0
+        tof_right:
+          topic: /tof/right/points
+          data_type: "PointCloud2"
+          marking: True
+          clearing: False
+          min_obstacle_height: 0.03
+          max_obstacle_height: 0.30
+          obstacle_max_range: 2.0
+          obstacle_min_range: 0.02
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.0
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True

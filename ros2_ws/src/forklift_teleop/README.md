@@ -155,3 +155,77 @@ marking 해둔 상자가 지워집니다.** local costmap이 `VoxelLayer`라 mar
 EKF(`robot_localization`) 구성은 이 패키지에 없습니다. 붙일 때는 rf2o의
 `publish_tf`를 `false`로 내려 `odom → base_link` 발행 주체를 EKF 하나로
 정리해야 합니다. 둘이 동시에 발행하면 TF가 떨며 튑니다.
+
+## 상부 LiDAR + 정면 ToF 장애물 회피 (S15P11A304-109)
+
+센서 배치는 다음과 같다.
+
+```text
+                진행 방향 +X
+                      ↑
+       정면 좌 ToF  [차량/포크]  정면 우 ToF
+                      │
+                 상부 YDLIDAR
+```
+
+두 ToF는 측면을 보지 않는다. 둘 다 포크 방향(+X)을 보며, 상부 LiDAR의 스캔
+평면 아래에 있는 포크·낮은 상자·사람 다리 등의 전방 사각지대를 보완한다.
+
+`obstacle_avoidance`의 역할은 다음과 같다.
+
+- 상부 YDLIDAR: 좌·우 우회 공간 및 스캔 높이에 걸리는 구조물 확인
+- 정면 좌/우 ToF: 각 포크 측 전방의 낮은 장애물 거리 확인
+- 좌 ToF만 가까우면 우회 후보는 우측, 우 ToF만 가까우면 좌측
+- 후보 방향을 상부 LiDAR가 비어 있다고 확인해야만 조향 보정
+- 두 정면 ToF가 모두 막히거나 후보 방향도 LiDAR에서 막히면 감속 또는 정지
+- 모든 센서 점은 TF를 통해 `base_link`로 변환하므로 실제 전방 장착 위치가 반영됨
+
+명령 경로는 아래처럼 분리한다.
+
+```text
+Nav2/teleop /cmd_vel
+        → obstacle_avoidance
+        → /cmd_vel_safe
+        → uart_teleop_bridge
+```
+
+기본 임계값은 0.45m 정지, 1.0m부터 감속, 센서 0.5초 stale 시 정지다.
+ToF PointCloud2 두 개는 local VoxelLayer에만 marking source로 추가한다. 이로써
+상부 LiDAR가 지나친 낮은 전방 물체도 Nav2가 경로 장애물로 사용한다. ToF clearing은
+다른 센서의 유효 장애물을 지우지 않도록 비활성화한다.
+
+빌드 및 실행:
+
+```bash
+cd ~/S15P11A304/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select forklift_teleop
+source install/setup.bash
+
+# 터미널 1: 상부 YDLIDAR + RF2O + EKF
+ros2 launch forklift_teleop lidar_odometry.launch.py
+
+# 터미널 2: 정면 ToF 2개 + IMU
+ros2 launch forklift_teleop sensor_usb.launch.py
+
+# 터미널 3: 회피 노드 + 안전 cmd_vel을 받는 UART 브리지
+ros2 launch forklift_teleop obstacle_avoidance.launch.py
+```
+
+상태 확인:
+
+```bash
+ros2 topic echo /obstacle_avoidance/status
+ros2 topic echo /cmd_vel_safe
+```
+
+현재 카메라 모델은 `pallet/hole` 전용이므로 사람·차량 분류 검증에는 사용할 수
+없다. 사람·차량 모델이 준비되면 `/camera/obstacles`에 아래 JSON을 발행하고
+`config/obstacle_avoidance.yaml`의 `require_vision`을 `true`로 바꾼다.
+
+```json
+{"detections":[{"label":"person","confidence":0.93,"distance_m":0.8}]}
+```
+
+실차 장착 전에 `sensor_usb.launch.py`의 ToF x/y/z와
+`lidar_odometry.launch.py`의 LiDAR x/y/z를 반드시 실측값으로 교체해야 한다.
