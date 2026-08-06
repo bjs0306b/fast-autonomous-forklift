@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fast.backend.traffic.mapper.TrafficControlEventMapper">
+
+    <resultMap id="eventResult" type="com.fast.backend.traffic.domain.TrafficControlEvent">
+        <id property="id" column="id"/>
+        <result property="vehicleId" column="vehicle_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="reasonCode" column="reason_code"/>
+        <result property="reasonDetail" column="reason_detail"/>
+        <result property="counterpartVehicleId" column="counterpart_vehicle_id"/>
+        <result property="slotCode" column="slot_code"/>
+        <result property="distanceM" column="distance_m"/>
+        <result property="commandId" column="command_id"/>
+        <result property="occurredAt" column="occurred_at"/>
+    </resultMap>
+
+    <sql id="columns">
+        id, vehicle_id, event_type, reason_code, reason_detail,
+        counterpart_vehicle_id, slot_code, distance_m, command_id, occurred_at
+    </sql>
+
+    <insert id="insert" parameterType="com.fast.backend.traffic.domain.TrafficControlEvent"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO traffic_control_event
+            (vehicle_id, event_type, reason_code, reason_detail,
+             counterpart_vehicle_id, slot_code, distance_m, command_id, occurred_at)
+        VALUES
+            (#{vehicleId}, #{eventType}, #{reasonCode}, #{reasonDetail},
+             #{counterpartVehicleId}, #{slotCode}, #{distanceM}, #{commandId}, #{occurredAt})
+    </insert>
+
+    <select id="findRecentByVehicleId" resultMap="eventResult">
+        SELECT <include refid="columns"/> FROM traffic_control_event
+        WHERE vehicle_id = #{vehicleId}
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="findRecent" resultMap="eventResult">
+        SELECT <include refid="columns"/> FROM traffic_control_event
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

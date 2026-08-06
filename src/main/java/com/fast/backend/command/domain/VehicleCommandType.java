@@ -34,6 +34,20 @@ public enum VehicleCommandType {
 
     MOVE(VehicleCommandTargetSystem.ROS2, VehicleCommandCategory.MOVE, true),
     STOP(VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.SAFETY, false),
+    /**
+     * 관제가 세웠던 차량의 주행 재개 (FR-502-1a).
+     *
+     * <p><b>⚠️ 이 값은 기존 8종 확정 규격에 없던 9번째 명령이라 ROS2·임베디드 합의가 필요하다.</b>
+     * FR-502-1a 가 "{@code RESUME} 또는 기존 목적지에 대한 {@code MOVE}"를 명시해 추가했다.
+     *
+     * <p>{@code MOVE} 로 대신하지 않은 이유: {@code MOVE} 는 목적지가 필수인데, 관제가 세운 차량의
+     * 원래 목적지를 백엔드가 항상 알 수는 없다(차량이 자율 주행 중이었다면 목적지는 ROS2 쪽에만
+     * 있다). 그 경우 "가던 길을 계속 가라"를 표현할 방법이 {@code RESUME} 뿐이다.
+     *
+     * <p>{@code STOP} 과 짝이므로 같은 {@code EMBEDDED}+{@code SAFETY} 조합을 쓴다.
+     * <b>수신 측이 이 명령을 모르면 무시될 뿐 차량이 멈춘 채 남는다</b> — 연동 전 반드시 확인할 것.
+     */
+    RESUME(VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.SAFETY, false),
     FORK_UP(VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.FORK, false),
     FORK_DOWN(VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.FORK, false),
     LOAD(VehicleCommandTargetSystem.EMBEDDED, VehicleCommandCategory.LOAD, false),

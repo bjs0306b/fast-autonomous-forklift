@@ -36,6 +36,10 @@
     <select id="findBySlotCode" resultMap="slotResult">
         SELECT <include refid="columns"/> FROM storage_slot WHERE slot_code = #{slotCode}
     </select>
+    <!-- 교통 관제가 선반 좌표를 읽는다(StorageSlotMapper.findAll 주석 참고). 상태로 거르지 않는다. -->
+    <select id="findAll" resultMap="slotResult">
+        SELECT <include refid="columns"/> FROM storage_slot ORDER BY slot_code
+    </select>
     <select id="findAllEmptySlotsForPlacement" resultMap="placementResult">
         SELECT slot_code, usable_height, fork_height, destination_x, destination_y,
                destination_heading, status

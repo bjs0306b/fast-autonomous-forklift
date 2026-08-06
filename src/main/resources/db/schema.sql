@@ -197,3 +197,32 @@ CREATE TABLE IF NOT EXISTS vehicle_command (
     INDEX idx_vehicle_command_vehicle (vehicle_id),
     INDEX idx_vehicle_command_status (status)
 );
+
+-- 교통 관제 정지/재개 이벤트 (FR-502-1a)
+--
+-- 발행된 명령 자체는 vehicle_command 에 남지만, 거기엔 "왜 그렇게 판단했는지"를 담을 자리가
+-- 없다(result_message 는 명령 처리 결과라 축이 다르다). 사고 후 "그때 왜 멈췄나"를 되짚으려면
+-- 안전거리·구역·상대 차량 같은 근거가 남아 있어야 한다.
+--
+-- command_id 에 FK 를 걸지 않는다: 명령 발행이 실패해도(PUBLISH_FAILED 이전 단계에서 예외)
+-- 판단 자체는 기록으로 남겨야 하는데, FK 가 있으면 그 경우 이벤트를 넣을 수 없다.
+CREATE TABLE IF NOT EXISTS traffic_control_event (
+    id                     BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    vehicle_id             VARCHAR(50)  NOT NULL COMMENT '정지/재개 대상 차량',
+    event_type             VARCHAR(20)  NOT NULL COMMENT 'HOLD(정지) 또는 RELEASE(재개)',
+    reason_code            VARCHAR(40)  NULL COMMENT '정지 사유 코드. RELEASE 면 해제된 직전 사유',
+    reason_detail          VARCHAR(500) NULL COMMENT '사람이 읽는 사유 상세',
+    counterpart_vehicle_id VARCHAR(50)  NULL COMMENT '안전거리 위반 상대 또는 구역 점유 차량',
+    slot_code              VARCHAR(50)  NULL COMMENT '작업 구역 사유일 때의 선반 코드',
+    distance_m             DOUBLE       NULL COMMENT '판단 당시 유효 거리(m)',
+    command_id             VARCHAR(100) NULL COMMENT '이 판단으로 발행된 명령. 발행 실패면 NULL',
+    occurred_at            DATETIME(6)  NOT NULL COMMENT '판단 시각',
+    CONSTRAINT chk_traffic_event_type CHECK (event_type IN ('HOLD', 'RELEASE')),
+    CONSTRAINT chk_traffic_event_reason CHECK (
+        reason_code IS NULL OR reason_code IN ('SAFETY_DISTANCE', 'WORK_ZONE_OCCUPIED')
+    ),
+    CONSTRAINT fk_traffic_event_vehicle
+        FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
+    INDEX idx_traffic_event_vehicle (vehicle_id, occurred_at),
+    INDEX idx_traffic_event_occurred (occurred_at)
+);

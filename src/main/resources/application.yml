@@ -44,9 +44,34 @@ cargo:
     auto-create-enabled: ${CARGO_INTAKE_AUTO_CREATE_ENABLED:true}
     next-delay-ms: ${CARGO_INTAKE_NEXT_DELAY_MS:5000}
 
+# =============================================================================
+# 차량 경로 충돌 예측 및 안전거리 제어 (FR-502-1a)
+# =============================================================================
+# 관제가 스스로 차량에 STOP/RESUME 을 내는 유일한 기능이다.
+#
+# ⚠️ 기본값은 반드시 false 로 둔다 — 설정을 건드리지 않은 환경에서 저절로 차량이 멈추거나
+#    움직이면 안 된다.
+# ⚠️ traffic.vehicles 가 비어 있으면 어떤 차량에도 명령을 보내지 않는다. 실물 차량은
+#    "명령이 끊기면 스스로 정지"하는 워치독이 확인되기 전까지 넣지 말 것.
+#    시뮬 검증 예: TRAFFIC_VEHICLES=SIM-F01,SIM-F02
+traffic:
+  enabled: ${TRAFFIC_ENABLED:false}
+  tick-ms: ${TRAFFIC_TICK_MS:500}
+  vehicles: ${TRAFFIC_VEHICLES:}
+  # 최소 안전거리(m). FR 의 "최소 안전거리".
+  safe-distance-m: ${TRAFFIC_SAFE_DISTANCE_M:6.0}
+  # 정지 판단 거리(m). 안전거리에 여유를 더한 값이라 보통 safe-distance-m 이상이다.
+  hold-distance-m: ${TRAFFIC_HOLD_DISTANCE_M:9.0}
+  # 재개 임계 배수. 정지·재개를 같은 거리로 판단하면 경계에서 STOP/RESUME 이 매 tick 번갈아 나간다.
+  release-hysteresis: ${TRAFFIC_RELEASE_HYSTERESIS:1.2}
+  # 예측 시간(초). 현재 속도·방향이 이만큼 유지된다고 보고 미래 위치를 잡는다.
+  prediction-horizon-s: ${TRAFFIC_PREDICTION_HORIZON_S:2.0}
+  # 선반 작업 구역 반경(m). storage_slot 의 접근 좌표를 중심으로 한 원.
+  work-zone-radius-m: ${TRAFFIC_WORK_ZONE_RADIUS_M:3.0}
+  # 위치가 이보다 오래되면 판단에서 제외한다(낡은 좌표로 "안전"을 선언하지 않기 위해).
+  stale-location-ms: ${TRAFFIC_STALE_LOCATION_MS:2000}
+
 logging:
   level:
     root: INFO
     com.fast.backend: INFO
-
-

@@ -410,6 +410,33 @@ WHERE TABLE_SCHEMA = DATABASE()
     OR (TABLE_NAME = 'transport_task'         AND COLUMN_NAME NOT IN ('id','task_code','cargo_id','status','created_at')))
 ORDER BY TABLE_NAME, COLUMN_NAME;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 교통 관제 정지/재개 이벤트 (FR-502-1a)
+--
+-- CREATE TABLE IF NOT EXISTS 라 반복 실행해도 안전하다. 스키마 정의는 db/schema.sql 과 같아야
+-- 하며, 한쪽만 고치면 신규 DB 와 기존 DB 가 갈라진다 — 둘 다 고칠 것.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS traffic_control_event (
+    id                     BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    vehicle_id             VARCHAR(50)  NOT NULL COMMENT '정지/재개 대상 차량',
+    event_type             VARCHAR(20)  NOT NULL COMMENT 'HOLD(정지) 또는 RELEASE(재개)',
+    reason_code            VARCHAR(40)  NULL COMMENT '정지 사유 코드. RELEASE 면 해제된 직전 사유',
+    reason_detail          VARCHAR(500) NULL COMMENT '사람이 읽는 사유 상세',
+    counterpart_vehicle_id VARCHAR(50)  NULL COMMENT '안전거리 위반 상대 또는 구역 점유 차량',
+    slot_code              VARCHAR(50)  NULL COMMENT '작업 구역 사유일 때의 선반 코드',
+    distance_m             DOUBLE       NULL COMMENT '판단 당시 유효 거리(m)',
+    command_id             VARCHAR(100) NULL COMMENT '이 판단으로 발행된 명령. 발행 실패면 NULL',
+    occurred_at            DATETIME(6)  NOT NULL COMMENT '판단 시각',
+    CONSTRAINT chk_traffic_event_type CHECK (event_type IN ('HOLD', 'RELEASE')),
+    CONSTRAINT chk_traffic_event_reason CHECK (
+        reason_code IS NULL OR reason_code IN ('SAFETY_DISTANCE', 'WORK_ZONE_OCCUPIED')
+    ),
+    CONSTRAINT fk_traffic_event_vehicle
+        FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
+    INDEX idx_traffic_event_vehicle (vehicle_id, occurred_at),
+    INDEX idx_traffic_event_occurred (occurred_at)
+);
+
 SELECT 'vehicles' AS check_type, vehicle_id, name, active FROM vehicle ORDER BY vehicle_id;
 SELECT 'station_state' AS check_type, singleton_id, active_session_id, acquired_at FROM station_state;
 
