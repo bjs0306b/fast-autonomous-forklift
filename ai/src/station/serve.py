@@ -400,9 +400,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.publish:
             return 0
-        print("[publish] ⚠️ --cargo-id 없이 보냅니다 — 백엔드는 요청의 화물을 묻지 않고 "
-              "**현재 활성 세션**에 붙입니다. 남이 연 세션이 있으면 그 화물로 잘못 "
-              "기록되고, 사후에 알아낼 방법이 없습니다.", file=sys.stderr)
+        print("[publish] ⚠️ --cargo-id 없이 보냅니다 — 세션을 열지 않으므로 "
+              "`sessionId` 없이 전송되고, 백엔드는 400(`sessionId 는 필수입니다`)으로 "
+              "거부합니다. 저장하려면 --cargo-id 를 주세요.", file=sys.stderr)
         return 0 if publish(payload) else 1
 
     # **세션을 측정 앞에 연다** (2026-07-31 팀 결정). 백엔드 문서상 정상 흐름
