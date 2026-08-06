@@ -229,3 +229,53 @@ ros2 topic echo /cmd_vel_safe
 
 실차 장착 전에 `sensor_usb.launch.py`의 ToF x/y/z와
 `lidar_odometry.launch.py`의 LiDAR x/y/z를 반드시 실측값으로 교체해야 한다.
+
+---
+
+## 무인 완주 시나리오 — `unmanned_mission` (2026-08-06 문서화)
+
+`Nav2 로 집는 곳까지 → 포크 올림 → 내리는 곳까지 → 포크 내림` 을 **한 번에** 실행하는
+노드다. 코드는 있었는데 문서가 없어 여기 적는다.
+
+```bash
+ros2 run forklift_teleop unmanned_mission --ros-args \
+    -p mission_armed:=true \
+    -p pickup_x:=1.2 -p pickup_y:=0.8 -p pickup_yaw:=0.0 \
+    -p dropoff_x:=2.4 -p dropoff_y:=1.6 -p dropoff_yaw:=1.57
+```
+
+### 안전장치 (이미 들어 있는 것)
+
+| 장치 | 동작 |
+|---|---|
+| `mission_armed` | **기본 false.** 명시적으로 true 를 주지 않으면 아무것도 안 하고 끝난다 |
+| 좌표 검사 | 집는 곳과 내리는 곳이 **0.05m 미만이면 거부** |
+| 브리지 대기 | 포크 브리지가 안 떠 있으면 시작 안 함 |
+| `start_delay_sec` 5초 | 팔을 뺄 시간. 이때 *"포크 호밍됐는지, 경로가 비었는지"* 경고 로그가 나온다 |
+| 포크 타임아웃 30초 | 응답이 없으면 `STOP` 을 보내고 실패로 끝낸다 |
+| `finally` 의 `STOP` | Ctrl-C 로 끊어도 포크는 멈춘다 |
+
+### ⚠️ 이 시나리오는 포크 정렬을 쓰지 않는다
+
+Nav2 로 목표 자세에 도착한 뒤 **바로 포크를 올린다.** 파렛트 구멍을 보고 맞추는
+`onboard_fork_align_node.py` 는 이 경로에 없다. 즉 **데모 경로가 두 갈래다**:
+
+| | 무인 완주(`unmanned_mission`) | 포크 정렬(`onboard_fork_align_node`) |
+|---|---|---|
+| 위치 정확도 | Nav2 목표 자세에 의존 | 카메라로 구멍을 보고 수렴 |
+| 파렛트가 돌아가 있으면 | 못 맞춘다 | 45° 까지 관통 확인(08-05) |
+| `/cmd_vel` 발행자 | Nav2 | 정렬 노드 |
+| guard 와의 관계 | 그대로 통과(먼 거리 주행) | **0.45m 에서 막힌다** — 아래 참조 |
+
+⚠️ **둘을 한 번에 이으려면 `/cmd_vel` 인계 규칙이 필요하다**(S15P11A304-**199**).
+지금은 사람이 런치를 갈아 띄운다. 정렬 구간에서 guard 를 어떻게 할지는
+`docs/ai/onboard-fork-align-runbook.md` §1-2 참조.
+
+### 포크 명령 경로
+
+`/fork/command`(String: `UP`·`DOWN`·`HOME`·`INITIALIZE`·`STOP`) → 브리지 → `@LIFT` UART
+→ 펌웨어. 결과는 `/fork/status` 로 돌아온다(`RUNNING`·`DONE`·`ERROR`).
+
+⚠️ **`@LIFT` 는 1회성이라 펌웨어가 거부하면(`@ACK,...,ERROR`) 재전송이 없다.** 미션은
+`/fork/status` 를 기다리다 30초 타임아웃으로 실패 처리한다 — 포크가 안 움직이면
+브리지 로그를 볼 것(`firmware/esp32/motor_controller/README.md` UART 절).
