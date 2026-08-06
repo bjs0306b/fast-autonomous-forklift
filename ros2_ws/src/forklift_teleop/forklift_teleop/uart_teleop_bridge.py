@@ -32,16 +32,27 @@ class UartTeleopBridge(Node):
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("command_rate_hz", 20.0)
         self.declare_parameter("command_timeout_sec", 0.5)
-        self.declare_parameter("max_linear_mps", 0.20)
-        self.declare_parameter("max_angular_rps", 0.35)
-        self.declare_parameter("linear_deadband_mps", 0.01)
-        self.declare_parameter("wheelbase_m", 0.144)
-        self.declare_parameter("rear_steering_limit_deg", 15.0)
-        self.declare_parameter("min_drive_percent", 50)
-        self.declare_parameter("max_drive_percent", 60)
-        self.declare_parameter("steering_center_cdeg", 10000)
-        self.declare_parameter("steering_min_cdeg", 8500)
-        self.declare_parameter("steering_max_cdeg", 11500)
+        # ⚠️ **기본값을 여기 다시 적지 않는다.** `TeleopLimits` 하나만 본다.
+        #
+        # 2026-08-05 까지 여기에 10000/8500/11500 · ±15° · drive 50 이 박혀 있었다.
+        # 실제 설정이 197·198·152 로 세 번 바뀌는 동안 한 번도 안 따라왔다. 브리지가
+        # 항상 teleop.yaml 을 넘기니 동작에는 영향이 없어서 아무도 안 봤다 — 그러다
+        # yaml 에서 한 줄이라도 빠지면 **그 순간 조용히 옛 값으로 돌아간다.**
+        # 같은 값을 두 곳에 적어두면 언젠가 반드시 갈라진다.
+        _d = TeleopLimits()
+        self.declare_parameter("max_linear_mps", _d.max_linear_mps)
+        self.declare_parameter("max_angular_rps", _d.max_angular_rps)
+        self.declare_parameter("linear_deadband_mps", _d.linear_deadband_mps)
+        self.declare_parameter("wheelbase_m", _d.wheelbase_m)
+        self.declare_parameter("rear_steering_limit_deg",
+                               _d.rear_steering_limit_deg)
+        self.declare_parameter("min_drive_percent", _d.min_drive_percent)
+        self.declare_parameter("max_drive_percent", _d.max_drive_percent)
+        self.declare_parameter("max_drive_percent_reverse",
+                               _d.max_drive_percent_reverse)
+        self.declare_parameter("steering_center_cdeg", _d.steering_center_cdeg)
+        self.declare_parameter("steering_min_cdeg", _d.steering_min_cdeg)
+        self.declare_parameter("steering_max_cdeg", _d.steering_max_cdeg)
 
         self._serial_port = str(self.get_parameter("serial_port").value)
         self._baud_rate = int(self.get_parameter("baud_rate").value)
@@ -67,6 +78,9 @@ class UartTeleopBridge(Node):
             min_drive_percent=int(
                 self.get_parameter("min_drive_percent").value
             ),
+            max_drive_percent_reverse=int(
+                self.get_parameter("max_drive_percent_reverse").value
+            ),
             max_drive_percent=int(
                 self.get_parameter("max_drive_percent").value
             ),
@@ -89,6 +103,7 @@ class UartTeleopBridge(Node):
         self._last_twist: Optional[Twist] = None
         self._last_twist_time: Optional[float] = None
         self._pending_lift_commands = deque(maxlen=8)
+        self._initializing_fork = False
 
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self._subscription = self.create_subscription(
@@ -128,16 +143,18 @@ class UartTeleopBridge(Node):
 
     def _on_fork_command(self, message: String) -> None:
         action = message.data.strip().upper()
-        if action not in {"UP", "DOWN", "STOP"}:
+        if action not in {"UP", "DOWN", "HOME", "INITIALIZE", "STOP"}:
             self.get_logger().warning(
                 f"Rejected fork command {message.data!r}; "
-                "expected UP, DOWN, or STOP"
+                "expected UP, DOWN, HOME, INITIALIZE, or STOP"
             )
             return
         if len(self._pending_lift_commands) == self._pending_lift_commands.maxlen:
             self.get_logger().warning("Fork command queue is full")
             return
         self._pending_lift_commands.append(action)
+        if action == "INITIALIZE":
+            self._initializing_fork = True
 
     def _ensure_serial(self, now: float) -> bool:
         if self._serial is not None and self._serial.is_open:
@@ -172,6 +189,8 @@ class UartTeleopBridge(Node):
         self._serial = None
 
     def _current_command(self, now: float):
+        if self._initializing_fork:
+            return map_twist(0.0, 0.0, self._limits)
         if (
             self._last_twist is None
             or self._last_twist_time is None
@@ -213,6 +232,11 @@ class UartTeleopBridge(Node):
                         separators=(",", ":"),
                     )
                     self._fork_status_publisher.publish(message)
+                    if (
+                        self._initializing_fork
+                        and status.state in {"DONE", "ERROR"}
+                    ):
+                        self._initializing_fork = False
                     self.get_logger().info(
                         "Fork status: "
                         f"sequence={status.sequence}, "

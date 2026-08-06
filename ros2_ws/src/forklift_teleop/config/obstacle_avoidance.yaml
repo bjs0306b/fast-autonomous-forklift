@@ -1,0 +1,45 @@
+obstacle_avoidance:
+  ros__parameters:
+    base_frame_id: base_link
+    input_cmd_vel_topic: /cmd_vel
+    output_cmd_vel_topic: /cmd_vel_safe
+
+    # Roof-mounted 360-degree YDLIDAR.
+    scan_topic: /scan
+    # Both ToFs face forward at fork level. "left/right" means mounting
+    # position, not a side-looking sensor orientation.
+    front_tof_topics: ["/tof/left/points", "/tof/right/points"]
+    vision_topic: /camera/obstacles
+    status_topic: /obstacle_avoidance/status
+
+    control_rate_hz: 20.0
+    command_timeout_sec: 0.5
+    sensor_timeout_sec: 0.5
+    vision_timeout_sec: 0.5
+    require_roof_lidar: true
+    require_both_front_tof: true
+    # Existing onboard model detects pallet/hole only. Enable this after a
+    # person/vehicle detector publishes the documented JSON contract.
+    require_vision: false
+
+    lidar_front_half_angle_deg: 70.0
+    lidar_center_half_angle_deg: 18.0
+    tof_front_half_angle_deg: 35.0
+    # Applied after ToF points are transformed into base_link. This removes
+    # floor returns while retaining low obstacles between/around the forks.
+    tof_min_height_m: 0.02
+    tof_max_height_m: 0.80
+    minimum_sector_hits: 2
+
+    stop_distance_m: 0.45
+    slowdown_distance_m: 1.00
+    minimum_speed_scale: 0.25
+    avoidance_yaw_rate_rps: 0.18
+    max_abs_yaw_rate_rps: 0.35
+    tof_imbalance_m: 0.10
+    lidar_clearance_margin_m: 0.15
+    minimum_turn_clearance_m: 0.55
+
+    vision_confidence_threshold: 0.60
+    dynamic_object_stop_distance_m: 1.50
+    dynamic_labels: [person, pedestrian, forklift, vehicle, car, truck]

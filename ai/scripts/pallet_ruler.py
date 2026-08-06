@@ -55,9 +55,20 @@ def main(argv=None) -> int:
                       rotate180=a.rotate180)
     tracker = TargetTracker()
 
+    # 자동 노출 안정화. `onboard_live.py`·`shoot.py` 에는 있는데 **여기만 빠져 있었다**
+    # (2026-08-04 발견). 초반 프레임은 어두워 구멍 박스 폭이 달라지고, 그 폭이 거리에
+    # 그대로 실린다 — 가만히 뒀는데 값이 한참 움직이는 원인이었다.
+    #
+    # ⚠️ 특히 아래 `farthest_seen` 은 **최댓값**이라 초반 이상치 하나가 영구히 남는다.
+    #    ALIGN_ENTER_MM 권고값이 실제보다 멀게 나와, 그 거리에서 안 잡히는 임계를
+    #    넣게 된다.
+    for _ in range(15):
+        cap.read()
+
     print(f"\n카메라 {w}x{h} · fx {a.focal_px:.1f}\n")
     print("파렛트를 카메라 앞에 놓고 **거리를 바꿔가며** 숫자를 보세요.")
-    print("멈춘 상태에서 읽어야 값이 안정됩니다. 끝내려면 Ctrl-C.\n")
+    print("멈춘 상태에서 읽어야 값이 안정됩니다. 끝내려면 Ctrl-C.")
+    print("⚠️ 자동 노출이 완전히 잡히기까지 몇 초 걸린다 — 값이 움직이면 기다렸다 읽을 것.\n")
 
     dists, yaws = deque(maxlen=WINDOW), deque(maxlen=WINDOW)
     nearest_with_holes = None     # 구멍이 보인 가장 가까운 거리

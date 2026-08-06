@@ -1,0 +1,169 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /TF1
+        - /ToF left1
+        - /ToF right1
+      Splitter Ratio: 0.5
+    Tree Height: 700
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.1
+      Plane Cell Count: 40
+      Color: 160; 160; 164
+      Alpha: 0.3
+      Reference Frame: base_link
+
+    # Every geometry question in procedure J is really a TF question. Leave
+    # this on: a point cloud in the right place under the wrong transform is
+    # indistinguishable from a wrong cloud until the frames are visible.
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 0.15
+      Update Interval: 0
+      Frame Timeout: 15
+
+    - Class: rviz_default_plugins/LaserScan
+      Name: LiDAR scan
+      Enabled: true
+      Topic:
+        Value: /scan
+        Depth: 5
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+      Size (m): 0.015
+      Style: Spheres
+      Color: 255; 255; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
+
+    # Sized larger than the lidar points on purpose. There are at most 64 of
+    # them per sensor against a few hundred lidar returns, and the whole point
+    # of this display is telling whether the ToF sees something the lidar
+    # cannot -- which only reads if the sparse cloud is the visible one.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ToF left
+      Enabled: true
+      Topic:
+        Value: /tof/left/points
+        Depth: 5
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+      Size (m): 0.03
+      Style: Spheres
+      Color: 0; 255; 128
+      Color Transformer: FlatColor
+      Decay Time: 0
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ToF right
+      Enabled: true
+      Topic:
+        Value: /tof/right/points
+        Depth: 5
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+      Size (m): 0.03
+      Style: Spheres
+      Color: 255; 128; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
+
+    # The local costmap is where the two sensors have to agree. A ToF mark that
+    # appears here and then disappears as the vehicle turns is the lidar
+    # raytracing through it, which is what clearing:False and the VoxelLayer
+    # are there to prevent.
+    - Class: rviz_default_plugins/Map
+      Name: Local costmap
+      Enabled: true
+      Topic:
+        Value: /local_costmap/costmap
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Color Scheme: costmap
+      Alpha: 0.6
+
+    - Class: rviz_default_plugins/Map
+      Name: Global costmap
+      Enabled: false
+      Topic:
+        Value: /global_costmap/costmap
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Color Scheme: costmap
+      Alpha: 0.4
+
+    - Class: rviz_default_plugins/Polygon
+      Name: Footprint
+      Enabled: true
+      Topic:
+        Value: /local_costmap/published_footprint
+        Depth: 5
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Color: 255; 255; 0
+      Alpha: 1
+
+    - Class: rviz_default_plugins/Odometry
+      Name: EKF odometry
+      Enabled: false
+      Topic:
+        Value: /odometry/filtered
+        Depth: 10
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Keep: 50
+      Shape:
+        Value: Arrow
+        Alpha: 1
+        Shaft Length: 0.1
+        Shaft Radius: 0.01
+        Head Length: 0.04
+        Head Radius: 0.02
+
+  Global Options:
+    # base_link, not odom: the geometry checks ask where a box is relative to
+    # the vehicle, and holding the vehicle still on screen makes a sign error
+    # obvious the moment the box appears on the wrong side.
+    Fixed Frame: base_link
+    Background Color: 48; 48; 48
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 2.5
+      Pitch: 0.8
+      Yaw: 3.14
+      Focal Point:
+        X: 0.3
+        Y: 0
+        Z: 0
+      Target Frame: base_link
+    Saved: ~
+Window Geometry:
+  Height: 900
+  Width: 1400
+  Displays:
+    collapsed: false
