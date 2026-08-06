@@ -64,11 +64,11 @@ node_modules/
 # .env.example(템플릿)만 커밋하고 .env 는 절대 커밋하지 않는다.
 .env
 .env.*
+# backend.env 는 `.env` 로 시작하지 않아 위 두 규칙에 걸리지 않는다.
+# EC2 백엔드 컨테이너가 읽는 실제 자격증명 파일이므로 반드시 제외한다
+# (템플릿은 backend.env.example).
+backend.env
 !.env.example
-# ⚠️ 위 `.env.*` 는 앞에 점이 붙은 것만 잡는다 — EC2 배포가 쓰는 `backend.env`
-# (DB·MQTT 비밀번호가 든 파일)는 `*.env` 라서 걸리지 않았다. 확장자 형태도 막는다.
-*.env
-!*.env.example
 
 ### MQTT Broker (infra/mqtt) ###
 # Mosquitto 비밀번호 파일 — mosquitto_passwd 로 생성한 실제 자격증명이라 커밋 금지.
@@ -79,8 +79,18 @@ infra/mqtt/data/*
 !infra/mqtt/data/.gitkeep
 infra/mqtt/log/*
 !infra/mqtt/log/.gitkeep
-firmware/esp32/motor_controller/4�@W@8
-firmware/esp32/motor_controller/4�@W@8
+
+### AI 대용량 산출물 ###
+# 데이터셋·체크포인트 번들. 서버(GPU)와 주고받는 중간 산출물이라 수백 MB이고,
+# `git add -A` 한 번에 딸려 들어가면 리포가 망가진다 (실제로 ai/ 최상위에
+# 165MB·200MB tar.gz가 무방비로 놓여 있었다). 내려받는 방법은 ai/README.md 참고.
+*.tar.gz
+*.tgz
+*.zip
+# 체크포인트·모델 가중치 (models/ 하위는 ai/models/.gitignore가 따로 관리)
+*.pth
+*.onnx
+*.engine
 
 ### AI 실행 산출물 ###
 # 진단·점검 명령이 작업 디렉터리에 떨어뜨리는 파일. 코드가 아니라 실행 흔적이라
@@ -88,8 +98,15 @@ firmware/esp32/motor_controller/4�@W@8
 # 확인하려고 프레임을 저장한다.
 camera_probe_*.jpg
 
-# 배포 산출물·빌드 캐시·개발 서버 로그 (git 히스토리에 남기지 않는다)
-fast-deploy.tar.gz
+# 스테이션 실행 중 생기는 작업 산출물 — 커밋 대상 아님.
+# 발표에 쓸 스틸은 발표자료/ 로 옮겨서 관리한다.
+ai/*.png
+ai/*.jpg
+ai/annotated.png
+ai/camera_probe_*.jpg
+
+# 빌드 캐시·개발 서버 로그 (git 히스토리에 남기지 않는다).
+# 배포 산출물 fast-deploy.tar.gz 는 위 *.tar.gz 가 이미 덮는다.
 *.bak
 frontend/monitoring-control-system/tsconfig.tsbuildinfo
 frontend/monitoring-control-system/.next-dev.*.log

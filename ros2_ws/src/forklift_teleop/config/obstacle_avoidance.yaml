@@ -1,0 +1,61 @@
+obstacle_avoidance:
+  ros__parameters:
+    base_frame_id: base_link
+    input_cmd_vel_topic: /cmd_vel
+    output_cmd_vel_topic: /cmd_vel_safe
+
+    # Roof-mounted 360-degree YDLIDAR.
+    scan_topic: /scan
+    # Both ToFs face forward at fork level. "left/right" means mounting
+    # position, not a side-looking sensor orientation.
+    front_tof_topics: ["/tof/left/points", "/tof/right/points"]
+    vision_topic: /camera/obstacles
+    status_topic: /obstacle_avoidance/status
+
+    control_rate_hz: 20.0
+    command_timeout_sec: 0.5
+    sensor_timeout_sec: 0.5
+    vision_timeout_sec: 0.5
+    # ⚠️ **required 센서가 하나라도 0.5초간 안 오면 차가 완전히 멈춘다.**
+    #    decide_avoidance() 가 SENSOR_TIMEOUT 을 내고 출력이 0 Twist 가 된다.
+    #    안전 설계로는 맞지만, **증상이 "명령은 나가는데 차가 안 움직임" 이라
+    #    조향·모터 쪽을 먼저 의심하게 된다.** 먼저 볼 곳:
+    #
+    #        ros2 topic echo /obstacle_avoidance/status
+    #
+    #    reason 에 "required sensor stale: front_left_tof" 처럼 어느 센서인지 나온다.
+    #
+    # 🔴 **펌웨어와 방침이 반대다.** firmware README 는 "ToF 초기화가 실패해도 주행은
+    #    계속됩니다" 라고 안내하고 실제로 main.c 가 그렇게 동작한다(ToF 없이 부팅 완료).
+    #    그런데 guard 를 띄우면 **ToF 하나만 죽어도 차가 안 간다.** 둘 다 각자
+    #    의도된 동작이라 어느 쪽도 버그가 아니지만, 두 문서만 읽으면 모순으로 보인다.
+    #
+    #    ToF 없이 주행해야 하는 상황(브링업·데모 예비)에서는 아래를 false 로 두거나
+    #    guard 를 안 띄운다. **false 로 두면 포크 높이의 낮은 장애물을 못 본다.**
+    require_roof_lidar: true
+    require_both_front_tof: true
+    # Existing onboard model detects pallet/hole only. Enable this after a
+    # person/vehicle detector publishes the documented JSON contract.
+    require_vision: false
+
+    lidar_front_half_angle_deg: 70.0
+    lidar_center_half_angle_deg: 18.0
+    tof_front_half_angle_deg: 35.0
+    # Applied after ToF points are transformed into base_link. This removes
+    # floor returns while retaining low obstacles between/around the forks.
+    tof_min_height_m: 0.02
+    tof_max_height_m: 0.80
+    minimum_sector_hits: 2
+
+    stop_distance_m: 0.45
+    slowdown_distance_m: 1.00
+    minimum_speed_scale: 0.25
+    avoidance_yaw_rate_rps: 0.18
+    max_abs_yaw_rate_rps: 0.35
+    tof_imbalance_m: 0.10
+    lidar_clearance_margin_m: 0.15
+    minimum_turn_clearance_m: 0.55
+
+    vision_confidence_threshold: 0.60
+    dynamic_object_stop_distance_m: 1.50
+    dynamic_labels: [person, pedestrian, forklift, vehicle, car, truck]

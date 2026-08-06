@@ -17,6 +17,8 @@ FRAME_START = b"@"
 IMU_FIELD_COUNT = 5
 IMU_STATUS_FIELD_COUNT = 6
 TOF_FIELD_COUNT = 5
+TOF_STATUS_FIELD_COUNT = 8
+ENCODER_FIELD_COUNT = 5
 
 # 8x8 multizone, packed as fixed-width hex: three digits of distance in mm
 # followed by one digit of target status, with no separators.
@@ -63,7 +65,35 @@ class TofFrame:
     status: tuple
 
 
-SensorFrame = Union[ImuFrame, ImuStatusFrame, TofFrame]
+@dataclass(frozen=True)
+class TofStatusFrame:
+    sensor_id: int
+    present: bool
+    read_errors: int
+    data_ready_errors: int
+    interrupts: int
+    published: int
+    polled: int
+
+
+@dataclass(frozen=True)
+class EncoderFrame:
+    """One cumulative wheel-encoder reading.
+
+    The count is cumulative rather than a delta, so a frame lost in transit
+    costs timing resolution but never distance: the next one still carries
+    everything the wheel has turned.
+    """
+
+    sequence: int
+    mcu_time_us: int
+    count: int
+    read_errors: int
+
+
+SensorFrame = Union[
+    ImuFrame, ImuStatusFrame, TofFrame, TofStatusFrame, EncoderFrame
+]
 
 
 def _split_verified_body(line: bytes) -> Optional[list]:
@@ -140,7 +170,31 @@ def parse_sensor_line(line: bytes) -> Optional[SensorFrame]:
             raise ValueError("invalid TOF field count")
         return _parse_tof(fields)
 
-    # An ACK arriving here would mean the links are crossed; treat as unknown.
+    if kind == "TFS":
+        if len(fields) != TOF_STATUS_FIELD_COUNT:
+            raise ValueError("invalid TFS field count")
+        return TofStatusFrame(
+            sensor_id=_parse_int(fields[1], "TFS sensor id"),
+            present=_parse_int(fields[2], "TFS present") != 0,
+            read_errors=_parse_int(fields[3], "TFS read errors"),
+            data_ready_errors=_parse_int(fields[4], "TFS data ready errors"),
+            interrupts=_parse_int(fields[5], "TFS interrupts"),
+            published=_parse_int(fields[6], "TFS published"),
+            polled=_parse_int(fields[7], "TFS polled"),
+        )
+
+    if kind == "ENC":
+        if len(fields) != ENCODER_FIELD_COUNT:
+            raise ValueError("invalid ENC field count")
+        return EncoderFrame(
+            sequence=_parse_int(fields[1], "ENC sequence"),
+            mcu_time_us=_parse_int(fields[2], "ENC timestamp"),
+            count=_parse_int(fields[3], "ENC count"),
+            read_errors=_parse_int(fields[4], "ENC read errors"),
+        )
+
+    # Unknown kinds are ignored rather than rejected, so a firmware that gains
+    # a new frame type does not break a bridge that has not been updated yet.
     return None
 
 

@@ -1,11 +1,21 @@
-"""측정 트리거 — 시뮬 신호를 받아 스테이션이 스스로 측정하게 한다 (S15P11A304-91).
+"""측정 트리거 — 신호를 받아 스테이션이 스스로 측정하게 한다 (S15P11A304-174).
 
-시연에서 스테이션(의자 위 노트북)은 지게차와 함께 움직이고, **Isaac Sim이 적재 위치에
-도착하면 신호를 쏜다.** 사람이 버튼을 누르는 방식은 "무인 스마트팩토리"와 맞지 않는다.
+시연에서 스테이션(의자 위 노트북)은 지게차와 함께 움직이고, 도착하면 신호가 온다.
+사람이 버튼을 누르는 방식은 "무인 스마트팩토리"와 맞지 않는다.
+
+⚠️ **발행 주체는 백엔드다**(2026-08-02 계약 변경,
+`docs/backend-message/cargo-measurement-workflow-contract.md`). 백엔드가 MOVE 명령을
+내고 → ROS2 가 Nav2 도착을 `SUCCESS` 로 회신하면 → 백엔드가 이 토픽을 발행한다.
+**Isaac Sim·ROS2 는 직접 발행하지 않는다** — 종전 기술("Isaac Sim이 쏜다")은 그
+계약 이전 것이다.
 
     from station.trigger import MeasureTrigger, wait_until_still
 
-    with MeasureTrigger(broker="70.12.130.106") as trig:
+    # 브로커는 EC2(TLS·인증). 인자를 직접 쓰기보다 `station.envfile.mqtt_settings()` 를
+    # 거치는 편이 낫다 — `.env` 값을 그대로 쓰고 주소가 한 곳에만 남는다.
+    with MeasureTrigger(broker="3.38.178.143", port=8883,
+                        tls_ca="infra/mqtt-ca.crt",
+                        username="...", password="...") as trig:
         for req in trig.requests():          # 신호가 올 때까지 블록
             wait_until_still(grab_frame)     # 흔들림이 멎을 때까지
             measure(req.cargo_id)

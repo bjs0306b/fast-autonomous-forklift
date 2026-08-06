@@ -3,8 +3,8 @@ sensor_bridge:
     # Native USB CDC of the ESP32-S3. Confirm with `ls /dev/ttyACM*`.
     serial_port: /dev/ttyACM0
     baud_rate: 115200
-    # Frames arrive at 100Hz (IMU) plus 15Hz per ToF; read faster so lines are
-    # not batched up.
+    # 바이트 수집은 전용 스레드가 하고, 이 주기는 큐를 비워 발행하는 속도다.
+    # 100Hz(IMU) + 15Hz x2(ToF) 를 여유 있게 넘긴다.
     read_rate_hz: 200.0
     status_log_period_sec: 10.0
 
@@ -15,7 +15,36 @@ sensor_bridge:
     # Measured standstill noise, rad/s. Never 0: that makes the EKF discard the
     # laser odometry entirely. Re-measure with the motors powered once the IMU
     # is bolted to the vehicle; a bench figure is optimistically small.
-    yaw_rate_stddev: 0.02
+    # 2026-08-06 실측, 정지 60초 x 4400여 표본. 라이다를 켠 채로 잰 값이다.
+    #
+    #   라이다 꺼짐  0.000722 rad/s  (0.041 deg/s)  = 센서 잡음뿐
+    #   라이다 켜짐  0.010934 rad/s  (0.626 deg/s)  <- 이 값
+    #
+    # 15배 차이다. 라이다는 차체 최고점에서 도는 모터라 진동이 IMU 까지 그대로
+    # 온다. 그래서 이 값은 반드시 **운용 구성 그대로** 재야 한다 — 꺼놓고 잰
+    # 값을 넣으면 EKF 가 IMU 를 실제보다 15배 정확한 센서로 믿는다.
+    #
+    # 구동 모터까지 도는 주행 중에는 더 커질 수 있다. 헤딩이 떨리면 주행
+    # 상태로 다시 재서 키운다. 0 으로 두는 것은 어느 경우에도 안 된다.
+    yaw_rate_stddev: 0.010934
+
+    # --- 구동 바퀴 엔코더 (JGA25-370, D1/D0 -> GPIO43/44) ---
+    encoder_enabled: true
+    encoder_topic: /wheel/twist
+    encoder_frame_id: base_link
+    # 지면에 하중이 걸린 상태에서 잰 값이다. 공칭 지름이 아니라 실제로 구르는
+    # 지름이라 그대로 쓴다 — 무부하로 다시 재서 "고치면" 주행 거리가 짧게 나온다.
+    wheel_diameter_m: 0.060
+    # 2026-08-06 실측: 손으로 10바퀴 x 2회 -> 499.5 / 498.8 counts/rev.
+    # 13 PPR x 4체배 x 감속비 1:9.6 = 499.2 와 0.01% 차이라 이론값을 쓴다
+    # (손으로 돌린 오차 0.14% 가 그보다 크다). 데이터시트에서 가져오면 안 되는
+    # 값이다 — 같은 이름으로 감속비가 여러 가지고, 틀려도 티가 안 난 채 모든
+    # 거리가 같은 비율로 어긋난다. tools/encoder_scale_check.py 로 잰다.
+    encoder_counts_per_wheel_rev: 499.2
+    # 50 Hz 에서 카운트 양자화만으로 속도가 18.9 mm/s 씩 끊기므로 (균등 오차
+    # 표준편차 5.5 mm/s), 나머지는 타이어 슬립과 유효 반경 오차 몫이다.
+    # 실주행으로 검증한 뒤 조이는 것이 맞다.
+    encoder_velocity_stddev: 0.05
 
     tof_enabled: true
     tof_topics: ["/tof/left/points", "/tof/right/points"]
@@ -26,10 +55,41 @@ sensor_bridge:
     # Which way the zone grid runs. A mirrored column or row order is a
     # reflection, not a rotation, so the static transform cannot fix it.
     # Confirm with an object at a known bearing before trusting the cloud.
-    tof_azimuth_sign: 1
-    tof_elevation_sign: 1
+    tof_azimuth_sign: -1
+    tof_elevation_sign: -1
+    # true when the board is turned 90 deg about its optical axis. The square
+    # FoV covers the same space either way, but the grid axes swap roles, and
+    # that is a transpose the signs above cannot express.
+    tof_transpose_zones: false
     # Status 9 is a half-confidence return; keep it out of the costmap unless
     # coverage proves too sparse.
     tof_accept_low_confidence: false
     tof_min_range_m: 0.02
     tof_max_range_m: 3.5
+    # 실측 장착 높이 [좌, 우] (m). 센서를 수평으로 달았으므로 센서 프레임의 z가
+    # 곧 지면 대비 높이차라, 이 값만 있으면 TF 조회 없이 바닥 반사를 가려낸다.
+    # 실측 2026-08-05: 바닥에서 광학창까지 70 mm (좌우 동일).
+    # base_link 기준 z 는 0.040 인데 축 중심이 바닥보다 30 mm 위이기 때문이다.
+    # 여기 값은 **바닥 기준**이어야 한다 — 지면 필터가 실제 바닥과 비교한다.
+    tof_mount_height_m: [0.070, 0.070]
+    tof_ground_margin_m: 0.02
+    # 아래로 기울어진 각도(도). 브래킷을 조절할 수 없어 실측값을 여기에 싣는다.
+    # 절차 D 의 바닥 행 적합으로 구한다. 0 이 아니면 launch 의 static TF 에도
+    # 같은 각을 라디안으로 넣어야 한다.
+    tof_pitch_deg: [3.0, -1.1]
+    # 고도 부호를 바닥으로 판정할 때만 false 로 내린다 (tof_geometry_check.py
+    # --check-floor). 평소에는 true.
+    tof_ground_filter: true
+
+    # 존이 한 번 더 나타나야 믿는다. 직물 바닥이 스치는 각도에서 약하게
+    # 산란해 고정되지 않은 자리에 단발 반사를 뿌린다 — 자리가 일정하지 않아
+    # 마스킹으로는 못 잡고, 이 소스는 clearing: False 라 costmap 에 한 번
+    # 찍히면 ToF 가 지우지 못한다. 대가는 한 프레임(67 ms) 지연이고
+    # 주행 속도에서 2 cm 다. hits 를 1 로 두면 꺼진다.
+    tof_persistence_frames: 3
+    tof_persistence_hits: 2
+    tof_persistence_tolerance_m: 0.05
+    # 포크·섀시를 항상 보는 존. 거리가 아니라 인덱스로 버린다.
+    # tools/tof_mask_learn.py 로 학습해서 채운다.
+    tof_masked_zones_left: []
+    tof_masked_zones_right: []

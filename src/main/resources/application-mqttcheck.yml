@@ -18,7 +18,12 @@
 #   (@SpringBootTest 컨텍스트가 여러 개 뜰 때 clientId 충돌 방지). 그 차단이 바로
 #   "실제 연결"을 증명하지 못하게 만드는 원인이므로 별도 프로필이 필요하다.
 #
-# 실행 (기본 브로커는 AI와 같은 70.12.130.106:1883이며 환경변수로 재정의 가능)
+# 실행 (기본 브로커는 아래 mqtt.broker-url 이 정한다. 환경변수로 재정의 가능)
+#
+# ⚠️ 종전 이 주석은 "기본 브로커는 AI와 같은 70.12.130.106:1883" 이라고 적고 있었다.
+#    그 GPU서버 브로커는 **2026-08-03에 내려갔고**(프로세스 0개) 운영 브로커는 EC2
+#    TLS 8883 하나뿐이다. 이 프로필은 애초에 로컬 브로커 전용이므로 그 주소를
+#    되살려 쓰지 말 것 — 지금 그 주소로 붙으면 그냥 연결이 안 된다.
 #   mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck"
 #
 # 주의
@@ -54,7 +59,8 @@ mqtt:
   # 검증 중 임의 토픽으로 손수 발행해 볼 수 있도록 테스트 API를 켠다.
   test-api:
     enabled: true
-  broker-url: ${MQTT_BROKER_URL:tcp://70.12.130.106:1883}
+  # 기본값은 로컬. 종전 GPU서버 기본값은 브로커가 죽어 조용히 실패한다(local 프로필 주석 참조).
+  broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
   username: ${MQTT_USERNAME:}
   password: ${MQTT_PASSWORD:}
   ca-cert-path: ${MQTT_CA_CERT_PATH:}

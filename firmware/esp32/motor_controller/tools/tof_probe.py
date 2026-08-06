@@ -26,6 +26,7 @@ from forklift_teleop.sensor_protocol import (
     ImuFrame,
     ImuStatusFrame,
     TofFrame,
+    TofStatusFrame,
     parse_sensor_line,
 )
 
@@ -55,6 +56,7 @@ def capture(port, duration):
     tof_frames = {sensor: [] for sensor in SENSOR_NAMES}
     tof_first_seen = {sensor: None for sensor in SENSOR_NAMES}
     logs = []
+    tof_status = {}
     parse_errors = 0
 
     start = time.monotonic()
@@ -80,6 +82,8 @@ def capture(port, duration):
                     if tof_first_seen[frame.sensor_id] is None:
                         tof_first_seen[frame.sensor_id] = now
                     tof_frames[frame.sensor_id].append(frame)
+            elif isinstance(frame, TofStatusFrame):
+                tof_status[frame.sensor_id] = frame
             elif isinstance(frame, ImuStatusFrame):
                 pass
             elif line.strip():
@@ -93,6 +97,7 @@ def capture(port, duration):
         "tof": tof_frames,
         "tof_first_seen": tof_first_seen,
         "logs": logs,
+        "tof_status": tof_status,
         "parse_errors": parse_errors,
     }
 
@@ -159,6 +164,17 @@ def report_tof(result):
         )
         print(f"         상태 분포 {summary}   (5=정상, 9=신뢰도 절반)")
 
+        # @TFS carries the counters that make wiring quality arguable. Zero
+        # while still, climbing when a motor runs, is EMI.
+        health = result["tof_status"].get(sensor_id)
+        if health is None:
+            print("         @TFS 미수신 — 펌웨어가 최신인지 확인")
+        else:
+            errors = health.read_errors + health.data_ready_errors
+            verdict = "정지 중 0 (정상)" if errors == 0 else "** 0 이 아님 **"
+            print(f"         I2C 에러 {errors} ({verdict}) · "
+                  f"인터럽트 {health.interrupts} · 폴링 {health.polled}")
+
     return any_frames
 
 
@@ -176,10 +192,18 @@ def report_imu(result):
         if frames[index].sequence < frames[index - 1].sequence
     ]
 
-    if reboots:
-        print(f"  ** ESP32 재부팅 {len(reboots)}회 감지 — 아래는 리셋을 "
+    # Opening the port resets the ESP32, so a sequence that runs backwards in
+    # the first few frames is the stale tail of the previous session sitting in
+    # the OS buffer -- expected, and not the same thing as a reset mid-run.
+    startup = [index for index in reboots if index <= 5]
+    mid_run = [index for index in reboots if index > 5]
+
+    if startup:
+        print("  (포트 열 때의 리셋 — 이전 세션 잔재이며 정상)")
+    if mid_run:
+        print(f"  ** 실행 중 ESP32 재부팅 {len(mid_run)}회 — 아래는 리셋을 "
               f"사이에 둔 조각들입니다 **")
-        print("     부팅 중 리셋이면 전원·접촉 문제를 먼저 보세요.")
+        print("     전원·접촉 문제를 먼저 보세요.")
 
     if not frames:
         print("  @IMU 프레임 없음")
@@ -220,11 +244,19 @@ def main():
         1 for _, text in result["logs"]
         if "i2c.master" in text and "timeout" in text
     )
-    if motor_bus_errors:
+    # A ToF bus scan probes addresses nobody answers, so a few timeouts there
+    # are normal. What matters is whether the actuators came up.
+    actuators_up = any(
+        "Actuators ready" in text for _, text in result["logs"]
+    )
+    if motor_bus_errors and not actuators_up:
         print()
-        print(f"  ** I2C 타임아웃 {motor_bus_errors}회 — 모터 HAT/서보 버스"
-              f"(I2C0, GPIO8/9)까지 영향받고 있는지 위 PCA9685 로그를 "
-              f"확인하세요 **")
+        print(f"  ** I2C 타임아웃 {motor_bus_errors}회 이고 액추에이터가 뜨지 "
+              f"않았습니다 — 모터 HAT/서보 버스(I2C0, GPIO8/9) 문제 **")
+    elif motor_bus_errors:
+        print()
+        print(f"  I2C 타임아웃 {motor_bus_errors}회 (ToF 버스 스캔 중). "
+              f"액추에이터는 정상 기동했으므로 구동계와 무관합니다.")
 
     any_frames = report_tof(result)
     report_imu(result)

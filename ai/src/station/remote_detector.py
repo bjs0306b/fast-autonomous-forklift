@@ -3,9 +3,18 @@
 `OnnxDetector`와 **같은 인터페이스**(`detect(frame_bgr) → list[Detection]`)라 스테이션
 파이프라인의 나머지를 건드리지 않고 갈아끼운다. 서버는 `scripts/onboard_infer_server.py`.
 
-    det = RemoteDetector("http://orin-desktop.local:8877", cfg)
+    det = RemoteDetector("http://70.12.247.81:8877", cfg)
     dets = det.detect(frame)
     print(det.last_path)      # "onboard" 또는 "local"
+
+⚠️ **주소는 IP로 준다.** 종전 이 예시가 `http://orin-desktop.local:8877` 이었는데
+**mDNS 이름은 해석되지 않는다**(2026-08-03 실측, S15P11A304-183에서 확인). 그대로
+복사해 쓰면 연결 실패로 **로컬 ONNX 폴백**이 되고, 보드에서 도는 줄 알고 넘어가게
+된다(`last_path`를 보면 드러난다).
+
+젯슨은 DHCP지만 재부팅해도 `70.12.247.81`을 그대로 재발급받았다. 고정 IP는 **일부러
+안 하기로 했다**(시연 주간에 네트워크를 건드리는 위험이 더 크다) — 대신 측정 전에
+`python -m station.serve --check` 로 연결을 확인한다.
 
 ## ⚠️ 폴백은 감추지 않는다
 

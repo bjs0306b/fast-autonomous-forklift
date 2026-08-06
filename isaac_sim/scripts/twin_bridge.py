@@ -41,11 +41,31 @@ import omni.kit.app
 # ---------------------------------------------------------------------------
 BROKER_HOST = "localhost"   # replace with the EC2 broker address
 BROKER_PORT = 1883
-# NOTE: "localhost" only works when this script runs on the same host as the
-# broker. Mosquitto here listens on 127.0.0.1 / [::1] only, so Isaac Sim running
-# in WSL, Docker, or on another PC cannot reach it with this value - point it at
-# the broker machine's LAN IP and add a matching `listener 1883 0.0.0.0` on the
-# broker side. See docs/backend-message/communication-protocol.md.
+#
+# 🔴 STALE AS WRITTEN (checked 2026-08-06). This block predates the broker move.
+#
+#   The only broker in operation is now the EC2 one: TLS on 8883 with
+#   `allow_anonymous false`. Plaintext 1883 has nothing listening on EC2, and the
+#   old shared GPU-server broker (70.12.130.106:1883) was shut down on 2026-08-03.
+#   So this script as-is can only talk to a broker you started yourself locally.
+#
+#   To point it at production you need THREE things, not just the host:
+#     1) BROKER_PORT = 8883
+#     2) client.tls_set(ca_certs=<infra/mqtt-ca.crt>, cert_reqs=ssl.CERT_REQUIRED)
+#        plus client.tls_insecure_set(False)
+#     3) client.username_pw_set(user, password)
+#   Copy the policy from `ai/src/station/trigger.py` (MeasureTrigger._connect) or
+#   `ros2_ws/src/fast_mqtt_bridge/fast_mqtt_bridge/mqtt_policy.configure_tls` —
+#   both already do exactly this. Do not invent a third variant.
+#
+#   ⚠️ Skipping (2) or (3) does not fail loudly in an obvious way: the connect
+#   attempt is refused by the broker and this bridge just never publishes, so the
+#   twin sits still and looks like a pose problem.
+#
+# NOTE (still true): "localhost" only works when this script runs on the same host
+# as the broker. A locally started Mosquitto listens on 127.0.0.1 / [::1] only, so
+# Isaac Sim running in WSL, Docker, or on another PC cannot reach it with this
+# value. See docs/backend-message/communication-protocol.md.
 
 # These are MQTT identifiers and must match `vehicle.vehicle_id` in the database
 # exactly. The DB rows are REAL-F01 / SIM-F01 with a HYPHEN; the backend drops

@@ -9,7 +9,10 @@ WebSocket 이벤트 중계가 구현되어 있습니다. 실제 Mosquitto/ROS2/�
 ## 시스템 구성 (최종 목표)
 
 ```
-ROS2 / Jetson / Isaac Sim → MQTT Broker → Spring Boot → MySQL → REST API / WebSocket → React 관제 화면
+ROS2 / Jetson / Isaac Sim → MQTT Broker → Spring Boot → MySQL → REST API / WebSocket → Next.js 관제 화면
+                                              ↑
+                        AI 측정 스테이션은 MQTT 가 아니라 REST 로 올린다
+                        (POST /api/stations/measurements, 2026-07-31 전환)
 ```
 
 ## 개발 환경
@@ -129,8 +132,16 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck" "-Dspring-boot.run.us
 | retained false 실동작(재구독 시 과거 명령 미전달) | 성공 |
 | 잘못된 JSON 폐기 후 consumer 계속 동작 | 성공 |
 
-**미검증**: Docker Compose 기동(개발 PC에 Docker 없음), 브로커 중지·재시작 재연결 실동작,
-EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 명령 수신·결과 회신.
+**당시 미검증이던 것 중 이후 해소된 것**(2026-08-05 기준):
+
+| 항목 | 현재 |
+|---|---|
+| Docker Compose 기동 | ✅ EC2에서 Compose 로 상시 구동, `develop` 푸시 자동배포(S15P11A304-179·182) |
+| EC2 인증 적용 | ✅ **TLS 8883 + 계정 인증**으로 일원화(S15P11A304-188). 아래 "EC2 브로커" 절 참조 |
+| 백엔드 → 스테이션 측정 요청 | ✅ MQTT TLS 왕복 검증(2026-08-03) |
+| 백엔드 → Nav2 MOVE → 도착 회신 | ⚠️ **배선까지만** 검증(S15P11A304-192·193). 실주행 미검증 |
+| 실제 차량의 명령 수신·결과 회신 | ⚠️ 미검증 |
+| 브로커 중지·재시작 재연결 실동작 | ⚠️ 미검증(로컬 브로커로만 확인) |
 
 ### 확정 통신 규격 요약 (2026-07-24)
 
@@ -163,19 +174,29 @@ EC2 인증 적용, ROS2 브리지 ↔ 브로커 실제 연결, 실제 차량의 
 로컬 개발용 Mosquitto뿐 아니라 팀이 공유하는 AWS EC2 Mosquitto Broker에도 코드 변경 없이 연결할 수 있도록,
 `application-local.yml`의 MQTT 접속 값을 환경변수로 오버라이드할 수 있게 구성했다.
 
+⚠️ **EC2 브로커는 평문 1883이 아니라 TLS 8883이다**(2026-08-03 정정). `allow_anonymous false`라
+계정 인증이 필수고, **EC2의 1883에는 아무것도 리스닝하지 않는다** — `tcp://...:1883`으로 적으면
+연결이 안 된다.
+
 ```env
-# 로컬 Spring Boot → EC2 공용 Broker
-MQTT_BROKER_URL=tcp://<EC2_PUBLIC_IP>:1883
+# 배포(EC2 도커) — 컨테이너끼리는 컨테이너명으로 붙는다. 현재 backend.env 의 실제 값이다.
+MQTT_BROKER_URL=ssl://fast-mosquitto:8883
 MQTT_USERNAME=<username>
 MQTT_PASSWORD=<password>
 
-# EC2에서 직접 실행하는 Spring Boot → 같은 EC2의 Broker
+# 도커 밖(AI 스테이션·ROS2)에서 붙을 때 — EC2 주소 + 8883 + CA 인증서
+#   ⚠️ 서버 인증서 SAN 이 IP 뿐이라 호스트명(i15a304.p.ssafy.io)으로는 검증에 실패한다.
+#      IP 로 붙거나, DNS SAN 을 넣어 인증서를 재발급해야 한다.
+
+# 로컬 개발 — 직접 띄운 브로커
 MQTT_BROKER_URL=tcp://localhost:1883
-MQTT_USERNAME=<username>
-MQTT_PASSWORD=<password>
 ```
 
-환경변수를 아무것도 설정하지 않으면 기존과 동일하게 `tcp://localhost:1883`(인증 없음)으로 접속한다.
+환경변수를 설정하지 않으면 `tcp://localhost:1883`(인증 없음)으로 접속한다.
+
+> ⚠️ 종전 기본값은 GPU서버 `tcp://70.12.130.106:1883` 이었는데, **그 브로커는 없어졌다**
+> (2026-08-03 GPU서버 학습 전용화). 죽은 주소로 기본값을 두면 발행이 **에러 없이 허공으로 간다** —
+> 실제로 측정 트리거가 통째로 사라진 적이 있다(S15P11A304-188·191).
 비밀번호는 코드/Git에 직접 작성하지 않고 실행 시점의 환경변수(`.env`, 쉘 환경변수, 배포 시크릿 등)로만 주입한다.
 
 EC2 Mosquitto 설치·설정 가이드, 보안 그룹 정책, 통합 테스트 절차, 재연결 테스트, 오류 점검표는

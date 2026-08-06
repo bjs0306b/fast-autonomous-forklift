@@ -19,7 +19,11 @@ mqtt:
   enabled: ${MQTT_ENABLED:true}
   test-api:
     enabled: ${MQTT_TEST_API_ENABLED:false}
-  broker-url: ${MQTT_BROKER_URL:tcp://70.12.130.106:1883}
+  # ⚠️ 기본값은 **로컬 브로커**다. 종전 기본값(GPU서버 `tcp://70.12.130.106:1883`)은
+  #    mosquitto 가 죽어 있어(2026-08-03 실측: 프로세스·리스너 모두 없음) 붙어도
+  #    **에러 없이 조용히 아무 데도 안 간다** — 발행이 허공으로 가고 트리거가 사라진다.
+  #    배포에서는 backend.env 의 MQTT_BROKER_URL(=ssl://fast-mosquitto:8883)이 덮는다.
+  broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
   username: ${MQTT_USERNAME:}
   password: ${MQTT_PASSWORD:}
   # ssl:// 브로커(EC2)에서만 쓴다. 비우면 JVM 기본 트러스트스토어를 쓴다(MqttProperties 주석 참고).

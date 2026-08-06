@@ -33,7 +33,15 @@ ROS2는 기존 `forklift/{vehicleId}/command`의 MOVE 명령을 실행하고 결
 - 좌표계는 `map`, 좌표는 m, `heading`은 degree를 사용한다.
 - ROS2가 측정 요청 토픽을 직접 발행하거나 `cargoId`를 관리하지 않는다.
 
-현재 `ros2_ws/src/fast_mqtt_bridge`는 명령 검증과 결과 envelope까지 있으나 실제 Nav2 실행 adapter가 임시 구현이다. ROS2 담당자는 MOVE를 `NavigateToPose`에 연결하고 목표 종료 결과를 아래 형식으로 반환해야 한다.
+> ✅ **연결 완료**(2026-08-03, S15P11A304-192·193). `fast_mqtt_bridge/nav2_adapter.py` ·
+> `nav2_goal_sender.py` 가 MOVE 를 `NavigateToPose` 액션으로 실행하고, 회전 없이 도는
+> 행동트리(`forklift_teleop/behavior_trees/navigate_to_pose_no_spin.xml`)를 물렸다.
+> ⚠️ **배선까지만 검증됐고 실주행은 미검증**이다.
+>
+> ⚠️ **`/cmd_vel` 인계 규칙이 없다**(S15P11A304-**199**). Nav2 와 포크 정렬 루프가 같은
+> 토픽을 동시에 잡을 수 있다 — 지금은 포크 정렬 전에 **사람이 Nav2 를 내린다.**
+
+MOVE 목표 종료 결과는 아래 형식으로 반환한다.
 
 ```json
 {

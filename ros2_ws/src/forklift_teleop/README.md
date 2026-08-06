@@ -5,7 +5,7 @@
 | 노드 | 링크 | 역할 |
 |---|---|---|
 | `uart_teleop_bridge` | UART1 `/dev/ttyTHS1` | `/cmd_vel` → `@CMD` 명령 (하행) |
-| `sensor_bridge` | USB CDC `/dev/ttyACM0` | `@IMU`/`@IMS` → `/imu/data`, `@TOF` → `/tof/{left,right}/points` (상행) |
+| `sensor_bridge` | USB CDC `/dev/ttyACM0` | `@IMU`/`@IMS` → `/imu/data`, `@TOF` → `/tof/{left,right}/points`, `@ENC` → `/wheel/twist` (상행) |
 
 `uart_teleop_bridge`는 전륜 고정축·후륜 조향 차량의 전진/후진 조향 부호와
 통신 안전 정지를 검증하기 위한 개방루프 텔레옵입니다.
@@ -86,6 +86,20 @@ ros2 launch forklift_teleop sensor_usb.launch.py
 **covariance를 0으로 두면 안 됩니다.** EKF가 "오차 없는 완벽한 센서"로
 착각하고 라이다 오도메트리를 완전히 무시합니다.
 
+### ⚠️ `/wheel/twist` 는 발행만 되고 아무도 안 받는다 (2026-08-06 확인)
+
+`@ENC`(50Hz)를 `wheel_diameter_m`·`encoder_counts_per_wheel_rev` 로 환산해
+`/wheel/twist` 로 냅니다. 그런데 **구독자가 하나도 없습니다** — `ekf.yaml` 에
+`twist0` 항목이 없고 Nav2 도 받지 않습니다. 지금 병진 속도는 전적으로
+rf2o(라이다 오도메트리)에서 나옵니다.
+
+의도인지 미완인지 기록이 없어 **건드리지 않았습니다.** EKF 에 붙이는 방법은
+`config/ekf.yaml` 주석에 적어뒀습니다.
+
+⚠️ 붙이기 전에 **정지 상태에서 두 소스의 `vx` 를 비교**하세요. 미니어처는 바닥
+마찰이 약해 바퀴가 헛돌면 엔코더가 실제보다 빠르게 읽힙니다 — 그 상태로 융합하면
+라이다가 맞는데도 EKF 가 "가고 있다" 고 믿습니다.
+
 ### 시각 보정
 
 ESP32는 자체 시계를 쓰므로 `esp_timer` 값을 그대로 쓰면 ROS 시각과 어긋나고
@@ -155,3 +169,127 @@ marking 해둔 상자가 지워집니다.** local costmap이 `VoxelLayer`라 mar
 EKF(`robot_localization`) 구성은 이 패키지에 없습니다. 붙일 때는 rf2o의
 `publish_tf`를 `false`로 내려 `odom → base_link` 발행 주체를 EKF 하나로
 정리해야 합니다. 둘이 동시에 발행하면 TF가 떨며 튑니다.
+
+## 상부 LiDAR + 정면 ToF 장애물 회피 (S15P11A304-109)
+
+센서 배치는 다음과 같다.
+
+```text
+                진행 방향 +X
+                      ↑
+       정면 좌 ToF  [차량/포크]  정면 우 ToF
+                      │
+                 상부 YDLIDAR
+```
+
+두 ToF는 측면을 보지 않는다. 둘 다 포크 방향(+X)을 보며, 상부 LiDAR의 스캔
+평면 아래에 있는 포크·낮은 상자·사람 다리 등의 전방 사각지대를 보완한다.
+
+`obstacle_avoidance`의 역할은 다음과 같다.
+
+- 상부 YDLIDAR: 좌·우 우회 공간 및 스캔 높이에 걸리는 구조물 확인
+- 정면 좌/우 ToF: 각 포크 측 전방의 낮은 장애물 거리 확인
+- 좌 ToF만 가까우면 우회 후보는 우측, 우 ToF만 가까우면 좌측
+- 후보 방향을 상부 LiDAR가 비어 있다고 확인해야만 조향 보정
+- 두 정면 ToF가 모두 막히거나 후보 방향도 LiDAR에서 막히면 감속 또는 정지
+- 모든 센서 점은 TF를 통해 `base_link`로 변환하므로 실제 전방 장착 위치가 반영됨
+
+명령 경로는 아래처럼 분리한다.
+
+```text
+Nav2/teleop /cmd_vel
+        → obstacle_avoidance
+        → /cmd_vel_safe
+        → uart_teleop_bridge
+```
+
+기본 임계값은 0.45m 정지, 1.0m부터 감속, 센서 0.5초 stale 시 정지다.
+ToF PointCloud2 두 개는 local VoxelLayer에만 marking source로 추가한다. 이로써
+상부 LiDAR가 지나친 낮은 전방 물체도 Nav2가 경로 장애물로 사용한다. ToF clearing은
+다른 센서의 유효 장애물을 지우지 않도록 비활성화한다.
+
+빌드 및 실행:
+
+```bash
+cd ~/S15P11A304/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select forklift_teleop
+source install/setup.bash
+
+# 터미널 1: 상부 YDLIDAR + RF2O + EKF
+ros2 launch forklift_teleop lidar_odometry.launch.py
+
+# 터미널 2: 정면 ToF 2개 + IMU
+ros2 launch forklift_teleop sensor_usb.launch.py
+
+# 터미널 3: 회피 노드 + 안전 cmd_vel을 받는 UART 브리지
+ros2 launch forklift_teleop obstacle_avoidance.launch.py
+```
+
+상태 확인:
+
+```bash
+ros2 topic echo /obstacle_avoidance/status
+ros2 topic echo /cmd_vel_safe
+```
+
+현재 카메라 모델은 `pallet/hole` 전용이므로 사람·차량 분류 검증에는 사용할 수
+없다. 사람·차량 모델이 준비되면 `/camera/obstacles`에 아래 JSON을 발행하고
+`config/obstacle_avoidance.yaml`의 `require_vision`을 `true`로 바꾼다.
+
+```json
+{"detections":[{"label":"person","confidence":0.93,"distance_m":0.8}]}
+```
+
+실차 장착 전에 `sensor_usb.launch.py`의 ToF x/y/z와
+`lidar_odometry.launch.py`의 LiDAR x/y/z를 반드시 실측값으로 교체해야 한다.
+
+---
+
+## 무인 완주 시나리오 — `unmanned_mission` (2026-08-06 문서화)
+
+`Nav2 로 집는 곳까지 → 포크 올림 → 내리는 곳까지 → 포크 내림` 을 **한 번에** 실행하는
+노드다. 코드는 있었는데 문서가 없어 여기 적는다.
+
+```bash
+ros2 run forklift_teleop unmanned_mission --ros-args \
+    -p mission_armed:=true \
+    -p pickup_x:=1.2 -p pickup_y:=0.8 -p pickup_yaw:=0.0 \
+    -p dropoff_x:=2.4 -p dropoff_y:=1.6 -p dropoff_yaw:=1.57
+```
+
+### 안전장치 (이미 들어 있는 것)
+
+| 장치 | 동작 |
+|---|---|
+| `mission_armed` | **기본 false.** 명시적으로 true 를 주지 않으면 아무것도 안 하고 끝난다 |
+| 좌표 검사 | 집는 곳과 내리는 곳이 **0.05m 미만이면 거부** |
+| 브리지 대기 | 포크 브리지가 안 떠 있으면 시작 안 함 |
+| `start_delay_sec` 5초 | 팔을 뺄 시간. 이때 *"포크 호밍됐는지, 경로가 비었는지"* 경고 로그가 나온다 |
+| 포크 타임아웃 30초 | 응답이 없으면 `STOP` 을 보내고 실패로 끝낸다 |
+| `finally` 의 `STOP` | Ctrl-C 로 끊어도 포크는 멈춘다 |
+
+### ⚠️ 이 시나리오는 포크 정렬을 쓰지 않는다
+
+Nav2 로 목표 자세에 도착한 뒤 **바로 포크를 올린다.** 파렛트 구멍을 보고 맞추는
+`onboard_fork_align_node.py` 는 이 경로에 없다. 즉 **데모 경로가 두 갈래다**:
+
+| | 무인 완주(`unmanned_mission`) | 포크 정렬(`onboard_fork_align_node`) |
+|---|---|---|
+| 위치 정확도 | Nav2 목표 자세에 의존 | 카메라로 구멍을 보고 수렴 |
+| 파렛트가 돌아가 있으면 | 못 맞춘다 | 45° 까지 관통 확인(08-05) |
+| `/cmd_vel` 발행자 | Nav2 | 정렬 노드 |
+| guard 와의 관계 | 그대로 통과(먼 거리 주행) | **0.45m 에서 막힌다** — 아래 참조 |
+
+⚠️ **둘을 한 번에 이으려면 `/cmd_vel` 인계 규칙이 필요하다**(S15P11A304-**199**).
+지금은 사람이 런치를 갈아 띄운다. 정렬 구간에서 guard 를 어떻게 할지는
+`docs/ai/onboard-fork-align-runbook.md` §1-2 참조.
+
+### 포크 명령 경로
+
+`/fork/command`(String: `UP`·`DOWN`·`HOME`·`INITIALIZE`·`STOP`) → 브리지 → `@LIFT` UART
+→ 펌웨어. 결과는 `/fork/status` 로 돌아온다(`RUNNING`·`DONE`·`ERROR`).
+
+⚠️ **`@LIFT` 는 1회성이라 펌웨어가 거부하면(`@ACK,...,ERROR`) 재전송이 없다.** 미션은
+`/fork/status` 를 기다리다 30초 타임아웃으로 실패 처리한다 — 포크가 안 움직이면
+브리지 로그를 볼 것(`firmware/esp32/motor_controller/README.md` UART 절).

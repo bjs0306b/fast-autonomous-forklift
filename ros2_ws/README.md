@@ -128,11 +128,56 @@ ros2 topic echo /cmd_vel
 - `/cmd_vel` 발행 중단 후 500 ms watchdog에 의해 DC 모터가 자동으로
   정지하고 서보가 중앙으로 복귀하는 것을 확인했습니다.
 
+### 2026-08-05 갱신 — 조향 실각도가 명령의 1/4이었다
+
+`ros2_ws` 밖(펌웨어)의 문제였지만 **여기의 곡률 변환 전제가 깨져 있었다**.
+`servo.c`가 각도를 180으로 정규화해 `SERVO_MIN/MAX_PULSE_US` 사이에 매핑하는데
+그 범위가 `1000~2000 µs`였다. MG996R은 **500~2500 µs가 180°**다.
+
+- 최대 조향을 명령했을 때 뒷바퀴 실측 **8°** (코드가 믿던 값 28°)
+- 실효 회전반경 **1200~1450 mm** (설계값 537 mm의 2~3배)
+- 명령 대비 실제 회전 **21~26%** = `tan(8°)/tan(28°)`
+
+수정 후 값(`config/teleop.yaml`이 단일 출처):
+
+| 항목 | 값 |
+|---|---|
+| 서보 펄스 범위 | `500~2500 µs` |
+| `rear_steering_limit_deg` | `36.0` |
+| `steering_center_cdeg` | `9000` (직진 편차 0.33°) |
+| `steering_min/max_cdeg` | `5400 / 12600` (±36° 대칭) |
+| `max_angular_rps` | `0.75` |
+| `max_drive_percent` / `_reverse` | `60` / `100` |
+
+⚠️ **조향 한계가 네 곳에 서로 다른 값으로 박혀 있었다.** `protocol.py`의 하드코딩이
+범위 밖 명령에 `ValueError`를 던져 **브리지 프로세스를 죽이고 있었다**(증상은
+"조향이 아예 안 움직임" — `/cmd_vel` 구독자가 사라진다). 지금은 **봉투**(`protocol.py`
+·펌웨어)와 **운전값**(`teleop.yaml`)이 분리돼 있어 범위를 바꿔도 재플래시가 필요 없다.
+
+⚠️ **경로 추종 게인을 이 이전에 잡았다면 다시 봐야 한다.** 같은 `angular_z`가 이제
+4.5배로 돈다.
+
 ### 남은 실차 검증
 
 - `NavigateToPose -> /cmd_vel -> UART bridge -> ESP32`를 동시에 연결한
   저속 자동 주행
-- 서보 명령각과 실제 후륜 바퀴각 캘리브레이션
+- 🔴 **`/cmd_vel` 인계 규칙**(S15P11A304-**199**) — **셋이 얽혀 있다**(2026-08-06 갱신):
+
+  | 주체 | 하는 일 |
+  |---|---|
+  | Nav2 | `/cmd_vel` 에 주행 명령 발행 |
+  | `obstacle_avoidance`(109) | `/cmd_vel` 을 받아 감속·정지시켜 **`/cmd_vel_safe`** 로 중계 |
+  | 포크 정렬(`onboard_fork_align_node.py`) | `/cmd_vel` 에 직접 발행 |
+
+  ⚠️ **guard 를 띄우면 브리지가 `/cmd_vel_safe` 만 듣는다**(`obstacle_avoidance.launch.py`가
+  `cmd_vel_topic` 을 덮어쓴다). 그 상태에서 포크 정렬은 guard 를 통과하게 되는데,
+  guard 는 **0.45m 에서 정지 · 1.00m 부터 감속**한다. 정렬은 0.70m 에서 시작해 **0.21m 까지**
+  들어가야 하므로 **파렛트를 장애물로 보고 막는다.** guard 가 틀린 게 아니라 역할이 겹친 것이다.
+
+  지금 운용: 정렬 시간에는 Nav2 와 guard 를 내리고 `teleop_uart.launch.py` 로 브리지만 띄운다
+  (`docs/ai/onboard-fork-align-runbook.md` §1·§1-2). 정렬 노드를 guard 뒤에 붙이려면
+  `--cmd-topic /cmd_vel_safe`.
+- ~~서보 명령각과 실제 후륜 바퀴각 캘리브레이션~~ → **완료**(위 2026-08-05 절)
 - 지면에서 직선·곡선 경로 추종 오차 측정
 - 후륜 조향 후미 스윙과 obstacle footprint 검증
 

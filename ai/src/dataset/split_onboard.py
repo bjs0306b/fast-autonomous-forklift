@@ -154,7 +154,8 @@ def main(argv=None) -> int:
         for c in CLASSES:
             print(f"   {c}: {cnt[c]}")
         if key == "train" and cnt["hole"] == 0:
-            print("   ⚠️ hole이 0개다 — 3클래스 학습의 의미가 없다. 라벨을 확인할 것.")
+            print("   ⚠️ hole이 0개다 — 온보드는 pallet·hole 2클래스이고, hole 이 "
+                  "없으면 포크 정렬이 성립하지 않는다. 라벨을 확인할 것.")
 
     if not a.no_copy:
         dst = a.out_dir / a.stage

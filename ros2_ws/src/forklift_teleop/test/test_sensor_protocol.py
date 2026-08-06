@@ -2,11 +2,13 @@ import unittest
 
 from forklift_teleop.protocol import frame_body
 from forklift_teleop.sensor_protocol import (
+    EncoderFrame,
     TOF_ZONE_COUNT,
     ClockOffsetTracker,
     ImuFrame,
     ImuStatusFrame,
     TofFrame,
+    TofStatusFrame,
     parse_sensor_line,
 )
 
@@ -166,3 +168,47 @@ class ClockOffsetTrackerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TofStatusTest(unittest.TestCase):
+    def test_parse_tof_status(self):
+        frame = parse_sensor_line(frame_body("TFS,1,1,3,0,540,538,2"))
+        self.assertIsInstance(frame, TofStatusFrame)
+        self.assertEqual(frame.sensor_id, 1)
+        self.assertTrue(frame.present)
+        self.assertEqual(frame.read_errors, 3)
+        self.assertEqual(frame.data_ready_errors, 0)
+        self.assertEqual(frame.interrupts, 540)
+        self.assertEqual(frame.published, 538)
+        self.assertEqual(frame.polled, 2)
+
+    def test_absent_sensor(self):
+        frame = parse_sensor_line(frame_body("TFS,0,0,0,0,0,0,0"))
+        self.assertFalse(frame.present)
+
+    def test_field_count_is_checked(self):
+        with self.assertRaisesRegex(ValueError, "TFS field count"):
+            parse_sensor_line(frame_body("TFS,1,1,3,0"))
+
+    def test_parse_encoder_frame(self):
+        frame = parse_sensor_line(frame_body("ENC,7,123456789,-4321,0"))
+        self.assertEqual(
+            frame,
+            EncoderFrame(
+                sequence=7,
+                mcu_time_us=123456789,
+                count=-4321,
+                read_errors=0,
+            ),
+        )
+
+    def test_encoder_frame_rejects_short_body(self):
+        with self.assertRaises(ValueError):
+            parse_sensor_line(frame_body("ENC,7,123,456"))
+
+    def test_unknown_frame_kind_is_ignored_not_rejected(self):
+        # ENC used to stand in here as the frame the bridge had not been taught
+        # about; it is implemented now, so the example moved to one that is
+        # still unknown. The rule is unchanged: a firmware that gains a frame
+        # type must not break a bridge that predates it.
+        self.assertIsNone(parse_sensor_line(frame_body("BAT,1,12345,678")))
