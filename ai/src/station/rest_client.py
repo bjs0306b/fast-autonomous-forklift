@@ -275,8 +275,9 @@ def measurement_session(cargo_id: str, base_url: str | None = None,
                     f"  sessionId = {session_id}\n"
                     f"  사유      = {e.body or e}\n"
                     f"  복구      : python src/station/serve.py --release-session\n"
-                    f"  (측정이 저장되기 전에는 백엔드가 종료를 거부한다. TTL이 없어\n"
-                    f"   방치하면 다른 화물이 측정을 시작할 수 없다.)\n",
+                    f"  (측정이 저장되기 전에는 백엔드가 종료를 거부한다.\n"
+                    f"   방치하면 TTL 60초까지 다른 화물이 측정을 시작할 수 없고,\n"
+                    f"   그 뒤 자동 해제되면서 이 작업은 FAILED 로 끝난다 — 재측정은 없다.)\n",
                     file=sys.stderr)
     # 원래 예외가 있었다면 이 지점에 오지 않는다 — 덮어쓰지 않는다는 뜻이다.
     if failed_to_close is not None:
