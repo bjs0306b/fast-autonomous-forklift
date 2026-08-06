@@ -30,7 +30,7 @@ from station.tilt import estimate_roll_deg  # noqa: E402
 
 
 def capture(cfg: StationConfig) -> "cv2.typing.MatLike":
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_V4L2)
     if not cap.isOpened():
         raise RuntimeError(f"카메라 index {cfg.camera_index}를 열 수 없습니다 (--probe로 확인)")
     try:
@@ -66,7 +66,7 @@ def read_distance(cfg: StationConfig) -> Measurement | None:
 
 def probe_cameras(max_index: int = 3) -> None:
     for idx in range(max_index):
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
         if not cap.isOpened():
             print(f"index {idx}: 안 열림")
             continue
@@ -171,7 +171,7 @@ def check_wiring(args) -> int:
 
     print("=== 카메라 ===")
     cfg = StationConfig()
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_V4L2)
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
@@ -268,26 +268,26 @@ def main(argv: list[str] | None = None) -> int:
     cfg = StationConfig()
 
     def build_detector():
-        """추론기를 만든다 — 기본은 로컬 ONNX, `--infer-url`이면 온보드 보드.
+        """추론기를 만든다.
 
-        보드 경로여도 **로컬을 폴백으로 항상 함께 준다.** 시연 중 WiFi가 끊겨도 측정이
-        죽지 않아야 하기 때문이다. 대신 어느 경로로 돌았는지 측정 JSON에 기록한다
-        (`inference.path`) — 조용히 로컬로 떨어지면 "보드가 추론한다"는 설명이 사실과
-        달라진다.
+        `--infer-url`이 있으면 온보드 원격 추론 서버만 사용한다.
+        원격 주소가 없을 때만 로컬 ONNX 모델을 초기화한다.
         """
-        local = OnnxDetector(
+        if args.infer_url:
+            from station.remote_detector import RemoteDetector
+            return RemoteDetector(
+                args.infer_url,
+                input_size=cfg.input_size,
+                local_detector=None,
+                score_threshold=cfg.score_threshold,
+                class_thresholds=cfg.class_score_thresholds,
+            )
+
+        return OnnxDetector(
             cfg.model_path, cfg.input_size, cfg.score_threshold,
             cfg.class_names, cfg.norm_mean, cfg.norm_std,
             class_thresholds=cfg.class_score_thresholds,
         )
-        if not args.infer_url:
-            return local
-        from station.remote_detector import RemoteDetector
-        # 임계를 로컬과 **같은 값**으로 넘긴다 — 경로에 따라 판정이 갈리지 않게.
-        return RemoteDetector(args.infer_url, input_size=cfg.input_size,
-                              local_detector=local,
-                              score_threshold=cfg.score_threshold,
-                              class_thresholds=cfg.class_score_thresholds)
 
     def measure_and_emit(detector=None, frame=None) -> dict | None:
         """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None.
@@ -431,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     detector = build_detector()
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_V4L2)
     if not cap.isOpened():
         print(f"카메라 index {cfg.camera_index} 안 열림 (--probe로 확인)", file=sys.stderr)
         trigger.__exit__(None, None, None)

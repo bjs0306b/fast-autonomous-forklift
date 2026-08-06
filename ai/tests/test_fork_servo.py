@@ -21,13 +21,20 @@ from perception.fork_align import AlignError
 
 DT = 0.045      # 22fps
 
+APPROACH_PX = ALIGN_ENTER_PX / 2
+"""아직 ALIGN 에 못 든 거리(=APPROACH 단계).
 
-def err(lateral=0.0, yaw=0.0, approach=200.0, distance_mm=None) -> AlignError:
+⚠️ **임계에서 유도한다.** 종전에 200.0 이 박혀 있었는데, 임계가 바뀌자(2026-08-03,
+ALIGN_ENTER_PX 260→95) 같은 값이 조용히 **다른 단계**를 뜻하게 됐다. 테스트가 잡아
+줬지만, 고정값을 튜닝 대상 상수와 비교하면 언제든 되풀이된다."""
+
+
+def err(lateral=0.0, yaw=0.0, approach=APPROACH_PX, distance_mm=None) -> AlignError:
     return AlignError(lateral_ratio=lateral, yaw_signal=yaw, approach_px=approach,
                       distance_mm=distance_mm)
 
 
-ALIGNED_FAR = err(approach=ALIGN_ENTER_PX - 50)
+ALIGNED_FAR = err(approach=APPROACH_PX)
 ALIGNED_INSERT = err(approach=INSERT_ENTER_PX + 10)
 
 
@@ -88,7 +95,7 @@ def test_정렬단계가_접근보다_느리다() -> None:
 
 def test_정렬단계는_요를_더_세게_잡는다() -> None:
     servo = ForkServo()
-    servo.step(err(yaw=0.2, approach=ALIGN_ENTER_PX - 50), DT)
+    servo.step(err(yaw=0.2, approach=APPROACH_PX), DT)
     approach_turn = servo._last.angular_z
     servo.step(err(yaw=0.2, approach=ALIGN_ENTER_PX + 10), DT)
     assert abs(servo._last.angular_z) > abs(approach_turn)
@@ -152,7 +159,7 @@ def test_진입_중에는_되돌아가지_않는다() -> None:
 def test_잠깐_놓치면_직전_명령을_유지한다() -> None:
     """매 프레임 급제동하면 검출이 깜빡일 때마다 덜컹거린다."""
     servo = ForkServo(lost_grace_s=0.2)
-    moving = servo.step(err(lateral=0.3, approach=200), DT)
+    moving = servo.step(err(lateral=0.3, approach=APPROACH_PX), DT)
     kept = servo.step(None, DT)
     assert kept.phase is Phase.APPROACH
     assert kept.linear_x == moving.linear_x
@@ -161,7 +168,7 @@ def test_잠깐_놓치면_직전_명령을_유지한다() -> None:
 
 def test_유예를_넘기면_정지한다() -> None:
     servo = ForkServo(lost_grace_s=0.1)
-    servo.step(err(lateral=0.3, approach=200), DT)
+    servo.step(err(lateral=0.3, approach=APPROACH_PX), DT)
     for _ in range(5):
         cmd = servo.step(None, DT)
     assert cmd.phase is Phase.SEARCH
@@ -216,7 +223,7 @@ def test_거리가_없으면_px_임계로_돌아간다() -> None:
     servo.reset()
     assert servo.step(err(approach=ALIGN_ENTER_PX + 10), DT).phase is Phase.ALIGN
     servo.reset()
-    assert servo.step(err(approach=ALIGN_ENTER_PX - 50), DT).phase is Phase.APPROACH
+    assert servo.step(err(approach=APPROACH_PX), DT).phase is Phase.APPROACH
 
 
 def test_mm_임계도_미정렬이면_중단한다() -> None:
@@ -240,3 +247,49 @@ def test_reset하면_기록이_새로_시작된다() -> None:
     servo.step(ALIGNED_FAR, DT)
     servo.reset()
     assert servo.episode.samples == []
+
+
+# --- 감쇠항 (S15P11A304-152) ---
+#
+# 08-04 실주행에서 lat 이 주기 1.8초 사인파로 흔들렸다. 조향각 → 요레이트 →
+# 헤딩 → 좌우위치로 적분이 두 번 들어가는 계에 비례항만 걸면 감쇠비가 0 이다.
+# 아래는 **부호와 기본 꺼짐**만 못 박는다 — 효과는 실물로만 확인된다.
+
+
+def test_감쇠는_기본으로_꺼져_있다() -> None:
+    """검증 전까지 기본 거동이 바뀌면 안 된다."""
+    with_rate = steering_for(err(lateral=0.3), lateral_rate=5.0)
+    without = steering_for(err(lateral=0.3), lateral_rate=0.0)
+    assert with_rate == without
+
+
+def test_감쇠는_오차가_커지는_방향을_거스른다() -> None:
+    """오차가 벌어지는 중이면 조향을 더 세게, 좁혀지는 중이면 덜 세게."""
+    base = steering_for(err(lateral=0.3), k_lateral_rate=0.05)
+    widening = steering_for(err(lateral=0.3), lateral_rate=+1.0,
+                            k_lateral_rate=0.05)
+    closing = steering_for(err(lateral=0.3), lateral_rate=-1.0,
+                           k_lateral_rate=0.05)
+    # lateral>0 이면 각속도가 음수(우회전)다. 벌어지는 중이면 더 음수여야 한다.
+    assert widening < base < closing
+
+
+def test_감쇠도_각속도_상한을_넘지_않는다() -> None:
+    assert steering_for(err(lateral=0.3), lateral_rate=1e6,
+                        k_lateral_rate=0.05) >= -MAX_ANGULAR
+
+
+def test_첫_프레임에는_변화율을_지어내지_않는다() -> None:
+    """직전 값이 없는데 변화율을 만들면 출발하자마자 조향이 튄다."""
+    servo = ForkServo(k_lateral_rate=0.05)
+    first = servo.step(err(lateral=0.3, approach=APPROACH_PX), DT)
+    plain = ForkServo().step(err(lateral=0.3, approach=APPROACH_PX), DT)
+    assert first.angular_z == plain.angular_z
+
+
+def test_타깃을_놓친_구간은_변화율에_안_섞인다() -> None:
+    """놓친 프레임을 건너뛴 차이를 변화율로 쓰면 없는 급변을 만들어낸다."""
+    servo = ForkServo(k_lateral_rate=0.05, lost_grace_s=1.0)
+    servo.step(err(lateral=0.1, approach=APPROACH_PX), DT)
+    servo.step(None, DT)                       # 놓침 — 여기서 갱신하면 안 된다
+    assert servo._last_lateral == 0.1

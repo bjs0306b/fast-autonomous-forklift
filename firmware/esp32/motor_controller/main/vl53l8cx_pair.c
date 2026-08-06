@@ -31,6 +31,7 @@ typedef struct {
     uint16_t address_8bit;
     const char *name;
     bool present;
+    tof_bus_stats_t stats;
 } tof_sensor_t;
 
 static i2c_master_bus_handle_t s_bus = NULL;
@@ -444,6 +445,18 @@ esp_err_t tof_pair_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /*
+     * Which module ends up as "left" is decided by the harness, not by
+     * anything in a frame, so a crossed pair looks identical to a correct one
+     * from the outside. Printing the mapping the running image actually holds
+     * is the only way to tell a flash that did not happen from a mapping that
+     * is still wrong.
+     */
+    ESP_LOGI(TAG, "mapping: left LPn=GPIO%d INT=GPIO%d, "
+                  "right LPn=GPIO%d INT=GPIO%d",
+             TOF_LEFT_LPN_GPIO, TOF_LEFT_INT_GPIO,
+             TOF_RIGHT_LPN_GPIO, TOF_RIGHT_INT_GPIO);
+
     esp_err_t result = tof_bus_init();
 
     if (result != ESP_OK) {
@@ -594,6 +607,7 @@ esp_err_t tof_pair_data_ready(tof_sensor_id_t sensor, bool *ready)
     );
 
     if (status != VL53L8CX_STATUS_OK) {
+        s_sensors[sensor].stats.data_ready_errors++;
         return ESP_FAIL;
     }
 
@@ -614,6 +628,7 @@ esp_err_t tof_pair_read(tof_sensor_id_t sensor, tof_zone_data_t *out)
     );
 
     if (status != VL53L8CX_STATUS_OK) {
+        s_sensors[sensor].stats.read_errors++;
         return ESP_FAIL;
     }
 
@@ -633,4 +648,19 @@ esp_err_t tof_pair_read(tof_sensor_id_t sensor, tof_zone_data_t *out)
     }
 
     return ESP_OK;
+}
+
+void tof_pair_get_stats(tof_sensor_id_t sensor, tof_bus_stats_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+
+    if (sensor >= TOF_SENSOR_COUNT) {
+        out->read_errors = 0U;
+        out->data_ready_errors = 0U;
+        return;
+    }
+
+    *out = s_sensors[sensor].stats;
 }

@@ -37,7 +37,7 @@ class StationConfig:
     # --- 카메라 ---
     # 이 PC에는 내장 캠과 BRIO가 함께 있어 인덱스가 섞일 수 있다. 실측(2026-07-22):
     # index 1이 BRIO였음. 장치 구성이 바뀌면 `python -m station.serve --probe`로 재확인.
-    camera_index: int = 1
+    camera_index: int = 0
     frame_width: int = 1920    # 캘리브레이션 기준 해상도 — 바꾸면 fx/fy 무효
     frame_height: int = 1080
     warmup_frames: int = 25    # 자동 노출 안정화 전 프레임은 어둡다 (실측)

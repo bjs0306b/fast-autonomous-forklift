@@ -47,11 +47,11 @@
 #define STEPPER_MOTOR_TASK_PRIORITY       5U
 
 #define STEPPER_MOTOR_START_RATE_SPS      200U
-#define STEPPER_MOTOR_DEFAULT_RATE_SPS    4000U
-#define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  8000U
-#define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  12800U
-#define STEPPER_MOTOR_HOMING_RATE_SPS     1000U
-#define STEPPER_MOTOR_HOMING_ACCEL_SPS2   300U
+#define STEPPER_MOTOR_DEFAULT_RATE_SPS    5000U
+#define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  10000U
+#define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  19200U
+#define STEPPER_MOTOR_HOMING_RATE_SPS     2000U
+#define STEPPER_MOTOR_HOMING_ACCEL_SPS2   600U
 #define STEPPER_MOTOR_HOMING_MAX_STEPS    300000U
 #define STEPPER_MOTOR_HOME_BACKOFF_DELAY_MS 500U
 #define STEPPER_MOTOR_HOME_BACKOFF_STEPS  1600U
@@ -60,7 +60,7 @@
 #define STEPPER_MOTOR_LIMIT_DEBOUNCE_MS   20U
 
 #define STEPPER_MOTOR_MIN_RATE_SPS        20U
-#define STEPPER_MOTOR_MAX_RATE_SPS        5000U
+#define STEPPER_MOTOR_MAX_RATE_SPS        6000U
 #define STEPPER_MOTOR_MAX_ACCEL_SPS2      20000U
 
 /*
@@ -83,10 +83,91 @@
 
 /* Tele-operation safety limits */
 #define TELEOP_WATCHDOG_TIMEOUT_MS      500U
-#define TELEOP_MAX_DRIVE_PERCENT        60
-#define TELEOP_STEERING_CENTER_CDEG     10000U
-#define TELEOP_STEERING_MIN_CDEG        8500U
-#define TELEOP_STEERING_MAX_CDEG        11500U
+/*
+ * !! 60 -> 100 (2026-08-05, S15P11A304-152). **여기는 허용 봉투이지 운전값이
+ *    아니다.** 실제로 쓰는 값은 teleop.yaml 의 max_drive_percent(전진 60 유지) 와
+ *    max_drive_percent_reverse(후진 100) 이고, 그쪽은 재플래시 없이 바꾼다.
+ *
+ *    종전 60 은 "Tele-operation safety limits" 아래에 근거 없이 박혀 있던
+ *    보수값이었다. 실측으로 후진이 전진의 19% 밖에 안 나온다는 것이 드러나
+ *    (60% 3초에 100mm = 0.033 m/s, 전진은 같은 60% 로 0.178 m/s) 후진만
+ *    올릴 수 있게 봉투를 넓혔다.
+ *
+ *    뒷바퀴 조향차는 후진할 때 뒷바퀴가 **앞장서서**(leading) 바닥을 파고들어
+ *    저항이 크다. 전진에서는 끌려오므로(trailing) 훨씬 가볍다. 바닥을 바꿔도
+ *    같은 값이 나와, 바닥이 아니라 구조에서 오는 차이로 확인됐다.
+ *
+ * !! 전진 상한은 **올리지 않는다.** 오늘 실측한 INSERT_SPEED_ACTUAL · 진입 깊이 ·
+ *    조향 중립이 전부 전진 60% 기준이라, 여기를 건드리면 그 값들이 무효가 된다.
+ */
+#define TELEOP_MAX_DRIVE_PERCENT        100
+/*
+ * 조향 원점·범위 — 2026-08-04 실측으로 갱신 (S15P11A304-197).
+ *
+ * CENTER 는 **서보 원점(100도)이 아니라 기구 직진(96도)** 이다. 서보 혼이
+ * 스플라인에 약 4도 틀어져 끼워져 있다. 종전 10000 으로 두면 정지 상태에서
+ * 바퀴가 좌 4도 로 꺾인 채 있고, 상한(11500)이 직진 근처라 **오른쪽으로 꺾을
+ * 여유가 거의 없었다.**
+ *
+ * MIN/MAX 는 종전 8500~11500 (중립 +-15도) 이었는데, 이는 기구 한계를 재서 정한
+ * 값이 아니라 "서보 원점이 곧 직진" 이라는 가정 위의 보수적 초기값이었다
+ * (README: "초기 안전 범위"). 원점이 96도 로 바뀌면서 대칭 가용 범위가 +-11도 로
+ * 줄어 정렬 제어에 부족해 +-30도 로 넓힌다.
+ *
+ * 서보 물리 한계는 SERVO_MIN/MAX_ANGLE_DEG (30~150도) 이므로 66~126 은 그 안이다.
+ *
+ * !! 링키지가 실제로 +-30도 를 못 가면 서보가 스톨한다. 전류·발열이 오르고 기어가
+ *    상할 수 있다. 첫 시험은 반드시 지게차를 들고, 양 끝에서 소리·떨림이 있으면
+ *    즉시 멈추고 이 값을 줄일 것.
+ */
+/*
+ * !! 2026-08-04 오후 재실측: 9600 -> 9400 (S15P11A304-198).
+ *
+ *    197 의 9600 은 차를 세워두고 **눈으로** 바퀴가 곧은지 본 값이었다. 실제로
+ *    주행시켜 재보니 3.0초(535mm)에 **왼쪽으로 40mm** 밀렸다 - 뒷바퀴가 약
+ *    2.31도 틀어져 있었다는 뜻이다. 눈대중으로는 2도를 못 본다.
+ *
+ *      중립   전진거리   좌우편차
+ *      9600    535mm      40mm 왼쪽
+ *      9400    565mm       9mm 왼쪽
+ *      9350    525mm       7mm 왼쪽   (9400 과 사실상 같음 - 노이즈 바닥)
+ *
+ *    !! 편차는 거리의 **제곱**으로 커진다. 짧게 재면 안 보인다 - 같은 날 315mm
+ *       런에서는 8mm 오른쪽이 나와 "계통 편향 없음" 으로 오판했다.
+ *
+ *    여기 값은 **부팅 직후와 워치독 정지 시의 중립 자세**에만 쓰인다. 주행 중
+ *    조향각은 브리지가 매 프레임 명시적으로 보내므로, 재플래시 전에도 주행
+ *    자체는 teleop.yaml 값(9400)으로 이미 맞게 돈다.
+ */
+/*
+ * !! 2026-08-05 (S15P11A304-152). 두 가지가 같이 바뀌었다.
+ *
+ * 1) 중립 9400 -> 9000. SERVO_MIN/MAX_PULSE_US 를 고치면서 같은 cdeg 가 다른 서보
+ *    위치를 뜻하게 됐다. 실주행 재실측:
+ *
+ *      중립   전진거리   좌우편차   뒷바퀴각
+ *      9400    580mm      50mm 왼쪽   2.45도   <- 옛 매핑의 값
+ *      9200    562mm      18mm 왼쪽   0.94도
+ *      9080    605mm      12mm 왼쪽   0.54도
+ *      9000    630mm       8mm 왼쪽   0.33도   <- 지금
+ *      8960    635mm      28mm 왼쪽   1.15도   <- 지나쳤다
+ *
+ * 2) MIN/MAX 를 6600~12600 -> 4000~14000 으로 넓혔다. **여기는 안전 봉투이지
+ *    운전 범위가 아니다.** 실제로 쓰는 범위는 teleop.yaml 의
+ *    steering_min/max_cdeg 이고, 그쪽은 재플래시 없이 바꿀 수 있다. 종전에는 두
+ *    값이 붙어 있어 조향 범위를 넓힐 때마다 플래시가 필요했다.
+ *
+ *    4000~14000 = 서보 40~140도 = 중립 9000 기준 +-50도. 펄스로는 944~2056us 라
+ *    MG996R 정격(500~2500) 안이고, SERVO_MIN/MAX_ANGLE_DEG(30~150) 안이다.
+ *
+ * !! **링키지가 +-50도 를 실제로 가는지는 아직 안 쟀다.** 못 가면 서보가 스톱에
+ *    박혀 스톨한다(MG996R 스톨 전류 약 2.5A - 발열·기어 손상). yaml 범위를
+ *    **한 단계씩** 넓히며 양 끝에서 소리·떨림을 확인할 것. 봉투를 넓힌 것은
+ *    "여기까지 허용" 이지 "여기까지 쓰라" 가 아니다.
+ */
+#define TELEOP_STEERING_CENTER_CDEG     9000U
+#define TELEOP_STEERING_MIN_CDEG        4000U
+#define TELEOP_STEERING_MAX_CDEG        14000U
 
 /* I2C */
 #define I2C_SDA_GPIO                    GPIO_NUM_8
@@ -102,9 +183,36 @@
 #define SERVO_MIN_ANGLE_DEG             30.0f
 #define SERVO_MAX_ANGLE_DEG             150.0f
 
-#define SERVO_MIN_PULSE_US              1000U
+/*
+ * ⚠️ 1000~2000 → 500~2500 (2026-08-05, S15P11A304-152).
+ *
+ * servo_set_angle() 은 각도를 180 으로 정규화해 이 두 값 사이에 매핑한다:
+ *
+ *     pulse = MIN + (angle / 180) * (MAX - MIN)
+ *
+ * 즉 이 범위가 **180도에 해당하는 펄스 폭**이어야 식이 성립한다. MG996R 은
+ * 500~2500us 가 180도이고, 1000~2000us 로는 90~120도밖에 안 돈다. 그래서 종전
+ * 값에서는 코드가 믿는 각도의 **절반만 실제로 돌았다.**
+ *
+ * 실측 (2026-08-05):
+ *
+ *     중립 9400cdeg = 94도  →  1522us
+ *     최대 12200    = 122도 →  1678us      차이 156us
+ *
+ *   156us 는 MG996R 기준 실제 **14도** 다. 코드는 28도로 알고 있었다.
+ *   그 결과가 뒷바퀴 실측 8도, 실효 회전반경 1200~1450mm(설계값 537mm 의 2~3배),
+ *   명령 대비 실제 회전 21~26% 다. tan(8)/tan(28)=25% 로 세 숫자가 맞물린다.
+ *
+ * 고친 뒤 같은 명령이 1544~1856us(312us)가 되어 가동폭이 두 배가 된다.
+ * ⚠️ **극단값(500·2500)은 쓰지 않는다** — 명령 구간이 1544~1856 이라 종전 창
+ *    (1000~2000) 안에 그대로 들어온다. 스톱에 박을 위험이 없다.
+ *
+ * ⚠️ **재플래시 후 직진 중립을 다시 잡아야 한다.** 9400 은 옛 매핑에서 실측한
+ *    값이고, 새 매핑에서 같은 펄스(1522us)를 내는 것은 **9200** 근처다.
+ */
+#define SERVO_MIN_PULSE_US              500U
 #define SERVO_CENTER_PULSE_US           1500U
-#define SERVO_MAX_PULSE_US              2000U
+#define SERVO_MAX_PULSE_US              2500U
 
 /* Waveshare Motor Driver HAT */
 #define MOTOR_HAT_PCA9685_ADDRESS       0x40
@@ -177,10 +285,24 @@
  *
  *   MOSI_SDA   A4 / GPIO11    pull-up to 3V3 (one pair for the whole bus)
  *   MCLK_SCL   A5 / GPIO12    pull-up to 3V3
- *   LPn        A6 / GPIO13    left  - gates the I2C comms block
- *   LPn        A7 / GPIO14    right
- *   INT        A0 / GPIO1     left
- *   INT        A1 / GPIO2     right
+ *   LPn        A6 / GPIO13    right - gates the I2C comms block
+ *   LPn        A7 / GPIO14    left
+ *   INT        A0 / GPIO1     right
+ *   INT        A1 / GPIO2     left
+ *
+ * The harness crosses: the left module lands on A7/A1, so the defines below
+ * are crossed relative to the pin names. Confirmed 2026-08-06 by covering each
+ * module in turn with tools/tof_identify.py --serial, against a boot log that
+ * named the image being tested.
+ *
+ * Nothing in a frame says where a sensor sits -- the index comes from whichever
+ * LPn is raised first -- so a crossed harness mirrors the topic, frame, static
+ * TF and mask list together, and a mirrored pair cannot be put right by a
+ * transform. Two things make this checkable: the mapping line the firmware
+ * logs at boot, and covering BOTH modules in turn. Neither alone is enough --
+ * without the log a wrong mapping looks like a flash that never happened, and
+ * a single-direction cover test was misread three times before both were
+ * used together.
  *   SPI_I2C_N  GND            selects I2C mode
  *   NCS        3V3            SPI deselected
  *   MISO       unconnected    SPI only
@@ -192,10 +314,10 @@
 #define TOF_I2C_PORT                    I2C_NUM_1
 #define TOF_I2C_SDA_GPIO                GPIO_NUM_11
 #define TOF_I2C_SCL_GPIO                GPIO_NUM_12
-#define TOF_LEFT_LPN_GPIO               GPIO_NUM_13
-#define TOF_RIGHT_LPN_GPIO              GPIO_NUM_14
-#define TOF_LEFT_INT_GPIO               GPIO_NUM_1
-#define TOF_RIGHT_INT_GPIO              GPIO_NUM_2
+#define TOF_LEFT_LPN_GPIO               GPIO_NUM_14
+#define TOF_RIGHT_LPN_GPIO              GPIO_NUM_13
+#define TOF_LEFT_INT_GPIO               GPIO_NUM_2
+#define TOF_RIGHT_INT_GPIO              GPIO_NUM_1
 #define TOF_PROBE_TIMEOUT_MS            50
 
 /*
@@ -258,5 +380,46 @@
 #define TELEMETRY_USB_RX_BUFFER_SIZE    256U
 #define TELEMETRY_FRAME_MAX_LENGTH      384U
 #define TELEMETRY_STATUS_PERIOD_MS      1000U
+
+/*
+ * Wheel encoder on the drive motor (JGA25-370 with quadrature hall sensors).
+ *
+ *   Signal 1   D1 / GPIO43     channel A
+ *   Signal 2   D0 / GPIO44     channel B
+ *
+ * D0 and D1 carry UART0 on a stock Arduino Nano ESP32, but the console here is
+ * on USB Serial/JTAG (CONFIG_ESP_CONSOLE_UART_NUM=-1) and the Jetson link is
+ * UART1 on GPIO17/18, so both pins are free. Neither is a strapping pin.
+ *
+ * Counts per wheel revolution is NOT taken from the datasheet. The gear ratio
+ * varies across JGA25-370 variants sold under the same name, and a wrong ratio
+ * scales every distance the encoder reports without ever looking wrong. Turn
+ * the wheel a whole number of revolutions and read the count instead --
+ * tools/encoder_scale_check.py does this -- and put the answer in the ROS
+ * bridge, which is where counts become metres.
+ */
+#define ENCODER_A_GPIO                  GPIO_NUM_43     /* D1 */
+#define ENCODER_B_GPIO                  GPIO_NUM_44     /* D0 */
+
+/*
+ * Half the 16-bit counter range. Wraps are folded into a 32-bit accumulator,
+ * so this only sets how often that fold happens, not how far the count can go.
+ */
+#define ENCODER_PCNT_LIMIT              16000
+
+/*
+ * Motor brushes and the stepper put fast spikes on nearby wiring. 1 us is far
+ * longer than any of those and far shorter than the ~140 us between edges at
+ * full speed, so it cannot swallow a real transition.
+ */
+#define ENCODER_GLITCH_FILTER_NS        1000
+
+#define ENCODER_PUBLISH_RATE_HZ         50U
+#define ENCODER_TASK_STACK_SIZE         3072
+#define ENCODER_TASK_PRIORITY           9
+#define ENCODER_ERROR_LOG_INTERVAL      100U
+
+/* Four samples of slack at 50 Hz; the count is cumulative so depth is cheap */
+#define TELEMETRY_ENCODER_QUEUE_LENGTH  4
 
 #endif
