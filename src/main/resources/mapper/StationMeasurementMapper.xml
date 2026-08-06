@@ -8,6 +8,7 @@
         <result property="sessionId" column="session_id"/>
         <result property="status" column="status"/>
         <result property="cargoHeight" column="cargo_height"/>
+        <result property="cargoWidth" column="cargo_width"/>
         <result property="tippingLevel" column="tipping_level"/>
         <result property="overhangRatio" column="overhang_ratio"/>
         <result property="createdAt" column="created_at"/>
@@ -15,15 +16,15 @@
 
     <sql id="columns">
         sequence_no, measurement_id, session_id, status,
-        cargo_height, tipping_level, overhang_ratio, created_at
+        cargo_height, cargo_width, tipping_level, overhang_ratio, created_at
     </sql>
 
     <insert id="insert" parameterType="com.fast.backend.station.domain.StationMeasurement"
             useGeneratedKeys="true" keyProperty="id" keyColumn="sequence_no">
         INSERT INTO station_measurement
-            (measurement_id, session_id, status, cargo_height, tipping_level, overhang_ratio, created_at)
+            (measurement_id, session_id, status, cargo_height, cargo_width, tipping_level, overhang_ratio, created_at)
         VALUES
-            (#{measurementId}, #{sessionId}, #{status}, #{cargoHeight}, #{tippingLevel}, #{overhangRatio}, #{createdAt})
+            (#{measurementId}, #{sessionId}, #{status}, #{cargoHeight}, #{cargoWidth}, #{tippingLevel}, #{overhangRatio}, #{createdAt})
     </insert>
 
     <select id="existsByMeasurementId" resultType="boolean">

@@ -25,7 +25,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record PlacementProperties(
         Double heightClearance,
         Double palletHeightM,
-        Double maxOverhangRatioExclusive
+        Double maxOverhangRatioExclusive,
+        Double widthClearance
 ) {
 
     public static final double DEFAULT_HEIGHT_CLEARANCE_M = 0.25;
@@ -35,6 +36,15 @@ public record PlacementProperties(
 
     /** 돌출률 상한 기본값(무차원, 경계 미포함). `docs/backend-api/optimal-placement.md` 7.1 근거. */
     public static final double DEFAULT_MAX_OVERHANG_RATIO_EXCLUSIVE = 0.05;
+
+    /**
+     * 폭 여유(m). 화물 폭이 슬롯 가용 폭보다 이만큼은 작아야 한다.
+     *
+     * <p>높이 여유({@link #DEFAULT_HEIGHT_CLEARANCE_M} 0.25m)보다 작게 잡았다 — 세로는 포크를
+     * 올리다 부딪히면 화물이 떨어지지만, 가로는 지게차가 정면으로 밀어 넣는 방향이라
+     * 접촉 위험이 낮다. 실측으로 조정할 것.
+     */
+    public static final double DEFAULT_WIDTH_CLEARANCE_M = 0.10;
 
     /**
      * 돌출률 상한이 넘을 수 없는 값. 1.0은 화물이 파렛트 폭만큼 통째로 벗어난 상태라 상한으로는
@@ -66,6 +76,14 @@ public record PlacementProperties(
             throw new IllegalArgumentException(
                     "storage.placement.max-overhang-ratio-exclusive must be a finite value in (0, "
                             + MAX_SANE_OVERHANG_LIMIT + "]: " + maxOverhangRatioExclusive);
+        }
+        if (widthClearance == null) {
+            widthClearance = DEFAULT_WIDTH_CLEARANCE_M;
+        }
+        if (!Double.isFinite(widthClearance) || widthClearance < 0) {
+            throw new IllegalArgumentException(
+                    "storage.placement.width-clearance must be a finite value greater than or equal to 0: "
+                            + widthClearance);
         }
     }
 }

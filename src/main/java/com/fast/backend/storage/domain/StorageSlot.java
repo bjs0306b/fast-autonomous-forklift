@@ -4,6 +4,7 @@ package com.fast.backend.storage.domain;
 public class StorageSlot {
     private String slotCode;
     private double usableHeight;
+    private Double usableWidth;
     private double forkHeight;
     private double destinationX;
     private double destinationY;
@@ -15,6 +16,8 @@ public class StorageSlot {
     public String getSlotCode() { return slotCode; }
     public void setSlotCode(String slotCode) { this.slotCode = slotCode; }
     public double getUsableHeight() { return usableHeight; }
+    public Double getUsableWidth() { return usableWidth; }
+    public void setUsableWidth(Double usableWidth) { this.usableWidth = usableWidth; }
     public void setUsableHeight(double usableHeight) { this.usableHeight = usableHeight; }
     public double getForkHeight() { return forkHeight; }
     public void setForkHeight(double forkHeight) { this.forkHeight = forkHeight; }

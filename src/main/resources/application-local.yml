@@ -57,12 +57,21 @@ vehicle:
   auto-registration-enabled: ${VEHICLE_AUTO_REGISTRATION_ENABLED:true}
   offline-check-enabled: ${VEHICLE_OFFLINE_CHECK_ENABLED:false}
   offline-timeout-seconds: ${VEHICLE_OFFLINE_TIMEOUT_SECONDS:10}
-  # 외부 시스템 차량 ID → DB vehicle_id 별칭. 현재 Isaac Sim 은 sim02/sim03 로 발행한다.
-  # 키 비교는 대소문자를 무시한다. DB 의 vehicle_id 를 바꾸지 않고 백엔드 경계에서만 정규화한다.
+  # 외부 시스템 차량 ID → DB vehicle_id 별칭. 키 비교는 대소문자를 무시한다.
+  # DB 의 vehicle_id 를 바꾸지 않고 백엔드 경계에서만 정규화한다.
+  #
+  # 현재 계약(F팀 backend-mqtt-guide, 2026-08-05):
+  #   Isaac 프림 SIM_F02 → sim02 · SIM_F03 → sim03 · 실물 오린카 → fk01
+  #   ⚠️ sim01 은 그 개편 전 이름이다. 남겨 두는 이유는 구 발행자가 아직 있을 수 있어서이고,
+  #      새로 쓰지 말 것.
+  #
+  # ⚠️ 별칭이 없으면 auto-registration 이 그 원본 ID(예: fk01)로 **별개 차량을 새로 만든다**.
+  #    관제 화면에 같은 차량이 두 대로 보이게 되므로 새 ID 가 생기면 여기에 먼저 추가한다.
   id-aliases:
     sim01: SIM-F01
     sim02: SIM-F02
     sim03: SIM-F03
+    fk01: REAL-F01
   status-test-api:
     enabled: ${VEHICLE_STATUS_TEST_API_ENABLED:false}
 

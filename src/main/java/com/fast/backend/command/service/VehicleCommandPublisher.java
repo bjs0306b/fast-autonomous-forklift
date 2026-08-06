@@ -93,7 +93,9 @@ public class VehicleCommandPublisher {
         String isaacCommand = switch (message.command()) {
             case STOP -> "HOLD";
             case EMERGENCY_STOP -> "ESTOP";
-            case RESET_ESTOP -> "RESUME";
+            // 두 명령이 같은 "RESUME" 으로 간다. Isaac 제어 계약에는 "정지 해제" 가 하나뿐이라
+            // 비상정지 해제(RESET_ESTOP)와 교통 관제 재개(RESUME)를 구분하지 않는다.
+            case RESET_ESTOP, RESUME -> "RESUME";
             default -> null;
         };
         if (isaacCommand == null) {
@@ -101,7 +103,7 @@ public class VehicleCommandPublisher {
         }
         String externalVehicleId = externalVehicleId(message.vehicleId());
         mqttPublisher.publish(
-                new IsaacVehicleControlMessage(isaacCommand),
+                IsaacVehicleControlMessage.now(isaacCommand),
                 mqttTopics.isaacVehicleControl(externalVehicleId), COMMAND_QOS, COMMAND_RETAINED);
     }
 
@@ -119,7 +121,7 @@ public class VehicleCommandPublisher {
     /** 전체 비상정지는 Isaac이 명시한 broadcast 토픽에도 즉시 한 번 발행한다. */
     public void publishIsaacGlobalEmergencyStop() {
         mqttPublisher.publish(
-                new IsaacVehicleControlMessage("ESTOP"),
+                IsaacVehicleControlMessage.now("ESTOP"),
                 mqttTopics.isaacGlobalControl(), COMMAND_QOS, COMMAND_RETAINED);
     }
 

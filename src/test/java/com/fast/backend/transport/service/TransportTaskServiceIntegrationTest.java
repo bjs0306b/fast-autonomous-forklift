@@ -119,7 +119,7 @@ class TransportTaskServiceIntegrationTest {
         assertThat(measuring.getMeasurementSessionId()).isEqualTo(session.getSessionId());
         measurementService.create(new com.fast.backend.station.dto.StationMeasurementCreateRequest(
                 session.getSessionId(), "MEASUREMENT-TRANSPORT", "ok",
-                0.50, "safe", 0.02));
+                0.50, null, "safe", 0.02));
 
         TransportTask completed = taskMapper.findById(task.getId()).orElseThrow();
         assertThat(completed.getStatus()).isEqualTo(TaskStatus.PICKING_UP);

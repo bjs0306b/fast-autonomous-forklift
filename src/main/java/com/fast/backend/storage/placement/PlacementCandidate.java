@@ -6,6 +6,11 @@ import com.fast.backend.storage.domain.StorageSlotStatus;
 public record PlacementCandidate(
         String slotCode,
         double usableHeight,
+        /**
+         * 수평 가용 폭(m). {@code null} 이면 <b>폭 제약을 모른다</b>는 뜻이며 폭 검사를 건너뛴다 —
+         * 컬럼이 없던 시절에 등록된 슬롯이 그렇다. 0 으로 두면 모든 화물이 탈락하므로 쓰면 안 된다.
+         */
+        Double usableWidth,
         double forkHeight,
         double destinationX,
         double destinationY,

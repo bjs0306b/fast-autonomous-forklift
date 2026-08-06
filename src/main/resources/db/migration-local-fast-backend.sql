@@ -437,6 +437,25 @@ CREATE TABLE IF NOT EXISTS traffic_control_event (
     INDEX idx_traffic_event_occurred (occurred_at)
 );
 
+-- 적재 위치 수평 가용 폭 (화물 폭 검사용)
+-- NULL 허용이라 기존 행은 그대로 두면 되고, 폭을 아는 슬롯만 채우면 된다.
+SET @sql = (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE storage_slot ADD COLUMN usable_width DOUBLE NULL COMMENT ''수평 가용 폭(m). NULL 이면 폭 제약 없음''',
+        'SELECT ''SKIP: storage_slot.usable_width exists'' AS message')
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'storage_slot' AND COLUMN_NAME = 'usable_width');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 화물 폭 (적재 위치 폭 검사용). 깊이는 정면 카메라로 측정 불가라 컬럼을 두지 않는다.
+SET @sql = (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE station_measurement ADD COLUMN cargo_width DOUBLE NULL COMMENT ''화물 폭(m). 미전송 시 NULL''',
+        'SELECT ''SKIP: station_measurement.cargo_width exists'' AS message')
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'station_measurement' AND COLUMN_NAME = 'cargo_width');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 SELECT 'vehicles' AS check_type, vehicle_id, name, active FROM vehicle ORDER BY vehicle_id;
 SELECT 'station_state' AS check_type, singleton_id, active_session_id, acquired_at FROM station_state;
 

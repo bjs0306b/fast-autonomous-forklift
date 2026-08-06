@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.within;
 class PlacementServiceTest {
 
     private final PlacementService service =
-            new PlacementService(new PlacementProperties(0.25, 0.12, 0.05));
+            new PlacementService(new PlacementProperties(0.25, 0.12, 0.05, 0.10));
 
     @Test
     void recommend_addsPalletAndClearanceExactlyOnce() {
@@ -64,7 +64,73 @@ class PlacementServiceTest {
 
     private PlacementCandidate candidate(
             String slotCode, double usableHeight, Double travelDistance, StorageSlotStatus status) {
+        return candidate(slotCode, usableHeight, null, travelDistance, status);
+    }
+
+    private PlacementCandidate candidate(
+            String slotCode, double usableHeight, Double usableWidth,
+            Double travelDistance, StorageSlotStatus status) {
         return new PlacementCandidate(
-                slotCode, usableHeight, 0.40, 1.0, 2.0, 180.0, travelDistance, status);
+                slotCode, usableHeight, usableWidth, 0.40, 1.0, 2.0, 180.0, travelDistance, status);
+    }
+
+    // ── 폭 검사 ────────────────────────────────────────────────────────────────
+    // 깊이(depth)는 정면 카메라로 측정할 수 없어(pipeline.py 가 항상 null) 검사 대상이 아니다.
+    // 그래서 회전(가로↔세로 교환) 판정도 하지 않는다 — 두 축을 다 알아야 성립한다.
+
+    @Test
+    void 폭이_모자라는_슬롯은_제외된다() {
+        // 폭 여유 기본값 0.10 → 필요 폭 = 0.80 + 0.10 = 0.90
+        List<PlacementCandidate> candidates = List.of(
+                candidate("A1", 2.0, 0.85, null, StorageSlotStatus.EMPTY),   // 폭 부족
+                candidate("A2", 2.0, 1.20, null, StorageSlotStatus.EMPTY));  // 통과
+
+        PlacementRecommendation result = service.recommend(0.5, 0.80, candidates);
+
+        assertThat(result.slotCode()).isEqualTo("A2");
+    }
+
+    @Test
+    void 슬롯_폭을_모르면_폭_검사를_건너뛴다() {
+        // usableWidth=null 은 "폭 제약을 모른다"는 뜻이다. 컬럼 도입 전 슬롯을 전부
+        // 못 쓰게 만들면 안 되므로 통과시킨다.
+        List<PlacementCandidate> candidates = List.of(
+                candidate("A1", 2.0, null, null, StorageSlotStatus.EMPTY));
+
+        PlacementRecommendation result = service.recommend(0.5, 99.0, candidates);
+
+        assertThat(result.slotCode()).isEqualTo("A1");
+    }
+
+    @Test
+    void 화물_폭을_모르면_높이로만_고른다() {
+        List<PlacementCandidate> candidates = List.of(
+                candidate("A1", 2.0, 0.10, null, StorageSlotStatus.EMPTY));
+
+        PlacementRecommendation result = service.recommend(0.5, null, candidates);
+
+        assertThat(result.slotCode()).isEqualTo("A1");
+    }
+
+    @Test
+    void 폭이_맞는_슬롯이_하나도_없으면_실패한다() {
+        List<PlacementCandidate> candidates = List.of(
+                candidate("A1", 2.0, 0.50, null, StorageSlotStatus.EMPTY));
+
+        assertThatThrownBy(() -> service.recommend(0.5, 1.00, candidates))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.NO_AVAILABLE_STORAGE_SLOT);
+    }
+
+    @Test
+    void 화물_폭이_0이하면_거부한다() {
+        List<PlacementCandidate> candidates = List.of(
+                candidate("A1", 2.0, 1.0, null, StorageSlotStatus.EMPTY));
+
+        assertThatThrownBy(() -> service.recommend(0.5, 0.0, candidates))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.CARGO_DIMENSION_INVALID);
     }
 }

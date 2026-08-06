@@ -19,6 +19,7 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +31,20 @@ class VehicleCommandPublisherIsaacControlTest {
     private final VehicleIdAliasResolver aliasResolver = mock(VehicleIdAliasResolver.class);
     private final VehicleCommandPublisher publisher = new VehicleCommandPublisher(
             mqttPublisher, mqttTopics, aliasResolver);
+
+
+    /**
+     * Isaac control 발행을 검증한다. {@code ts} 는 발행 시각이라 값을 고정 비교할 수 없으므로,
+     * <b>0 이 아닌 값이 채워졌는지</b>만 본다 — 규격이 요구하는 필드가 빠지면 수신 측이 명령을
+     * 조용히 무시하고, 그러면 발행은 성공한 것처럼 보인다(2026-08-06 실제 누락 발견).
+     */
+    private void verifyIsaacControl(String expectedCommand, String expectedTopic) {
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(mqttPublisher).publish(payload.capture(), eq(expectedTopic), eq(1), eq(false));
+        IsaacVehicleControlMessage message = (IsaacVehicleControlMessage) payload.getValue();
+        assertThat(message.command()).isEqualTo(expectedCommand);
+        assertThat(message.ts()).isGreaterThan(0L);
+    }
 
     @Test
     void emergencyStopIsAlsoPublishedToIsaacControlUsingExternalVehicleId() {
@@ -45,11 +60,7 @@ class VehicleCommandPublisherIsaacControlTest {
         publisher.publish(message);
 
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(mqttPublisher).publish(
-                payload.capture(), org.mockito.ArgumentMatchers.eq("fast/v1/vehicle/sim02/control"),
-                org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq(false));
-        assertThat(payload.getValue()).isEqualTo(
-                new IsaacVehicleControlMessage("ESTOP"));
+        verifyIsaacControl("ESTOP", "fast/v1/vehicle/sim02/control");
     }
 
     @Test
@@ -65,9 +76,30 @@ class VehicleCommandPublisherIsaacControlTest {
 
         publisher.publish(message);
 
-        verify(mqttPublisher).publish(
-                new IsaacVehicleControlMessage("HOLD"),
-                "fast/v1/vehicle/sim03/control", 1, false);
+        verifyIsaacControl("HOLD", "fast/v1/vehicle/sim03/control");
+    }
+
+    /**
+     * 교통 관제(FR-502-1a)가 내는 RESUME 도 Isaac 제어 계약으로 나가야 한다.
+     *
+     * <p>회귀 방지: RESUME 을 VehicleCommandType 에 추가하면서 이 변환표를 갱신하지 않아,
+     * STOP 은 HOLD 로 나가는데 RESUME 은 default -> null 로 빠져 <b>발행조차 되지 않았다</b>.
+     * 그러면 차량이 멈춘 뒤 영영 다시 가지 않는다(2026-08-06 발견).
+     */
+    @Test
+    void trafficResumeMapsToIsaacResume() {
+        OffsetDateTime issuedAt = OffsetDateTime.now();
+        VehicleCommandMessage message = new VehicleCommandMessage(
+                "cmd-4", "sim03", VehicleCommandTargetSystem.EMBEDDED,
+                VehicleCommandCategory.SAFETY, VehicleCommandType.RESUME,
+                VehicleCommandPayload.empty(), issuedAt);
+        when(mqttTopics.vehicleCommand("sim03")).thenReturn("forklift/sim03/command");
+        when(aliasResolver.resolveExternal("sim03")).thenReturn(Optional.of("sim03"));
+        when(mqttTopics.isaacVehicleControl("sim03")).thenReturn("fast/v1/vehicle/sim03/control");
+
+        publisher.publish(message);
+
+        verifyIsaacControl("RESUME", "fast/v1/vehicle/sim03/control");
     }
 
     @Test
