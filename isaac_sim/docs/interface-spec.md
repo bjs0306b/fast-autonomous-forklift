@@ -25,7 +25,7 @@
 | 항목 | 규칙 |
 |---|---|
 | MQTT 토픽 | `fast/v1/vehicle/{vehicleId}/...` |
-| 차량 ID | `fk01` (실물), `sim01`~`simNN` (시뮬) |
+| 차량 ID | `fk01` (실물), `sim02`(SIM_F02), `sim03`(SIM_F03) |
 | 길이 | m |
 | 속도 | m/s |
 | 각도 | rad, −π~π, x축 기준 반시계(CCW +) |
@@ -53,7 +53,7 @@
 
 ```json
 {
-  "vehicleId": "sim01",
+  "vehicleId": "sim02",
   "ts": 1784568107610,
   "pose":     { "x": 12.34, "y": 5.67, "yaw": 1.5708 },
   "velocity": { "linear": 0.85, "angular": 0.12 },
@@ -74,7 +74,7 @@
 
 ```json
 {
-  "vehicleId": "sim01",
+  "vehicleId": "sim02",
   "ts": 1784568107610,
   "taskId": "T-0042",
   "waypoints": [ {"x":12.3,"y":5.6}, {"x":15.0,"y":5.6}, {"x":15.0,"y":9.2} ],
@@ -90,7 +90,7 @@
 
 ```json
 {
-  "vehicleId": "sim01",
+  "vehicleId": "sim02",
   "ts": 1784568107610,
   "type": "OBSTACLE_DETECTED",
   "severity": "WARN",
@@ -190,7 +190,7 @@
 ## 7. 차량 내부 ROS2 토픽 (C ↔ F 공통)
 
 차량 내부에서만 사용한다. **MQTT로 나가지 않는다.**
-네임스페이스: `/fk01/...`, `/sim01/...`
+네임스페이스: `/fk01/...`, `/sim02/...`
 
 | 토픽 | 타입 | 방향 |
 |---|---|---|

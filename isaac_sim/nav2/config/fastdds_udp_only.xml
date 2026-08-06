@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  FastDDS 를 UDP 전용으로 돌린다 (공유메모리 전송 끄기).
+
+  왜 필요한가:
+    프로세스를 강제 종료(pkill -9)하면 /dev/shm 의 fastrtps_* 세그먼트가
+    정리되지 않고 남는다. 수백 개가 쌓이면 새 포트를 열지 못해
+
+        RTPS_TRANSPORT_SHM Error: open_and_lock_file failed
+
+    가 뜨고, 발행이 블로킹된다. Isaac 은 /clock 과 TF 를 앱 메인 스레드에서
+    매 프레임 발행하므로, 그 쓰기가 막히면 Isaac 창 전체가 멈춘다
+    (GPU 사용률 0% 인 채로 "not responding").
+
+  UDP 로만 돌리면 이 문제가 원천적으로 사라진다. 같은 PC 안 통신은 루프백을
+  타므로 속도 차이는 이 규모에서 문제되지 않고, 오히려 큰 메시지(costmap)를
+  외부 도구(ros2 topic echo)로 못 읽던 문제도 함께 해결된다.
+
+  사용: 환경변수로 지정한다.
+      export FASTRTPS_DEFAULT_PROFILES_FILE=/home/ubuntu/forklift_ws/nav2/config/fastdds_udp_only.xml
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_only</transport_id>
+        <type>UDPv4</type>
+        <!-- 큰 메시지(costmap 240KB)도 무리 없이 넘기도록 버퍼를 넉넉히 -->
+        <sendBufferSize>2097152</sendBufferSize>
+        <receiveBufferSize>2097152</receiveBufferSize>
+        <maxMessageSize>65500</maxMessageSize>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="udp_only_participant" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_only</transport_id>
+        </userTransports>
+        <!-- 기본 전송(공유메모리 포함)을 쓰지 않는다 -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

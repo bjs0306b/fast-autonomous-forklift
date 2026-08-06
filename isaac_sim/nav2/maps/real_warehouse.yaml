@@ -1,0 +1,15 @@
+# 실물(오린카)용 맵 — 시뮬과 같은 그림을 1/10 눈금으로 읽는다.
+#
+# sim_warehouse.pgm 은 400 x 600 픽셀이다. resolution 만 바꾸면 같은 배치가
+# 다른 크기로 해석된다.
+#     0.05  m/px  ->  20 x 30 m  (시뮬, sim_warehouse.yaml)
+#     0.005 m/px  ->   2 x  3 m  (실물, 이 파일)
+#
+# 따라서 실물 세트장은 2.00 x 3.00 m 로, 시뮬과 같은 비율로 지으면 된다.
+# 벽·랙 위치가 어긋나면 오린카의 라이다 정합(AMCL)이 실패한다.
+image: sim_warehouse.pgm
+resolution: 0.005
+origin: [0.0, 0.0, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

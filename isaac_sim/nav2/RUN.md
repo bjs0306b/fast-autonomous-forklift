@@ -14,25 +14,6 @@ pkill -9 -f 'controller_server|planner_server|bt_navigator|behavior_server|smoot
 
 ---
 
-## 0-2. 🔴 ROS_DOMAIN_ID 확인 — 시뮬은 `0`, 실물은 `100`
-
-시뮬은 기본 도메인 `0` 그대로 두면 된다. **다만 젯슨(실물)이 같은 네트워크에 있으면
-`100` 인지 확인할 것.**
-
-ROS2 는 같은 네트워크·같은 도메인이면 노드와 토픽을 **자동으로 공유한다.** 2026-08-04 에
-실제로 겪었다 — 팀원 PC 의 Isaac Sim 노드가 젯슨에서 그대로 보였고, `/cmd_vel` 구독자가
-**2개**(젯슨 UART 브리지 + 시뮬 `kinematic_fleet`)가 됐다. **시뮬 차량이 실물 명령을
-받고, 실물이 시뮬 명령을 받는다.**
-
-```bash
-echo $ROS_DOMAIN_ID          # 시뮬 터미널: 비어 있거나 0 이면 정상
-ros2 topic info /cmd_vel -v  # 내 노드 말고 다른 게 붙어 있는지 본다
-```
-
-근거·설정 방법은 `docs/deploy/ros-domain.md`.
-
----
-
 ## 1. [터미널 1] Isaac Sim 실행
 
 ⚠️ **ROS 를 source 하지 않은 깨끗한 새 터미널**에서 실행할 것.

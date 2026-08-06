@@ -1,3 +1,31 @@
+# 실물 오린카용 Nav2 설정 — nav2_sim.yaml 을 1/10 로 환산한 것.
+#
+# 시뮬은 실물의 10배 스케일이라 길이 단위를 전부 나눠야 한다. 그대로 쓰면
+# inflation 이 0.4 m(실물 통로 0.82 m 의 절반)라 통로가 통째로 막힌다.
+#
+# 환산한 것       : footprint, costmap resolution, inflation, goal tolerance,
+#                   속도, lookahead, 라이다 사거리, 최소 회전반경
+# 그대로 둔 것    : 각도(yaw tolerance, max_steer), 주파수, cost_scaling_factor,
+#                   transform_tolerance
+#
+# 맵은 maps/real_warehouse.yaml (같은 pgm, resolution 0.005 -> 2 x 3 m).
+#
+# ⚠️ 반드시 맞출 것 — 초기 위치 (amcl: initial_pose)
+#   AMCL 은 "대충 여기쯤" 이라는 첫 추정이 있어야 파티클을 뿌린다. 없으면
+#   맵 어디에 있는지 몰라 정합에 실패한다. 아래 값은 순환로 모서리 C0
+#   (실물 1.55, 0.40) 로 넣어 뒀다.
+#   ★ 실물 차량을 전원 켤 때 반드시 그 자리, 그 방향으로 놓아야 한다.
+#     다른 자리에서 시작하려면 이 값을 그 좌표로 바꾸거나,
+#     /initialpose 토픽으로 알려주거나, RViz 의 2D Pose Estimate 를 쓴다.
+#
+# ⚠️ 확인 필요 — 라이다 최소 측정거리
+#   obstacle_min_range 를 0.25 로 뒀지만, 실제 라이다의 range_min 이 그보다
+#   크면 그 안쪽 벽이 안 읽혀 AMCL 정합이 깨진다. 라이다 사양을 확인하고
+#   range_min 보다 크게 잡을 것.
+#
+# ⚠️ 확인 필요 — 차량 제원
+#   footprint 0.38 x 0.19 m, 휠베이스 0.14 m, 최대조향 60도, 최소회전반경
+#   0.081 m 은 시뮬 값의 1/10 이다. 실측하면 그 값으로 바꿀 것.
 # Nav2 params for the simulated forklift in the FULL-SIZE NVIDIA warehouse.
 #
 # Scale note: this scene is real size (warehouse ~20x30 m, forklift ~2.6 m,
@@ -5,7 +33,7 @@
 # the miniature (0.16 m) values here or the robot mis-judges its own size and
 # clips walls.
 #
-# Frames come from kinematic_vehicle.py: SIM_F02_base_link / SIM_F02_odom, and
+# Frames come from kinematic_vehicle.py: base_link / odom, and
 # the lidar frame SIM_F02_laser (set in the RTX Lidar graph). Topics are under
 # /sim_f02. Only the lidar (scan) is used as an obstacle source for now; add the
 # ToF PointCloud2 sources once those topics are verified.
@@ -19,15 +47,15 @@
 amcl:
   ros__parameters:
     use_sim_time: true
-    base_frame_id: "SIM_F02_base_link"
-    odom_frame_id: "SIM_F02_odom"
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
     global_frame_id: "map"
-    scan_topic: /sim_f02/scan
-    laser_min_range: 1.0
-    laser_max_range: 20.0
+    scan_topic: /scan
+    laser_min_range: 0.1     # ⚠️ 라이다 range_min 이상이어야 한다
+    laser_max_range: 2.0
     max_particles: 2000
     min_particles: 500
-    update_min_d: 0.2
+    update_min_d: 0.02      # 이 거리만큼 움직이면 갱신
     update_min_a: 0.2
     resample_interval: 1
     transform_tolerance: 1.0                # 0.5 -> 1.0 (느린 TF 허용)
@@ -40,8 +68,8 @@ amcl:
     # (v.x, v.y in kinematic_vehicle.py) - here (10, 15).
     set_initial_pose: true
     initial_pose:
-      x: 3.0
-      y: 2.0
+      x: 1.55                # 실물 출발 위치 (순환로 모서리 C0)
+      y: 0.40
       z: 0.0
       yaw: 0.0
 
@@ -49,8 +77,8 @@ bt_navigator:
   ros__parameters:
     use_sim_time: true
     global_frame: map
-    robot_base_frame: SIM_F02_base_link
-    odom_topic: /sim_f02/odom
+    robot_base_frame: base_link
+    odom_topic: /odom
     bt_loop_duration: 20                    # 10 -> 20 (느린 시뮬 대응)
     default_server_timeout: 60              # 20 -> 60 (플래너 응답 대기 여유)
 
@@ -76,7 +104,7 @@ controller_server:
       # per control step and jumps straight over the acceptance band, then (being
       # forward-only) has to loop back on a 2.8 m radius - that is what produced
       # 21 recoveries and an overshoot from a goal at x=14 out to x=17.2.
-      xy_goal_tolerance: 0.25                   # 0.5 -> 0.25 위치 조여서 방향 정렬 유도
+      xy_goal_tolerance: 0.025                   # 0.5 -> 0.25 위치 조여서 방향 정렬 유도
       yaw_goal_tolerance: 3.14                   # 0.25(±14°) -> 0.1(±6°) 도착 방향 엄격
       stateful: true
 
@@ -84,10 +112,10 @@ controller_server:
     # for a car-like (Ackermann) chassis that cannot rotate toward the goal.
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 1.0     # 2.0 overshot the goal band (see goal_checker)
-      lookahead_dist: 0.6
-      min_lookahead_dist: 0.4
-      max_lookahead_dist: 1.0
+      desired_linear_vel: 0.1     # 2.0 overshot the goal band (see goal_checker)
+      lookahead_dist: 0.06
+      min_lookahead_dist: 0.04
+      max_lookahead_dist: 0.1
       use_velocity_scaled_lookahead_dist: true
       transform_tolerance: 1.0              # 0.2 -> 1.0
       use_collision_detection: true
@@ -109,13 +137,13 @@ local_costmap:
       update_frequency: 2.0                 # 5.0 -> 2.0 (부하 감소)
       publish_frequency: 1.0                # 2.0 -> 1.0
       transform_tolerance: 1.0
-      global_frame: SIM_F02_odom
-      robot_base_frame: SIM_F02_base_link
+      global_frame: odom
+      robot_base_frame: base_link
       rolling_window: true
       width: 10
       height: 10
-      resolution: 0.05
-      footprint: "[[1.9, 0.95], [1.9, -0.95], [-1.9, -0.95], [-1.9, 0.95]]"
+      resolution: 0.005
+      footprint: "[[0.19, 0.095], [0.19, -0.095], [-0.19, -0.095], [-0.19, 0.095]]"
       plugins: ["obstacle_layer", "inflation_layer"]
 
       obstacle_layer:
@@ -123,25 +151,25 @@ local_costmap:
         enabled: true
         observation_sources: scan fleet
         scan:
-          topic: /sim_f02/scan
+          topic: /scan
           data_type: "LaserScan"
           max_obstacle_height: 3.0
-          raytrace_max_range: 20.0
+          raytrace_max_range: 2.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 15.0
-          obstacle_min_range: 2.5
+          obstacle_max_range: 1.5
+          obstacle_min_range: 0.25
           clearing: true
           marking: true
         fleet:
-          topic: /sim_f02/fleet_obstacles
+          topic: /fleet_obstacles
           data_type: "PointCloud2"
           marking: true
           clearing: true
           min_obstacle_height: 0.0
           max_obstacle_height: 3.0
-          raytrace_max_range: 20.0
+          raytrace_max_range: 2.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 15.0
+          obstacle_max_range: 1.5
           obstacle_min_range: 0.0
 
       inflation_layer:
@@ -150,7 +178,7 @@ local_costmap:
         # Must be >= the footprint's circumscribed radius (sqrt(1.3^2+0.6^2)=1.45),
         # or SMAC cannot use the potential field to skip full-footprint collision
         # checks and planning slows down badly (planner configure took 16 s at 0.7).
-        inflation_radius: 0.4
+        inflation_radius: 0.04
 
 global_costmap:
   global_costmap:
@@ -159,11 +187,11 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: SIM_F02_base_link
-      resolution: 0.05
+      robot_base_frame: base_link
+      resolution: 0.005
       track_unknown_space: true
       transform_tolerance: 1.0
-      footprint: "[[1.9, 0.95], [1.9, -0.95], [-1.9, -0.95], [-1.9, 0.95]]"
+      footprint: "[[0.19, 0.095], [0.19, -0.095], [-0.19, -0.095], [-0.19, 0.095]]"
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
 
       static_layer:
@@ -176,30 +204,30 @@ global_costmap:
         enabled: true
         observation_sources: scan fleet
         scan:
-          topic: /sim_f02/scan
+          topic: /scan
           data_type: "LaserScan"
           max_obstacle_height: 3.0
-          raytrace_max_range: 20.0
-          obstacle_max_range: 15.0
-          obstacle_min_range: 2.5
+          raytrace_max_range: 2.0
+          obstacle_max_range: 1.5
+          obstacle_min_range: 0.25
           clearing: true
           marking: true
         fleet:
-          topic: /sim_f02/fleet_obstacles
+          topic: /fleet_obstacles
           data_type: "PointCloud2"
           marking: true
           clearing: true
           min_obstacle_height: 0.0
           max_obstacle_height: 3.0
-          raytrace_max_range: 20.0
+          raytrace_max_range: 2.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 15.0
+          obstacle_max_range: 1.5
           obstacle_min_range: 0.0
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 1.5
-        inflation_radius: 0.4   # see local_costmap note - must cover 1.45 m
+        inflation_radius: 0.04   # see local_costmap note - must cover 1.45 m
 
 map_server:
   ros__parameters:
@@ -225,7 +253,7 @@ planner_server:
       # that motivated it is handled by the lower speed and wider goal tolerance.
       motion_model_for_search: "REEDS_SHEPP"      # 후진 포함 (DUBIN=전진전용)
       angle_quantization_bins: 72
-      minimum_turning_radius: 0.81   # = wheelbase 1.4 / tan(max_steer 1.047, 60 deg)
+      minimum_turning_radius: 0.081   # = wheelbase 1.4 / tan(max_steer 1.047, 60 deg)
       reverse_penalty: 2.0    # 1.0 -> 2.0 장거리 후진 억제 (전진 위주), 짧은 정렬엔 여전히 후진
       change_penalty: 1.0     # 2.0 -> 1.0 방향전환 덜 억제 (0.15 는 진동, 1.0 은 균형)
       non_straight_penalty: 1.2
@@ -236,8 +264,8 @@ planner_server:
 behavior_server:
   ros__parameters:
     use_sim_time: true
-    global_frame: SIM_F02_odom
-    robot_base_frame: SIM_F02_base_link
+    global_frame: odom
+    robot_base_frame: base_link
     # Register the full standard set so bt_navigator's default behavior tree
     # finds every recovery action server it references at startup (missing ones
     # make bt_navigator error out). The Ackermann forklift will not actually use
@@ -262,8 +290,8 @@ behavior_server:
 collision_monitor:
   ros__parameters:
     use_sim_time: true
-    base_frame_id: "SIM_F02_base_link"
-    odom_frame_id: "SIM_F02_odom"
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
     # Sits at the end of the velocity chain: takes the smoothed command and
     # forwards it to the real /cmd_vel, stopping the vehicle if the lidar sees
     # something inside the stop circle.
@@ -285,7 +313,7 @@ collision_monitor:
     observation_sources: ["scan"]
     scan:
       type: "scan"
-      topic: "/sim_f02/scan"
+      topic: "/scan"
       min_height: 0.15
       max_height: 2.0
       enabled: true
@@ -314,9 +342,9 @@ velocity_smoother:
   ros__parameters:
     use_sim_time: true
     smoothing_frequency: 20.0
-    max_velocity: [2.0, 0.0, 1.0]
+    max_velocity: [0.2, 0.0, 1.0]    # 선속도만 ÷10, 각속도는 그대로
     min_velocity: [-2.0, 0.0, -1.0]
-    max_accel: [1.0, 0.0, 2.0]
-    max_decel: [-1.0, 0.0, -2.0]
-    odom_topic: "/sim_f02/odom"
+    max_accel: [0.1, 0.0, 2.0]
+    max_decel: [-0.1, 0.0, -2.0]
+    odom_topic: "/odom"
     odom_duration: 0.1
