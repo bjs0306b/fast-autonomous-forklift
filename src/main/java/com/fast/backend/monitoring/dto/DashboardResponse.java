@@ -12,6 +12,7 @@ public record DashboardResponse(List<VehicleView> vehicles, List<TaskView> tasks
      *                    {@code false} 와 {@code null} 을 구분하려고 원시 타입을 쓰지 않는다.
      * @param cargoId     차량이 싣고 있는(또는 실을) 화물 식별자. 없으면 {@code null}.
      * @param cargoHeight {@code cargoId} 화물의 측정 높이(m, 팔레트 제외). 측정 결과가 없으면 {@code null}.
+     * @param targetForkHeight 선택된 적재 위치에서 사용할 목표 포크 높이(m).
      */
     public record VehicleView(
             String vehicleId,
@@ -23,6 +24,12 @@ public record DashboardResponse(List<VehicleView> vehicles, List<TaskView> tasks
             Boolean hasCargo,
             Long cargoId,
             Double cargoHeight,
+            Double targetForkHeight,
+            Double actualForkHeight,
+            Double battery,
+            String reportedCargoId,
+            Double reportedCargoHeight,
+            String reportedTaskId,
             FailureView lastFailure,
             OffsetDateTime lastUpdatedAt) {
     }

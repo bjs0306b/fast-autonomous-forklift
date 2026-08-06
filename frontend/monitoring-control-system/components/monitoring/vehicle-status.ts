@@ -2,7 +2,7 @@ import type { VehicleStatus } from "@/types/monitoring"
 
 /**
  * 차량 상태 한글 라벨.
- * 백엔드 VehicleStatus enum 10종과 1:1 대응한다(FR-402-1 연동에서 스캐폴딩 값 교체).
+ * 백엔드 VehicleStatus enum과 1:1 대응한다(FR-402-1 연동에서 스캐폴딩 값 교체).
  */
 export const VEHICLE_STATUS_LABEL: Record<VehicleStatus, string> = {
   UNKNOWN: "상태 미상",
@@ -12,6 +12,7 @@ export const VEHICLE_STATUS_LABEL: Record<VehicleStatus, string> = {
   LIFTING: "포크 승강",
   LOADING: "적재 중",
   UNLOADING: "하역 중",
+  HOLDING: "대기(관제)",
   ESTOP: "비상정지",
   ERROR: "오류",
   OFFLINE: "오프라인",
@@ -39,6 +40,7 @@ export const VEHICLE_STATUS_COLOR: Record<VehicleStatus, StatusColor> = {
   LIFTING: { base: "#a855f7", border: "#c084fc", glow: "168, 85, 247", text: "#12041f" },
   LOADING: { base: "#f59e0b", border: "#fbbf24", glow: "245, 158, 11", text: "#1a1200" },
   UNLOADING: { base: "#fb923c", border: "#fdba74", glow: "251, 146, 60", text: "#1a0d00" },
+  HOLDING: { base: "#64748b", border: "#94a3b8", glow: "100, 116, 139", text: "#071018" },
   ESTOP: { base: "#ef4444", border: "#f87171", glow: "239, 68, 68", text: "#1a0303" },
   ERROR: { base: "#dc2626", border: "#f87171", glow: "220, 38, 38", text: "#1a0303" },
   OFFLINE: { base: "#64748b", border: "#94a3b8", glow: "100, 116, 139", text: "#0b1220" },

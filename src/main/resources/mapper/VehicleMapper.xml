@@ -31,6 +31,15 @@
         FROM vehicle WHERE active = true ORDER BY vehicle_id
     </select>
 
+    <!-- MQTT 로 좌표를 한 번도 보낸 적 없는 더미/폐기 등록을 걸러낸다(VehicleMapper 주석 참고). -->
+    <select id="findAllActiveWithLocation" resultMap="result">
+        SELECT v.vehicle_id, v.name, v.active, v.created_at, v.updated_at
+        FROM vehicle v
+        JOIN vehicle_current_status s ON s.vehicle_id = v.vehicle_id
+        WHERE v.active = true AND s.position_x IS NOT NULL AND s.position_y IS NOT NULL
+        ORDER BY v.vehicle_id
+    </select>
+
     <select id="findAllActiveVehicleIds" resultType="string">
         SELECT vehicle_id FROM vehicle WHERE active = true ORDER BY vehicle_id
     </select>

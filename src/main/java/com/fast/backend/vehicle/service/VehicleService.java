@@ -38,10 +38,15 @@ public class VehicleService {
 
     private final VehicleMapper vehicleMapper;
     private final VehicleCurrentStatusMapper vehicleCurrentStatusMapper;
+    private final VehicleIdAliasResolver aliasResolver;
 
-    public VehicleService(VehicleMapper vehicleMapper, VehicleCurrentStatusMapper vehicleCurrentStatusMapper) {
+    public VehicleService(
+            VehicleMapper vehicleMapper,
+            VehicleCurrentStatusMapper vehicleCurrentStatusMapper,
+            VehicleIdAliasResolver aliasResolver) {
         this.vehicleMapper = vehicleMapper;
         this.vehicleCurrentStatusMapper = vehicleCurrentStatusMapper;
+        this.aliasResolver = aliasResolver;
     }
 
     @Transactional
@@ -73,7 +78,11 @@ public class VehicleService {
 
     @Transactional(readOnly = true)
     public List<VehicleResponse> findActiveVehicles() {
-        List<Vehicle> vehicles = vehicleMapper.findAllActive();
+        // 별칭 도입 전에 자동 등록된 raw ID(sim03 등)는 canonical 차량과 함께 화면에 두 번 나타날 수 있다.
+        // 별칭 키 자체인 행은 읽기 목록에서 숨기고 canonical DB ID(SIM-F03)만 노출한다.
+        List<Vehicle> vehicles = vehicleMapper.findAllActive().stream()
+                .filter(this::isCanonicalVehicle)
+                .toList();
         if (vehicles.isEmpty()) {
             return List.of();
         }
@@ -84,6 +93,12 @@ public class VehicleService {
         return vehicles.stream()
                 .map(vehicle -> toResponse(vehicle, statusByVehicleId.get(vehicle.getVehicleId())))
                 .collect(Collectors.toList());
+    }
+
+    private boolean isCanonicalVehicle(Vehicle vehicle) {
+        return aliasResolver.resolve(vehicle.getVehicleId())
+                .map(resolved -> resolved.equalsIgnoreCase(vehicle.getVehicleId()))
+                .orElse(false);
     }
 
     @Transactional(readOnly = true)
@@ -115,8 +130,7 @@ public class VehicleService {
     public VehicleStatusCountResponse countByStatus() {
         List<VehicleStatusCountRow> rows = vehicleCurrentStatusMapper.countByStatusForActiveVehicles();
 
-        // 상태값이 한 번도 관측되지 않은 항목도 0으로 채워, 응답에 항상 확정 enum 10종이 전부 나오게 한다
-        // (prompt32.md 1장 3번 "상태별 0건 기본값 처리". 등록된 차량이 아예 없을 때도 total=0 + 10개 항목).
+        // 상태값이 한 번도 관측되지 않은 항목도 0으로 채워, 응답에 현재 enum 전부가 나오게 한다.
         // VehicleStatus.values()를 그대로 순회하므로 enum에 값을 추가하면 이 응답도 자동으로 따라간다.
         Map<String, Long> countByStatus = new LinkedHashMap<>();
         for (VehicleStatus status : VehicleStatus.values()) {

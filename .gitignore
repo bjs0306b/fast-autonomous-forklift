@@ -64,6 +64,10 @@ node_modules/
 # .env.example(템플릿)만 커밋하고 .env 는 절대 커밋하지 않는다.
 .env
 .env.*
+# backend.env 는 `.env` 로 시작하지 않아 위 두 규칙에 걸리지 않는다.
+# EC2 백엔드 컨테이너가 읽는 실제 자격증명 파일이므로 반드시 제외한다
+# (템플릿은 backend.env.example).
+backend.env
 !.env.example
 
 ### MQTT Broker (infra/mqtt) ###
@@ -88,9 +92,21 @@ infra/mqtt/log/*
 *.onnx
 *.engine
 
+### AI 실행 산출물 ###
+# 진단·점검 명령이 작업 디렉터리에 떨어뜨리는 파일. 코드가 아니라 실행 흔적이라
+# 커밋 대상이 아니다 — `serve.py --probe` 가 어느 index 가 어느 카메라인지
+# 확인하려고 프레임을 저장한다.
+camera_probe_*.jpg
+
 # 스테이션 실행 중 생기는 작업 산출물 — 커밋 대상 아님.
 # 발표에 쓸 스틸은 발표자료/ 로 옮겨서 관리한다.
 ai/*.png
 ai/*.jpg
 ai/annotated.png
 ai/camera_probe_*.jpg
+
+# 빌드 캐시·개발 서버 로그 (git 히스토리에 남기지 않는다).
+# 배포 산출물 fast-deploy.tar.gz 는 위 *.tar.gz 가 이미 덮는다.
+*.bak
+frontend/monitoring-control-system/tsconfig.tsbuildinfo
+frontend/monitoring-control-system/.next-dev.*.log

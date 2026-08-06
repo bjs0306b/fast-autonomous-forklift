@@ -29,7 +29,6 @@ export default function MonitoringPage() {
     applyLocationEvent,
     applyTaskEvent,
   } = useMonitoringDashboard()
-
   /**
    * Isaac Sim 영상 연결.
    *
@@ -116,8 +115,20 @@ export default function MonitoringPage() {
         ? "connecting"
         : "disconnected"
 
-  // 전체 비상정지 대상 수. dashboard 는 활성 차량만 반환하지만, active 플래그로 한 번 더 거른다.
-  const activeVehicleCount = useMemo(() => vehicles.filter((v) => v.active).length, [vehicles])
+  /**
+   * 전체 비상정지 대상 수.
+   *
+   * dashboard 는 DB active=true 차량을 전부 내려주는데, 여기엔 한 번도 MQTT 로 좌표를 받은 적
+   * 없는 차량(FORKLIFT-01/02, REAL-F01 같은 미연동 더미·폐기 등록)도 섞여 있다. `location`이
+   * null이라는 뜻은 MonitoringService 가 "좌표를 한 번도 받은 적이 없는 차량"으로 명시한 값이라
+   * (백엔드 MonitoringService.toLocationView 주석 참고), active 플래그만으로는 실제 MQTT 로
+   * 연동된 차량 수를 알 수 없다. 그래서 좌표 수신 이력까지 함께 걸러야 "대상 N대"가 실제로 명령을
+   * 받을 수 있는 차량 수와 일치한다.
+   */
+  const activeVehicleCount = useMemo(
+    () => vehicles.filter((v) => v.active && v.location !== null).length,
+    [vehicles],
+  )
 
   /**
    * 개별 비상정지.
@@ -400,7 +411,9 @@ function VehicleControlPanel({
     // 컬럼이 하나 줄어 세로 여유가 생겼다 — 고정 min-h 를 낮춰 패널 자체가 화면 높이를
     // 넘기지 않게 한다(넘기면 우측 패널에 불필요한 세로 스크롤이 생긴다).
     <section className="flex min-h-[520px] min-w-0 flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220] lg:h-full lg:min-h-0" aria-label="차량 관제" aria-busy={loadState === "loading"}>
-      <header className="shrink-0 border-b border-slate-700 px-3 py-1.5"><h2 className="text-sm font-semibold text-slate-100">차량 관제</h2></header>
+      <header className="flex shrink-0 items-center border-b border-slate-700 px-3 py-1.5">
+        <h2 className="text-sm font-semibold text-slate-100">차량 관제</h2>
+      </header>
       <div className="h-[clamp(240px,30dvh,340px)] min-h-0 shrink-0 overflow-hidden">
         <MiniMap vehicles={vehicles} selectedVehicleId={selectedVehicleId} onSelectVehicle={setSelectedVehicleId} onClearSelection={() => setSelectedVehicleId(null)} realtimeStatus={realtimeStatus} onRefresh={() => void loadDashboard()} className="h-full min-h-0 min-w-0 overflow-hidden rounded-none border-0 bg-transparent" />
       </div>

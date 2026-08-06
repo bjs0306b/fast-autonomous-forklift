@@ -52,12 +52,18 @@
         LIMIT 1
     </select>
 
-    <!-- Status messages never change position/message_at. -->
+    <!-- Status messages never change position/message_at. Cargo fields are authoritative only when
+         hasCargo is present; old senders omit it and therefore preserve the previous values. -->
     <insert id="upsert" parameterType="com.fast.backend.vehicle.domain.VehicleCurrentStatus">
-        INSERT INTO vehicle_current_status (vehicle_id, status, received_at)
-        VALUES (#{vehicleId}, #{status}, #{receivedAt})
+        INSERT INTO vehicle_current_status (vehicle_id, status, has_cargo, cargo_id, received_at)
+        VALUES (#{vehicleId}, #{status}, #{hasCargo}, #{cargoId}, #{receivedAt})
         ON DUPLICATE KEY UPDATE
             status = VALUES(status),
+            cargo_id = CASE
+                WHEN VALUES(has_cargo) IS NULL THEN cargo_id
+                ELSE VALUES(cargo_id)
+            END,
+            has_cargo = COALESCE(VALUES(has_cargo), has_cargo),
             received_at = VALUES(received_at)
     </insert>
 

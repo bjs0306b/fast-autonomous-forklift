@@ -42,7 +42,6 @@ erDiagram
     vehicle_current_status {
         varchar vehicle_id PK,FK
         varchar status
-        int battery
         double position_x
         double position_y
         varchar position_frame

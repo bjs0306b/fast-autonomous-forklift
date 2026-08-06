@@ -4,6 +4,7 @@ import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.common.exception.ErrorCode;
 import com.fast.backend.forklift.dto.ForkliftStatusMessage;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
+import com.fast.backend.vehicle.service.VehicleAutoRegistrar;
 import com.fast.backend.vehicle.service.VehicleStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,12 +23,14 @@ import static org.mockito.Mockito.when;
 
 class ForkliftStatusServiceTest {
     private VehicleStatusService vehicleStatusService;
+    private VehicleAutoRegistrar autoRegistrar;
     private ForkliftStatusService service;
 
     @BeforeEach
     void setUp() {
         vehicleStatusService = mock(VehicleStatusService.class);
-        service = new ForkliftStatusService(vehicleStatusService);
+        autoRegistrar = mock(VehicleAutoRegistrar.class);
+        service = new ForkliftStatusService(vehicleStatusService, autoRegistrar);
     }
 
     @Test
@@ -38,6 +41,18 @@ class ForkliftStatusServiceTest {
         ArgumentCaptor<VehicleStatusUpdateCommand> captor = ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
         verify(vehicleStatusService).updateCurrentStatus(eq("FORKLIFT-01"), captor.capture());
         assertThat(captor.getValue()).isEqualTo(new VehicleStatusUpdateCommand("ACTIVE", timestamp));
+    }
+
+    @Test
+    void delegatesReportedCargoState() {
+        OffsetDateTime timestamp = OffsetDateTime.of(2026, 8, 6, 13, 0, 0, 0, ZoneOffset.ofHours(9));
+        service.handleStatus(new ForkliftStatusMessage(
+                "FORKLIFT-01", "LOADING", timestamp, true, 17L));
+
+        ArgumentCaptor<VehicleStatusUpdateCommand> captor = ArgumentCaptor.forClass(VehicleStatusUpdateCommand.class);
+        verify(vehicleStatusService).updateCurrentStatus(eq("FORKLIFT-01"), captor.capture());
+        assertThat(captor.getValue()).isEqualTo(
+                new VehicleStatusUpdateCommand("LOADING", timestamp, true, 17L));
     }
 
     @Test

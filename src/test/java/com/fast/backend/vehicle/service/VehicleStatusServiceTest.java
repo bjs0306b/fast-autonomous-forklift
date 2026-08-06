@@ -107,4 +107,25 @@ class VehicleStatusServiceTest {
         verify(broadcaster).broadcastStatus(eq("FORKLIFT-01"), any(), captor.capture());
         assertThat(captor.getValue()).isNotNull();
     }
+
+    @Test
+    void reportedCargoState_isUpsertedAndReturned() {
+        when(vehicleMapper.existsByVehicleId("FORKLIFT-01")).thenReturn(true);
+        VehicleCurrentStatus stored = new VehicleCurrentStatus();
+        stored.setVehicleId("FORKLIFT-01");
+        stored.setStatus(VehicleStatus.LOADING);
+        stored.setHasCargo(true);
+        stored.setCargoId(31L);
+        when(statusMapper.findByVehicleId("FORKLIFT-01")).thenReturn(Optional.of(stored));
+
+        VehicleStatusResponse response = service.updateCurrentStatus(
+                "FORKLIFT-01", new VehicleStatusUpdateCommand("LOADING", MESSAGE_AT, true, 31L));
+
+        ArgumentCaptor<VehicleCurrentStatus> captor = ArgumentCaptor.forClass(VehicleCurrentStatus.class);
+        verify(statusMapper).upsert(captor.capture());
+        assertThat(captor.getValue().getHasCargo()).isTrue();
+        assertThat(captor.getValue().getCargoId()).isEqualTo(31L);
+        assertThat(response.hasCargo()).isTrue();
+        assertThat(response.cargoId()).isEqualTo(31L);
+    }
 }

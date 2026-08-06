@@ -81,6 +81,40 @@ class VehicleCurrentStatusMapperIntegrationTest {
         assertThat(stored.getMessageAt()).isEqualTo(sourceTime);
     }
 
+    @Test
+    void cargoStateUpsert_updatesAndClearsCargoWithoutLosingLocation() {
+        insertVehicle("FORKLIFT-CARGO");
+        LocalDateTime now = LocalDateTime.of(2026, 8, 6, 13, 0);
+        statusMapper.updateLocationIfNewer(
+                "FORKLIFT-CARGO", 2.0, 3.0, "map", 90.0, 0.0, now, now);
+
+        VehicleCurrentStatus loaded = new VehicleCurrentStatus();
+        loaded.setVehicleId("FORKLIFT-CARGO");
+        loaded.setStatus(VehicleStatus.LOADING);
+        loaded.setHasCargo(true);
+        loaded.setCargoId(9L);
+        loaded.setReceivedAt(now.plusSeconds(1));
+        statusMapper.upsert(loaded);
+
+        VehicleCurrentStatus stored = statusMapper.findByVehicleId("FORKLIFT-CARGO").orElseThrow();
+        assertThat(stored.getHasCargo()).isTrue();
+        assertThat(stored.getCargoId()).isEqualTo(9L);
+        assertThat(stored.getPositionX()).isEqualTo(2.0);
+
+        VehicleCurrentStatus unloaded = new VehicleCurrentStatus();
+        unloaded.setVehicleId("FORKLIFT-CARGO");
+        unloaded.setStatus(VehicleStatus.IDLE);
+        unloaded.setHasCargo(false);
+        unloaded.setCargoId(null);
+        unloaded.setReceivedAt(now.plusSeconds(2));
+        statusMapper.upsert(unloaded);
+
+        stored = statusMapper.findByVehicleId("FORKLIFT-CARGO").orElseThrow();
+        assertThat(stored.getHasCargo()).isFalse();
+        assertThat(stored.getCargoId()).isNull();
+        assertThat(stored.getPositionX()).isEqualTo(2.0);
+    }
+
     private void insertVehicle(String vehicleId) {
         LocalDateTime now = LocalDateTime.now();
         Vehicle vehicle = new Vehicle();

@@ -11,6 +11,7 @@ export const VEHICLE_PATH_EVENT_TYPE = "VEHICLE_PATH_UPDATED"
 export const VEHICLE_COMMAND_RESULT_EVENT_TYPE = "VEHICLE_COMMAND_RESULT_UPDATED"
 
 export const TRANSPORT_TASK_FAILED_EVENT_TYPE = "TRANSPORT_TASK_FAILED"
+export const TRANSPORT_TASK_MEASURED_EVENT_TYPE = "TRANSPORT_TASK_MEASURED"
 
 export const TOPIC_VEHICLE_STATUS = "/topic/vehicles/status"
 export const TOPIC_VEHICLE_LOCATION = "/topic/vehicles/location"
@@ -41,6 +42,21 @@ export interface NormalizedVehicleLocation {
   frameId: string | null
   messageAt: string | null
   receivedAt: string | null
+}
+
+/** 위치 이벤트 한 건에서 위치와 함께 전달되는 차량 상태. */
+export interface NormalizedVehicleLocationUpdate {
+  location: NormalizedVehicleLocation
+  /** 값이 없거나 백엔드 계약 밖의 값이면 null. 기존의 더 구체적인 상태를 지우지 않는다. */
+  reportedStatus: import("./monitoring").VehicleStatus | null
+  telemetry: {
+    forkHeight: number | null
+    battery: number | null
+    reportedCargoId: string | null
+    reportedCargoHeight: number | null
+    loaded: boolean | null
+    reportedTaskId: string | null
+  }
 }
 
 export interface NormalizedVehicleStatusUpdate {

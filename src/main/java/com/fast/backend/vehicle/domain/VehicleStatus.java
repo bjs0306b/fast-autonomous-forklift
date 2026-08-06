@@ -1,7 +1,7 @@
 package com.fast.backend.vehicle.domain;
 
 /**
- * 차량 상태 확정 enum 10종(prompt32.md 1장 3번 확정 규격).
+ * 차량 상태 enum. Isaac 현재 계약의 HOLDING까지 보존한다.
  *
  * <p><b>확정 이전과의 차이</b>: 이전 버전은 {@code UNKNOWN/IDLE/ACTIVE/ERROR/OFFLINE} 5종만 두고
  * {@code MOVING}을 {@code ACTIVE}로 강제 변환했다. 팀 확정에 따라 <b>MOVING을 별도 상태로 보존</b>하고
@@ -17,6 +17,7 @@ package com.fast.backend.vehicle.domain;
  *   <li>{@link #LIFTING} — 포크 승강 중</li>
  *   <li>{@link #LOADING} — 적재 중</li>
  *   <li>{@link #UNLOADING} — 하역 중</li>
+ *   <li>{@link #HOLDING} — 관제에 의한 일시 정지</li>
  *   <li>{@link #ESTOP} — 비상 정지 상태</li>
  *   <li>{@link #ERROR} — 오류 발생</li>
  *   <li>{@link #OFFLINE} — 통신 단절 또는 접속 종료</li>
@@ -33,6 +34,7 @@ public enum VehicleStatus {
     LIFTING,
     LOADING,
     UNLOADING,
+    HOLDING,
     ESTOP,
     ERROR,
     OFFLINE;

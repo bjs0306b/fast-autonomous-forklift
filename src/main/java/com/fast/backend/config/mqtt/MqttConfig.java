@@ -17,7 +17,19 @@ import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 import java.util.Arrays;
+import java.util.Locale;
 
 /**
  * MQTT v3(Eclipse Paho) 연결, 구독(Inbound), 발행(Outbound) 인프라를 구성한다.
@@ -64,6 +76,19 @@ public class MqttConfig {
         if (mqttProperties.password() != null && !mqttProperties.password().isBlank()) {
             options.setPassword(mqttProperties.password().toCharArray());
         }
+        if (isSslUrl(mqttProperties.brokerUrl())
+                && mqttProperties.caCertPath() != null
+                && !mqttProperties.caCertPath().isBlank()) {
+            options.setSocketFactory(buildSslSocketFactory(mqttProperties.caCertPath()));
+            log.info("MQTT TLS enabled with custom CA: caCertPath={}", mqttProperties.caCertPath());
+        }
+        if (isSslUrl(mqttProperties.brokerUrl())) {
+            options.setHttpsHostnameVerificationEnabled(mqttProperties.sslHostnameVerificationEnabled());
+            if (!mqttProperties.sslHostnameVerificationEnabled()) {
+                log.warn("MQTT TLS hostname verification is disabled. Keep CA verification enabled and "
+                        + "re-enable hostname verification after the broker certificate gets a matching SAN.");
+            }
+        }
         options.setAutomaticReconnect(mqttProperties.automaticReconnect());
         options.setCleanSession(mqttProperties.cleanSession());
         options.setConnectionTimeout(mqttProperties.connectionTimeout());
@@ -78,6 +103,44 @@ public class MqttConfig {
         // 단정하지 말고, 실제 장애 상황에서 재검증해야 한다.
         options.setMaxReconnectDelay((int) mqttProperties.recoveryInterval());
         return options;
+    }
+
+    private static boolean isSslUrl(String brokerUrl) {
+        return brokerUrl != null && brokerUrl.toLowerCase(Locale.ROOT).startsWith("ssl://");
+    }
+
+    /**
+     * {@code mqtt.ca-cert-path} 가 가리키는 CA 인증서 하나만 신뢰하는 {@link SSLSocketFactory}를 만든다.
+     *
+     * <p>이 값을 넣지 않으면 이 메서드는 호출되지 않고 Paho 가 JVM 기본 SSLContext 를 그대로 쓴다
+     * (운영 컨테이너는 {@code Dockerfile.backend} 가 빌드 시점에 같은 CA 를 cacerts 에 심어 둔다).
+     * 로컬 IDE 실행처럼 JVM cacerts 를 건드리고 싶지 않은 환경에서만 이 경로가 필요하다.
+     */
+    private SSLSocketFactory buildSslSocketFactory(String caCertPath) {
+        File caFile = new File(caCertPath);
+        if (!caFile.isFile()) {
+            throw new IllegalStateException(
+                    "MQTT CA 인증서를 찾을 수 없습니다: " + caFile.getAbsolutePath()
+                            + " (mqtt.ca-cert-path/MQTT_CA_CERT_PATH 확인)");
+        }
+        try (InputStream in = new FileInputStream(caFile)) {
+            CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+            Certificate ca = certificateFactory.generateCertificate(in);
+
+            KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            trustStore.load(null, null);
+            trustStore.setCertificateEntry("fast-mqtt-ca", ca);
+
+            TrustManagerFactory trustManagerFactory =
+                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(trustStore);
+
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, trustManagerFactory.getTrustManagers(), null);
+            return sslContext.getSocketFactory();
+        } catch (IOException | GeneralSecurityException e) {
+            throw new IllegalStateException("MQTT TLS 설정 실패: caCertPath=" + caCertPath, e);
+        }
     }
 
     @Bean
@@ -105,10 +168,17 @@ public class MqttConfig {
                 mqttTopics.forkliftStatusSubscribeTopic(),
                 mqttTopics.forkliftLocationSubscribeTopic(),
                 mqttTopics.forkliftPathSubscribeTopic(),
-                mqttTopics.forkliftCommandResultSubscribeTopic()
+                mqttTopics.forkliftCommandResultSubscribeTopic(),
+                // Isaac Sim telemetry. 기존 forklift 토픽을 대체하는 것이 아니라 함께 구독한다 —
+                // 시뮬과 실물이 서로 다른 계약으로 동시에 위치를 보내기 때문이다.
+                mqttTopics.isaacTelemetrySubscribeTopic(),
+                mqttTopics.isaacEventSubscribeTopic(),
+                mqttTopics.forkliftArrivedSubscribeTopic()
         };
         int[] qosLevels = new int[topics.length];
         Arrays.fill(qosLevels, mqttProperties.defaultQos());
+        // telemetry는 10 Hz라 최신값이 중요하고 재전송 비용이 크다. 명령성 event/arrived는 QoS 1을 유지한다.
+        qosLevels[4] = 0;
 
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 mqttProperties.inboundClientId(), mqttClientFactory(), topics);

@@ -17,6 +17,7 @@ mybatis:
 
 mqtt:
   enabled: false
+  ssl-hostname-verification-enabled: false
   test-api:
     enabled: false
   broker-url: tcp://localhost:1883
@@ -38,11 +39,20 @@ mqtt:
     forklift-command-result: forklift/+/command-result
     station-measure-request: fast/station/measure_request
     forklift-command: forklift/%s/command
+    isaac-telemetry: fast/v1/vehicle/+/telemetry
+    isaac-event: fast/v1/vehicle/+/event
+    forklift-arrived: forklift/+/arrived
 
 vehicle:
   auto-registration-enabled: false
   offline-check-enabled: false
   offline-timeout-seconds: 10
+  # 외부 시스템 차량 ID → DB vehicle_id 별칭. 현재 Isaac Sim 은 sim02/sim03 로 발행한다.
+  # 키 비교는 대소문자를 무시한다. DB 의 vehicle_id 를 바꾸지 않고 백엔드 경계에서만 정규화한다.
+  id-aliases:
+    sim01: SIM-F01
+    sim02: SIM-F02
+    sim03: SIM-F03
   status-test-api:
     enabled: false
 

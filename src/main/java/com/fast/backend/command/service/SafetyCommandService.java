@@ -36,13 +36,15 @@ public class SafetyCommandService {
 
     private final VehicleMapper vehicleMapper;
     private final VehicleCommandService vehicleCommandService;
+    private final VehicleCommandPublisher vehicleCommandPublisher;
     private final SafetyCommandBroadcaster broadcaster;
 
     public SafetyCommandService(
             VehicleMapper vehicleMapper, VehicleCommandService vehicleCommandService,
-            SafetyCommandBroadcaster broadcaster) {
+            VehicleCommandPublisher vehicleCommandPublisher, SafetyCommandBroadcaster broadcaster) {
         this.vehicleMapper = vehicleMapper;
         this.vehicleCommandService = vehicleCommandService;
+        this.vehicleCommandPublisher = vehicleCommandPublisher;
         this.broadcaster = broadcaster;
     }
 
@@ -66,9 +68,22 @@ public class SafetyCommandService {
     /**
      * 활성 차량 전체에 EMERGENCY_STOP을 차량별로 개별 발행한다. 차량마다 별도 commandId·DB 레코드가
      * 생성되며(issueCommand 재사용), 한 차량의 발행 실패가 다음 차량 처리를 막지 않는다.
+     *
+     * <p>대상은 {@code active=true} 전체가 아니라 <b>MQTT 로 좌표를 한 번이라도 보낸 활성 차량</b>으로
+     * 좁힌다({@link com.fast.backend.vehicle.mapper.VehicleMapper#findAllActiveWithLocation()}).
+     * {@code active=true} 로만 거르면 FORKLIFT-01/02·REAL-F01 처럼 한 번도 연동된 적 없는 더미/폐기
+     * 등록까지 "대상"에 잡혀, 관제 화면의 실제 차량 수(프론트 activeVehicleCount)와 이 응답의
+     * {@code requestedCount} 가 어긋난다 — 아무도 구독하지 않는 토픽에 헛발행만 늘어난다.
      */
     public EmergencyStopAllResponse emergencyStopAll() {
-        List<Vehicle> activeVehicles = vehicleMapper.findAllActive(); // 활성·미삭제 차량, vehicleId 오름차순
+        try {
+            vehicleCommandPublisher.publishIsaacGlobalEmergencyStop();
+        } catch (RuntimeException e) {
+            // broadcast가 실패해도 아래 차량별 발행은 반드시 계속 시도한다.
+            log.error("Isaac global emergency-stop publish failed: {}", e.getMessage());
+        }
+        // 활성 + 좌표 수신 이력 있는 차량만, vehicleId 오름차순
+        List<Vehicle> activeVehicles = vehicleMapper.findAllActiveWithLocation();
         List<EmergencyStopAllResponse.Item> results = new ArrayList<>();
         int published = 0;
         int failed = 0;

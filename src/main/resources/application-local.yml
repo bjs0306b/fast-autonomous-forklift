@@ -26,6 +26,10 @@ mqtt:
   broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
   username: ${MQTT_USERNAME:}
   password: ${MQTT_PASSWORD:}
+  # ssl:// 브로커(EC2)에서만 쓴다. 비우면 JVM 기본 트러스트스토어를 쓴다(MqttProperties 주석 참고).
+  ca-cert-path: ${MQTT_CA_CERT_PATH:}
+  # 현재 EC2 인증서 CN/SAN이 호스트명과 일치하지 않아 기본 false. CA 검증 자체는 유지한다.
+  ssl-hostname-verification-enabled: ${MQTT_SSL_HOSTNAME_VERIFICATION_ENABLED:false}
   inbound-client-id: ${MQTT_INBOUND_CLIENT_ID:fast-backend-inbound}
   outbound-client-id: ${MQTT_OUTBOUND_CLIENT_ID:fast-backend-outbound}
   connection-timeout: 10
@@ -42,11 +46,23 @@ mqtt:
     forklift-command-result: forklift/+/command-result
     station-measure-request: fast/station/measure_request
     forklift-command: forklift/%s/command
+    # Isaac Sim 차량 telemetry. 기존 forklift 토픽을 대체하지 않고 함께 구독한다.
+    isaac-telemetry: ${MQTT_ISAAC_TELEMETRY_TOPIC:fast/v1/vehicle/+/telemetry}
+    isaac-event: ${MQTT_ISAAC_EVENT_TOPIC:fast/v1/vehicle/+/event}
+    forklift-arrived: ${MQTT_FORKLIFT_ARRIVED_TOPIC:forklift/+/arrived}
 
 vehicle:
-  auto-registration-enabled: ${VEHICLE_AUTO_REGISTRATION_ENABLED:false}
+  # MQTT 로 처음 관측된 vehicleId 를 자동 등록한다. 브로커가 보내는 차량 수만큼 관제 화면에 뜨게
+  # 하는 유일한 경로다 — 꺼 두면 DB 시드에 적힌 차량만 보인다(미등록 차량 메시지는 폐기).
+  auto-registration-enabled: ${VEHICLE_AUTO_REGISTRATION_ENABLED:true}
   offline-check-enabled: ${VEHICLE_OFFLINE_CHECK_ENABLED:false}
   offline-timeout-seconds: ${VEHICLE_OFFLINE_TIMEOUT_SECONDS:10}
+  # 외부 시스템 차량 ID → DB vehicle_id 별칭. 현재 Isaac Sim 은 sim02/sim03 로 발행한다.
+  # 키 비교는 대소문자를 무시한다. DB 의 vehicle_id 를 바꾸지 않고 백엔드 경계에서만 정규화한다.
+  id-aliases:
+    sim01: SIM-F01
+    sim02: SIM-F02
+    sim03: SIM-F03
   status-test-api:
     enabled: ${VEHICLE_STATUS_TEST_API_ENABLED:false}
 

@@ -59,6 +59,8 @@ class VehicleLocationEventDataTest {
         assertThat(node.get("speed").asDouble()).isEqualTo(0.4);
         assertThat(node.get("messageAt").asText()).startsWith("2026-07-22T13:30:00");
         assertThat(node.get("receivedAt").asText()).startsWith("2026-07-22T13:30:00");
+        assertThat(node.has("reportedLoaded")).isTrue();
+        assertThat(node.has("reportedCargoHeight")).isTrue();
     }
 
     @Test

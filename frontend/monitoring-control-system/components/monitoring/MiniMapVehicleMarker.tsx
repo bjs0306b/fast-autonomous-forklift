@@ -3,26 +3,10 @@
 import { cn } from "@/lib/utils"
 import { headingToMarkerRotation } from "@/lib/config/warehouseMap"
 import { formatNumber } from "@/lib/format"
+import { resolveVehicleSource, type VehicleSource } from "@/lib/monitoring/vehicleSource"
 import { toShortLabel } from "@/lib/vehicleStatus"
 import type { DashboardVehicle } from "@/types/monitoring"
 import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
-
-/**
- * 차량이 실물인지 시뮬인지 구분한다.
- *
- * 백엔드에 `source` 같은 구분 필드가 없어(vehicle 테이블 2컬럼 + 상태) **vehicleId 접두어 관례**로만
- * 판별할 수 있다. 현재 관제 대상은 Isaac 의 `SIM-F01` 한 대이지만, 나중에 실물 차량이 다시
- * 붙을 수 있으므로 `REAL-` 접두어 판정은 남겨 둔다.
- * 접두어가 없는 식별자(FORKLIFT-01 등)는 어느 쪽인지 알 수 없으므로 "unknown" 으로 둔다.
- */
-export type VehicleSource = "real" | "sim" | "unknown"
-
-export function resolveVehicleSource(vehicleId: string): VehicleSource {
-  const id = vehicleId.trim().toUpperCase()
-  if (id.startsWith("REAL-")) return "real"
-  if (id.startsWith("SIM-")) return "sim"
-  return "unknown"
-}
 
 const SOURCE_LABEL: Record<VehicleSource, string> = {
   real: "실물",
@@ -35,7 +19,7 @@ const SOURCE_LABEL: Record<VehicleSource, string> = {
  *
  * 시각 언어는 `wireframe-monitoring-final.md` §16.10 의 기존 설계를 따른다.
  *   모양 = 출처   실물은 채운 원, 시뮬은 점선 테두리 사각형
- *   색   = 상태   VEHICLE_STATUS_COLOR 10종(기존 토큰, 새 색을 만들지 않는다)
+ *   색   = 상태   VEHICLE_STATUS_COLOR(백엔드 상태 enum과 동일)
  *   내부 glow    = 선택됨
  * 위 세 축이 이미 점유돼 있어, 초기 위치 표시는 네 번째 축(투명도 + `초기` 배지)으로 구분한다.
  *

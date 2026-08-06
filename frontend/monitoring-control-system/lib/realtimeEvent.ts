@@ -1,6 +1,6 @@
 import type { VehicleStatus } from "@/types/monitoring"
 import type {
-  NormalizedVehicleLocation,
+  NormalizedVehicleLocationUpdate,
   NormalizedVehicleStatusUpdate,
   RealtimeEvent,
   TransportTaskEvent,
@@ -13,7 +13,8 @@ import {
   VEHICLE_PATH_EVENT_TYPE,
   VEHICLE_STATUS_EVENT_TYPE,
 } from "@/types/websocket"
-import { normalizeVehicleStatus } from "./vehicleStatus"
+import { normalizeReportedVehicleStatus, normalizeVehicleStatus } from "./vehicleStatus"
+import { normalizeReportedCargoTelemetry } from "./monitoring/cargoTelemetry"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -99,18 +100,32 @@ export function normalizeStatusEvent(
 
 export function normalizeLocationEvent(
   event: RealtimeEvent<unknown>,
-): NormalizedVehicleLocation | null {
+): NormalizedVehicleLocationUpdate | null {
   if (event.eventType !== VEHICLE_LOCATION_EVENT_TYPE || !isRecord(event.data)) return null
   const data = event.data
   if (!isRecord(data.position)) return null
+  const rawStatus = toStringOrNull(data.status)
+  const normalizedStatus = rawStatus == null ? null : normalizeReportedVehicleStatus(rawStatus)
+  const cargoTelemetry = normalizeReportedCargoTelemetry(data)
   return {
-    x: toFiniteNumberOrNull(data.position.x),
-    y: toFiniteNumberOrNull(data.position.y),
-    heading: toFiniteNumberOrNull(data.heading),
-    speed: toFiniteNumberOrNull(data.speed),
-    frameId: toStringOrNull(data.position.frameId),
-    messageAt: toStringOrNull(data.messageAt) ?? toStringOrNull(event.occurredAt),
-    receivedAt: toStringOrNull(data.receivedAt),
+    location: {
+      x: toFiniteNumberOrNull(data.position.x),
+      y: toFiniteNumberOrNull(data.position.y),
+      heading: toFiniteNumberOrNull(data.heading),
+      speed: toFiniteNumberOrNull(data.speed),
+      frameId: toStringOrNull(data.position.frameId),
+      messageAt: toStringOrNull(data.messageAt) ?? toStringOrNull(event.occurredAt),
+      receivedAt: toStringOrNull(data.receivedAt),
+    },
+    // Isaac 계약에는 UNKNOWN 이 없다. 알 수 없는 원본 문자열을 UNKNOWN 으로 덮어쓰면 REST 로
+    // 이미 알고 있던 ERROR/IDLE 같은 상태까지 잃으므로, 계약 밖 값은 "상태 갱신 없음"으로 본다.
+    reportedStatus: normalizedStatus,
+    telemetry: {
+      forkHeight: toFiniteNumberOrNull(data.forkHeight),
+      battery: toFiniteNumberOrNull(data.battery),
+      ...cargoTelemetry,
+      reportedTaskId: toStringOrNull(data.reportedTaskId),
+    },
   }
 }
 

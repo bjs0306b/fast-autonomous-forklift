@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Optional;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.eq;
@@ -58,5 +59,30 @@ class StationMeasurementRequestWorkflowTest {
                 ArgumentCaptor.forClass(StationMeasurementReadyEvent.class);
         verify(eventPublisher).publishEvent(event.capture());
         assertThat(event.getValue().taskId()).isEqualTo(7L);
+    }
+
+    @Test
+    void arrivedTopic_marksTheMatchingVehicleTaskAsWaitingForMeasurement() {
+        TransportTaskMapper taskMapper = mock(TransportTaskMapper.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        StationMeasurementRequestWorkflow workflow = new StationMeasurementRequestWorkflow(
+                taskMapper, eventPublisher, CLOCK);
+        TransportTask task = new TransportTask();
+        task.setId(8L);
+        task.setTaskCode("TASK-ARRIVED");
+        task.setCargoId(2L);
+        task.setVehicleId("SIM-F02");
+        task.setStatus(TaskStatus.MOVING_TO_PICKUP);
+        when(taskMapper.findActiveTasksWithVehicle()).thenReturn(List.of(task));
+        when(taskMapper.updateStatusIfCurrent(
+                8L, TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING,
+                null, null)).thenReturn(1);
+
+        workflow.handleArrival("SIM-F02", "TASK-ARRIVED");
+
+        verify(taskMapper).updateStatusIfCurrent(
+                8L, TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING,
+                null, null);
+        verify(eventPublisher).publishEvent(new StationMeasurementReadyEvent(8L));
     }
 }

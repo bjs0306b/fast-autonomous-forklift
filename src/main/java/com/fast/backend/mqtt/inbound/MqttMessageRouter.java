@@ -12,7 +12,13 @@ import com.fast.backend.forklift.dto.LegacyIsaacLocationMessage;
 import com.fast.backend.forklift.service.ForkliftLocationService;
 import com.fast.backend.forklift.service.ForkliftStatusService;
 import com.fast.backend.isaac.dto.IsaacForkliftPathMessage;
+import com.fast.backend.isaac.dto.IsaacVehicleTelemetryMessage;
+import com.fast.backend.isaac.dto.IsaacVehicleEventMessage;
+import com.fast.backend.isaac.service.IsaacVehicleEventService;
 import com.fast.backend.isaac.service.IsaacForkliftPathService;
+import com.fast.backend.isaac.service.IsaacVehicleTelemetryService;
+import com.fast.backend.station.dto.VehicleArrivedMessage;
+import com.fast.backend.station.service.StationArrivalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -30,6 +36,9 @@ public class MqttMessageRouter {
     private final VehicleLocationMessageAdapter locationMessageAdapter;
     private final IsaacForkliftPathService pathService;
     private final VehicleCommandResultService commandResultService;
+    private final IsaacVehicleTelemetryService isaacTelemetryService;
+    private final IsaacVehicleEventService isaacEventService;
+    private final StationArrivalService stationArrivalService;
 
     public MqttMessageRouter(
             ObjectMapper objectMapper,
@@ -38,7 +47,10 @@ public class MqttMessageRouter {
             ForkliftLocationService locationService,
             VehicleLocationMessageAdapter locationMessageAdapter,
             IsaacForkliftPathService pathService,
-            VehicleCommandResultService commandResultService) {
+            VehicleCommandResultService commandResultService,
+            IsaacVehicleTelemetryService isaacTelemetryService,
+            IsaacVehicleEventService isaacEventService,
+            StationArrivalService stationArrivalService) {
         this.objectMapper = objectMapper;
         this.topics = topics;
         this.statusService = statusService;
@@ -46,10 +58,13 @@ public class MqttMessageRouter {
         this.locationMessageAdapter = locationMessageAdapter;
         this.pathService = pathService;
         this.commandResultService = commandResultService;
+        this.isaacTelemetryService = isaacTelemetryService;
+        this.isaacEventService = isaacEventService;
+        this.stationArrivalService = stationArrivalService;
     }
 
     public void route(String topic, String payload) {
-        if (topic == null || topic.isBlank() || payload == null || payload.isBlank()) {
+        if (topic == null || topic.isBlank() || payload == null) {
             log.warn("MQTT message discarded: blank topic or payload");
             return;
         }
@@ -58,7 +73,9 @@ public class MqttMessageRouter {
             return;
         }
         try {
-            JsonNode root = objectMapper.readTree(payload);
+            JsonNode root = payload.isBlank() && topics.isForkliftArrivedTopic(topic)
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(payload);
             if (root == null || !root.isObject()) {
                 log.warn("MQTT message discarded: topic={}, reason=payload must be an object", topic);
                 return;
@@ -76,6 +93,19 @@ public class MqttMessageRouter {
                 if (matchesTopicVehicle(topic, message.vehicleId())) {
                     commandResultService.handleResult(message);
                 }
+            } else if (topics.isIsaacTelemetryTopic(topic)) {
+                // Isaac 은 DB 와 다른 ID(sim01)를 쓰므로 여기서 ID 를 대조하지 않는다. 정규화와 불일치
+                // 경고는 IsaacVehicleTelemetryService 가 별칭표를 보고 판단한다.
+                IsaacVehicleTelemetryMessage message =
+                        objectMapper.treeToValue(root, IsaacVehicleTelemetryMessage.class);
+                isaacTelemetryService.handleTelemetry(topics.extractIsaacVehicleId(topic), message);
+            } else if (topics.isIsaacEventTopic(topic)) {
+                IsaacVehicleEventMessage message =
+                        objectMapper.treeToValue(root, IsaacVehicleEventMessage.class);
+                isaacEventService.handleEvent(topics.extractIsaacVehicleId(topic), message);
+            } else if (topics.isForkliftArrivedTopic(topic)) {
+                VehicleArrivedMessage message = objectMapper.treeToValue(root, VehicleArrivedMessage.class);
+                stationArrivalService.handleArrival(topics.extractForkliftId(topic), message);
             }
         } catch (JsonProcessingException e) {
             log.error("MQTT message discarded: topic={}, reason=invalid JSON, error={}", topic, e.getMessage());
@@ -106,7 +136,10 @@ public class MqttMessageRouter {
         return topics.isForkliftStatusTopic(topic)
                 || topics.isForkliftLocationTopic(topic)
                 || topics.isForkliftPathTopic(topic)
-                || topics.isForkliftCommandResultTopic(topic);
+                || topics.isForkliftCommandResultTopic(topic)
+                || topics.isIsaacTelemetryTopic(topic)
+                || topics.isIsaacEventTopic(topic)
+                || topics.isForkliftArrivedTopic(topic);
     }
 
     private boolean matchesTopicVehicle(String topic, String payloadVehicleId) {

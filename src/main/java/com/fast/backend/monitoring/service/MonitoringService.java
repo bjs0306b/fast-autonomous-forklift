@@ -141,7 +141,13 @@ public class MonitoringService {
      * 추정할 근거조차 없으면 {@code null} 을 돌려 화면이 "확인 불가"로 표시하게 한다 —
      * 모르는 상태를 {@code false}(미적재)로 단정하지 않는다.
      */
-    private static Boolean resolveHasCargo(VehicleResponse vehicle, TransportTask currentTask) {
+    private static Boolean resolveHasCargo(
+            VehicleResponse vehicle,
+            TransportTask currentTask,
+            VehicleLocationSnapshot location) {
+        if (location != null && location.reportedLoaded() != null) {
+            return location.reportedLoaded();
+        }
         Boolean reported = vehicle.status().hasCargo();
         if (reported != null) {
             return reported;
@@ -229,10 +235,7 @@ public class MonitoringService {
             Double cargoHeight,
             DashboardResponse.FailureView lastFailure) {
         VehicleStatusResponse status = vehicle.status();
-        DashboardResponse.LocationView locationView = location == null ? null
-                : new DashboardResponse.LocationView(
-                        location.x(), location.y(), location.heading(), location.speed(), location.frameId(),
-                        location.messageAt(), location.receivedAt());
+        DashboardResponse.LocationView locationView = toLocationView(location, status);
         DashboardResponse.CurrentTaskView taskView = currentTask == null ? null
                 : new DashboardResponse.CurrentTaskView(
                         currentTask.getTaskCode(), currentTask.getStatus().name(),
@@ -241,8 +244,48 @@ public class MonitoringService {
         return new DashboardResponse.VehicleView(
                 vehicle.vehicleId(), vehicle.name(), vehicle.active(), status.status(),
                 locationView, taskView,
-                resolveHasCargo(vehicle, currentTask), cargoId, cargoHeight, lastFailure,
+                resolveHasCargo(vehicle, currentTask, location), cargoId, cargoHeight,
+                currentTask == null ? null : currentTask.getForkHeight(),
+                location == null ? null : location.forkHeight(),
+                location == null ? null : location.battery(),
+                location == null ? null : location.reportedCargoId(),
+                location == null ? null : location.reportedCargoHeight(),
+                location == null ? null : location.reportedTaskId(),
+                lastFailure,
                 lastUpdatedAt);
+    }
+
+    /**
+     * 대시보드에 실을 위치. 인메모리 최신 위치를 우선 쓰고, 없으면 {@code vehicle_current_status} 의
+     * 좌표로 폴백한다.
+     *
+     * <p><b>폴백이 필요한 이유</b>: 최신 위치는 {@code InMemoryLatestVehicleLocationProvider} 가
+     * 들고 있어 <b>백엔드를 재시작하면 사라진다</b>. 그러면 다음 MQTT 위치 메시지가 도착할 때까지
+     * 대시보드가 {@code location=null} 을 내려주고, 화면은 좌표를 이미 아는 차량인데도 "위치 미수신"
+     * 으로 표시한다. DB 에는 {@code updateLocationIfNewer} 로 같은 좌표가 이미 저장돼 있으므로
+     * ({@code ForkliftLocationService}), 그 값을 쓰면 재시작 직후의 공백이 사라진다.
+     *
+     * <p><b>주의 — 폴백 값의 시각은 근사값이다.</b> {@code vehicle_current_status} 의
+     * {@code message_at}/{@code received_at} 컬럼은 상태 메시지와 위치 메시지가 <b>함께 쓰는</b>
+     * 한 쌍이라, 위치보다 상태가 최근이면 그 시각은 위치 수신 시각이 아니라 상태 수신 시각이다.
+     * 좌표 자체는 위치 메시지에서만 갱신되므로 정확하지만, "최근 수신 시간" 표시는 실제보다 새로
+     * 보일 수 있다. 새 위치 메시지가 한 번이라도 들어오면 인메모리 값이 우선이 되어 정확해진다.
+     * (컬럼을 분리하려면 스키마 변경이 필요해 이번 범위에서 다루지 않았다.)
+     */
+    private static DashboardResponse.LocationView toLocationView(
+            VehicleLocationSnapshot location, VehicleStatusResponse status) {
+        if (location != null) {
+            return new DashboardResponse.LocationView(
+                    location.x(), location.y(), location.heading(), location.speed(), location.frameId(),
+                    location.messageAt(), location.receivedAt());
+        }
+        if (status == null || status.positionX() == null || status.positionY() == null) {
+            // 좌표를 한 번도 받은 적이 없는 차량이다. 없는 위치를 만들어 내지 않는다.
+            return null;
+        }
+        return new DashboardResponse.LocationView(
+                status.positionX(), status.positionY(), status.heading(), status.speed(),
+                status.positionFrame(), status.messageAt(), status.receivedAt());
     }
 
     private DashboardResponse.TaskView toTaskView(TransportTask task) {

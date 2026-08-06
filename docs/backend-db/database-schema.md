@@ -69,7 +69,7 @@
 | 컬럼 | 의미 |
 |---|---|
 | `vehicle_id` | 차량 식별자 |
-| `status`, `battery` | 주행 상태와 배터리 잔량 |
+| `status` | 주행 상태 |
 | `position_x`, `position_y`, `position_frame` | 최신 위치와 좌표계 |
 | `heading`, `speed` | 진행 방향과 속도 |
 | `has_cargo`, `cargo_id` | 차량이 보고한 화물 적재 상태 |
