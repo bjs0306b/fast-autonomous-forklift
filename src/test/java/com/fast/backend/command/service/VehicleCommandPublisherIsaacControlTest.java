@@ -70,6 +70,31 @@ class VehicleCommandPublisherIsaacControlTest {
                 "fast/v1/vehicle/sim03/control", 1, false);
     }
 
+    /**
+     * 교통 관제(FR-502-1a)가 내는 RESUME 도 Isaac 제어 계약으로 나가야 한다.
+     *
+     * <p>회귀 방지: RESUME 을 VehicleCommandType 에 추가하면서 이 변환표를 갱신하지 않아,
+     * STOP 은 HOLD 로 나가는데 RESUME 은 default -> null 로 빠져 <b>발행조차 되지 않았다</b>.
+     * 그러면 차량이 멈춘 뒤 영영 다시 가지 않는다(2026-08-06 발견).
+     */
+    @Test
+    void trafficResumeMapsToIsaacResume() {
+        OffsetDateTime issuedAt = OffsetDateTime.now();
+        VehicleCommandMessage message = new VehicleCommandMessage(
+                "cmd-4", "sim03", VehicleCommandTargetSystem.EMBEDDED,
+                VehicleCommandCategory.SAFETY, VehicleCommandType.RESUME,
+                VehicleCommandPayload.empty(), issuedAt);
+        when(mqttTopics.vehicleCommand("sim03")).thenReturn("forklift/sim03/command");
+        when(aliasResolver.resolveExternal("sim03")).thenReturn(Optional.of("sim03"));
+        when(mqttTopics.isaacVehicleControl("sim03")).thenReturn("fast/v1/vehicle/sim03/control");
+
+        publisher.publish(message);
+
+        verify(mqttPublisher).publish(
+                new IsaacVehicleControlMessage("RESUME"),
+                "fast/v1/vehicle/sim03/control", 1, false);
+    }
+
     @Test
     void moveIsAlsoPublishedToIsaacTaskWithRadianYaw() {
         OffsetDateTime issuedAt = OffsetDateTime.of(2026, 8, 6, 12, 5, 0, 0, ZoneOffset.ofHours(9));
