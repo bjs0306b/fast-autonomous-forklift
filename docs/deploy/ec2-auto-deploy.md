@@ -139,6 +139,24 @@ rsync 가 둘 다 `--exclude` 하므로 배포해도 덮어써지지 않는다.
 
 ⚠️ **이 두 파일은 백업이 없다.** 지우면 값을 아는 사람에게 다시 받아야 한다.
 
+### ⚠️ 백엔드 설정을 `.env` 에 넣으면 조용히 무시된다
+
+`docker-compose.yml` 의 backend 서비스에는 **`environment:` 패스스루가 없고 `env_file:
+./backend.env` 하나뿐**이다. 즉 `.env` 에 적은 값은 **compose 파일 안에서 `${...}` 로
+치환되는 것만** 효력이 있다(현재는 `MYSQL_ROOT_PASSWORD`·`DB_PASSWORD`·`NEXT_PUBLIC_*`).
+
+그래서 `STATION_SESSION_TTL_SECONDS`·`MQTT_ENABLED` 같은 **스프링 속성**을 `.env` 에
+넣으면 컨테이너까지 가지 않는다. **에러도 안 난다** — 코드 기본값이 그대로 쓰이고,
+바꾼 줄 알고 넘어가게 된다.
+
+| 바꾸려는 값 | 넣을 곳 |
+|---|---|
+| 스프링 속성 (`STATION_*`·`MQTT_*`·`DB_*`·`CORS_*`) | **`backend.env`** |
+| compose 가 `${...}` 로 읽는 값 (`MYSQL_ROOT_PASSWORD`·`NEXT_PUBLIC_*`) | **`.env`** |
+
+⚠️ `NEXT_PUBLIC_*` 는 Next.js **빌드 인자**라 값을 바꾸면 재시작이 아니라 **재빌드**가
+필요하다(compose `build.args` 로 들어간다).
+
 ---
 
 ## 4. 알아야 할 함정
