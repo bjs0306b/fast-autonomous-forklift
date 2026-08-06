@@ -28,6 +28,14 @@ public record StationMeasurementCreateRequest(
         String measurementId,
         String status,
         Double cargoHeight,
+        /**
+         * 화물 폭(m). 스테이션이 보내지 않으면 {@code null} 이고, 그때는 적재 위치 선택에서
+         * 폭 검사를 건너뛴다(PlacementService 주석 참고).
+         *
+         * <p>깊이(depth)는 받지 않는다 — 정면 카메라 하나로는 측정할 수 없어
+         * {@code ai/src/station/pipeline.py} 가 항상 null 을 낸다.
+         */
+        Double cargoWidth,
         String tippingLevel,
         Double overhangRatio
 ) {

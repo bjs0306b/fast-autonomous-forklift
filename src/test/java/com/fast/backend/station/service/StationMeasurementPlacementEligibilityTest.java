@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class StationMeasurementPlacementEligibilityTest {
 
     private final StationMeasurementPlacementEligibility eligibility =
-            new StationMeasurementPlacementEligibility(new PlacementProperties(0.05, 0.12, 0.05));
+            new StationMeasurementPlacementEligibility(new PlacementProperties(0.05, 0.12, 0.05, 0.10));
 
     // ── 통과 ────────────────────────────────────────────────────────────────
 
@@ -139,7 +139,7 @@ class StationMeasurementPlacementEligibilityTest {
     void limitComesFromConfiguration_notHardcoded() {
         // 상한을 0.10 으로 올리면 0.05 가 허용된다 — 0.05 가 코드에 박혀 있지 않다는 증거다.
         StationMeasurementPlacementEligibility relaxed =
-                new StationMeasurementPlacementEligibility(new PlacementProperties(0.05, 0.12, 0.10));
+                new StationMeasurementPlacementEligibility(new PlacementProperties(0.05, 0.12, 0.10, 0.10));
         assertThat(relaxed.isEligible(measurement(StationMeasurementStatus.OK, 0.723, "SAFE", 0.05))).isTrue();
         assertThat(relaxed.isEligible(measurement(StationMeasurementStatus.OK, 0.723, "SAFE", 0.10))).isFalse();
     }

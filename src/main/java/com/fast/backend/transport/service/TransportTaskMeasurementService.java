@@ -75,7 +75,7 @@ public class TransportTaskMeasurementService {
         final PlacementRecommendation recommendation;
         try {
             recommendation = placementService.recommend(
-                    measurement.getCargoHeight(), loadEmptyCandidates());
+                    measurement.getCargoHeight(), measurement.getCargoWidth(), loadEmptyCandidates());
         } catch (BusinessException exception) {
             fail(task, TaskFailureCode.PLACEMENT_SLOT_UNAVAILABLE, exception.getMessage());
             return false;
@@ -111,7 +111,7 @@ public class TransportTaskMeasurementService {
 
     private PlacementCandidate toCandidate(StorageSlotPlacementRow row) {
         return new PlacementCandidate(
-                row.getSlotCode(), row.getUsableHeight(), row.getForkHeight(),
+                row.getSlotCode(), row.getUsableHeight(), row.getUsableWidth(), row.getForkHeight(),
                 row.getDestinationX(), row.getDestinationY(), row.getDestinationHeading(),
                 null, row.getStatus());
     }

@@ -6,6 +6,8 @@ import com.fast.backend.storage.domain.StorageSlotStatus;
 public class StorageSlotPlacementRow {
     private String slotCode;
     private double usableHeight;
+    /** NULL 가능 — "폭 제약 없음"을 뜻한다(PlacementService 주석 참고). */
+    private Double usableWidth;
     private double forkHeight;
     private double destinationX;
     private double destinationY;
@@ -15,6 +17,8 @@ public class StorageSlotPlacementRow {
     public String getSlotCode() { return slotCode; }
     public void setSlotCode(String slotCode) { this.slotCode = slotCode; }
     public double getUsableHeight() { return usableHeight; }
+    public Double getUsableWidth() { return usableWidth; }
+    public void setUsableWidth(Double usableWidth) { this.usableWidth = usableWidth; }
     public void setUsableHeight(double usableHeight) { this.usableHeight = usableHeight; }
     public double getForkHeight() { return forkHeight; }
     public void setForkHeight(double forkHeight) { this.forkHeight = forkHeight; }

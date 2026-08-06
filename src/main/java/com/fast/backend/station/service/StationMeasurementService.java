@@ -262,6 +262,7 @@ public class StationMeasurementService {
         entity.setSessionId(requestedSessionId);
         entity.setStatus(status);
         entity.setCargoHeight(request.cargoHeight());
+        entity.setCargoWidth(request.cargoWidth());
         // 소문자 입력을 대문자로 정규화해 저장한다 — 비교하는 쪽이 표기를 신경 쓰지 않게 한다.
         entity.setTippingLevel(tippingLevel == null ? null : tippingLevel.name());
         entity.setOverhangRatio(request.overhangRatio());

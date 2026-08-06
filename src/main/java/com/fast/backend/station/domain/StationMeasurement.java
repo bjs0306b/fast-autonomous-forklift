@@ -10,6 +10,7 @@ public class StationMeasurement {
     private String sessionId;
     private StationMeasurementStatus status;
     private Double cargoHeight;
+    private Double cargoWidth;
     private String tippingLevel;
     private Double overhangRatio;
     private LocalDateTime createdAt;
@@ -23,6 +24,8 @@ public class StationMeasurement {
     public StationMeasurementStatus getStatus() { return status; }
     public void setStatus(StationMeasurementStatus status) { this.status = status; }
     public Double getCargoHeight() { return cargoHeight; }
+    public Double getCargoWidth() { return cargoWidth; }
+    public void setCargoWidth(Double cargoWidth) { this.cargoWidth = cargoWidth; }
     public void setCargoHeight(Double cargoHeight) { this.cargoHeight = cargoHeight; }
     public String getTippingLevel() { return tippingLevel; }
     public void setTippingLevel(String tippingLevel) { this.tippingLevel = tippingLevel; }

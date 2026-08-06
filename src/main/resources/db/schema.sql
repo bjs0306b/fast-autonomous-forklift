@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS station_measurement (
     measurement_id VARCHAR(100) NOT NULL COMMENT '측정 결과 중복 방지 식별자',
     session_id     VARCHAR(100) NOT NULL COMMENT '측정 세션 식별자',
     status         VARCHAR(30)  NOT NULL COMMENT '측정 처리 상태',
+    cargo_width         DOUBLE       NULL COMMENT '화물 폭(m). 스테이션 미전송 시 NULL — 폭 검사 생략',
     cargo_height   DOUBLE       NULL COMMENT '팔레트를 제외한 화물 높이(m)',
     tipping_level  VARCHAR(20)  NULL COMMENT '전복 위험 등급(SAFE, WARNING, DANGER)',
     overhang_ratio DOUBLE       NULL COMMENT '팔레트 대비 화물 돌출 비율',
@@ -84,6 +85,9 @@ CREATE TABLE IF NOT EXISTS vehicle_current_status (
 CREATE TABLE IF NOT EXISTS storage_slot (
     slot_code           VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '적재 위치 식별자',
     usable_height       DOUBLE      NOT NULL COMMENT '수직 가용 높이(m)',
+    -- NULL 은 "폭 제약을 모른다"는 뜻이고 폭 검사를 건너뛴다(PlacementService 주석 참고).
+    -- 0 으로 두면 모든 화물이 탈락하므로 쓰지 말 것.
+    usable_width        DOUBLE      NULL COMMENT '수평 가용 폭(m). NULL 이면 폭 제약 없음',
     fork_height         DOUBLE      NOT NULL COMMENT '목표 포크 높이(m)',
     destination_x       DOUBLE      NOT NULL COMMENT '적재 위치 접근 X 좌표(m)',
     destination_y       DOUBLE      NOT NULL COMMENT '적재 위치 접근 Y 좌표(m)',

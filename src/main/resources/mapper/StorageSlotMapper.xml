@@ -4,6 +4,7 @@
     <resultMap id="slotResult" type="com.fast.backend.storage.domain.StorageSlot">
         <id property="slotCode" column="slot_code"/>
         <result property="usableHeight" column="usable_height"/>
+        <result property="usableWidth" column="usable_width"/>
         <result property="forkHeight" column="fork_height"/>
         <result property="destinationX" column="destination_x"/>
         <result property="destinationY" column="destination_y"/>
@@ -15,6 +16,7 @@
     <resultMap id="placementResult" type="com.fast.backend.storage.mapper.StorageSlotPlacementRow">
         <id property="slotCode" column="slot_code"/>
         <result property="usableHeight" column="usable_height"/>
+        <result property="usableWidth" column="usable_width"/>
         <result property="forkHeight" column="fork_height"/>
         <result property="destinationX" column="destination_x"/>
         <result property="destinationY" column="destination_y"/>
@@ -22,15 +24,15 @@
         <result property="status" column="status"/>
     </resultMap>
     <sql id="columns">
-        slot_code, usable_height, fork_height, destination_x, destination_y,
+        slot_code, usable_height, usable_width, fork_height, destination_x, destination_y,
         destination_heading, status, reserved_task_id, stored_cargo_id
     </sql>
     <insert id="insert" parameterType="com.fast.backend.storage.domain.StorageSlot">
         INSERT INTO storage_slot
-            (slot_code, usable_height, fork_height, destination_x, destination_y,
+            (slot_code, usable_height, usable_width, fork_height, destination_x, destination_y,
              destination_heading, status, reserved_task_id, stored_cargo_id)
         VALUES
-            (#{slotCode}, #{usableHeight}, #{forkHeight}, #{destinationX}, #{destinationY},
+            (#{slotCode}, #{usableHeight}, #{usableWidth}, #{forkHeight}, #{destinationX}, #{destinationY},
              #{destinationHeading}, #{status}, #{reservedTaskId}, #{storedCargoId})
     </insert>
     <select id="findBySlotCode" resultMap="slotResult">
@@ -41,12 +43,12 @@
         SELECT <include refid="columns"/> FROM storage_slot ORDER BY slot_code
     </select>
     <select id="findAllEmptySlotsForPlacement" resultMap="placementResult">
-        SELECT slot_code, usable_height, fork_height, destination_x, destination_y,
+        SELECT slot_code, usable_height, usable_width, fork_height, destination_x, destination_y,
                destination_heading, status
         FROM storage_slot WHERE status = 'EMPTY' ORDER BY slot_code
     </select>
     <select id="findPlacementRowBySlotCode" resultMap="placementResult">
-        SELECT slot_code, usable_height, fork_height, destination_x, destination_y,
+        SELECT slot_code, usable_height, usable_width, fork_height, destination_x, destination_y,
                destination_heading, status
         FROM storage_slot WHERE slot_code = #{slotCode}
     </select>
