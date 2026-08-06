@@ -5,9 +5,9 @@
 # the miniature (0.16 m) values here or the robot mis-judges its own size and
 # clips walls.
 #
-# Frames come from kinematic_vehicle.py: SIM_F02_base_link / SIM_F02_odom, and
-# the lidar frame SIM_F02_laser (set in the RTX Lidar graph). Topics are under
-# /sim_f02. Only the lidar (scan) is used as an obstacle source for now; add the
+# Frames come from kinematic_vehicle.py: SIM_F03_base_link / SIM_F03_odom, and
+# the lidar frame SIM_F03_laser (set in the RTX Lidar graph). Topics are under
+# /sim_f03. Only the lidar (scan) is used as an obstacle source for now; add the
 # ToF PointCloud2 sources once those topics are verified.
 #
 # Launch:
@@ -19,10 +19,10 @@
 amcl:
   ros__parameters:
     use_sim_time: true
-    base_frame_id: "SIM_F02_base_link"
-    odom_frame_id: "SIM_F02_odom"
+    base_frame_id: "SIM_F03_base_link"
+    odom_frame_id: "SIM_F03_odom"
     global_frame_id: "map"
-    scan_topic: /sim_f02/scan
+    scan_topic: /sim_f03/scan
     laser_min_range: 1.0
     laser_max_range: 20.0
     max_particles: 2000
@@ -41,7 +41,7 @@ amcl:
     set_initial_pose: true
     initial_pose:
       x: 3.0
-      y: 2.0
+      y: 5.0
       z: 0.0
       yaw: 0.0
 
@@ -49,8 +49,8 @@ bt_navigator:
   ros__parameters:
     use_sim_time: true
     global_frame: map
-    robot_base_frame: SIM_F02_base_link
-    odom_topic: /sim_f02/odom
+    robot_base_frame: SIM_F03_base_link
+    odom_topic: /sim_f03/odom
     bt_loop_duration: 20                    # 10 -> 20 (느린 시뮬 대응)
     default_server_timeout: 60              # 20 -> 60 (플래너 응답 대기 여유)
 
@@ -109,8 +109,8 @@ local_costmap:
       update_frequency: 2.0                 # 5.0 -> 2.0 (부하 감소)
       publish_frequency: 1.0                # 2.0 -> 1.0
       transform_tolerance: 1.0
-      global_frame: SIM_F02_odom
-      robot_base_frame: SIM_F02_base_link
+      global_frame: SIM_F03_odom
+      robot_base_frame: SIM_F03_base_link
       rolling_window: true
       width: 10
       height: 10
@@ -123,7 +123,7 @@ local_costmap:
         enabled: true
         observation_sources: scan fleet
         scan:
-          topic: /sim_f02/scan
+          topic: /sim_f03/scan
           data_type: "LaserScan"
           max_obstacle_height: 3.0
           raytrace_max_range: 20.0
@@ -133,7 +133,7 @@ local_costmap:
           clearing: true
           marking: true
         fleet:
-          topic: /sim_f02/fleet_obstacles
+          topic: /sim_f03/fleet_obstacles
           data_type: "PointCloud2"
           marking: true
           clearing: true
@@ -159,7 +159,7 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: SIM_F02_base_link
+      robot_base_frame: SIM_F03_base_link
       resolution: 0.05
       track_unknown_space: true
       transform_tolerance: 1.0
@@ -176,7 +176,7 @@ global_costmap:
         enabled: true
         observation_sources: scan fleet
         scan:
-          topic: /sim_f02/scan
+          topic: /sim_f03/scan
           data_type: "LaserScan"
           max_obstacle_height: 3.0
           raytrace_max_range: 20.0
@@ -185,7 +185,7 @@ global_costmap:
           clearing: true
           marking: true
         fleet:
-          topic: /sim_f02/fleet_obstacles
+          topic: /sim_f03/fleet_obstacles
           data_type: "PointCloud2"
           marking: true
           clearing: true
@@ -236,8 +236,8 @@ planner_server:
 behavior_server:
   ros__parameters:
     use_sim_time: true
-    global_frame: SIM_F02_odom
-    robot_base_frame: SIM_F02_base_link
+    global_frame: SIM_F03_odom
+    robot_base_frame: SIM_F03_base_link
     # Register the full standard set so bt_navigator's default behavior tree
     # finds every recovery action server it references at startup (missing ones
     # make bt_navigator error out). The Ackermann forklift will not actually use
@@ -262,8 +262,8 @@ behavior_server:
 collision_monitor:
   ros__parameters:
     use_sim_time: true
-    base_frame_id: "SIM_F02_base_link"
-    odom_frame_id: "SIM_F02_odom"
+    base_frame_id: "SIM_F03_base_link"
+    odom_frame_id: "SIM_F03_odom"
     # Sits at the end of the velocity chain: takes the smoothed command and
     # forwards it to the real /cmd_vel, stopping the vehicle if the lidar sees
     # something inside the stop circle.
@@ -285,7 +285,7 @@ collision_monitor:
     observation_sources: ["scan"]
     scan:
       type: "scan"
-      topic: "/sim_f02/scan"
+      topic: "/sim_f03/scan"
       min_height: 0.15
       max_height: 2.0
       enabled: true
@@ -318,5 +318,5 @@ velocity_smoother:
     min_velocity: [-2.0, 0.0, -1.0]
     max_accel: [1.0, 0.0, 2.0]
     max_decel: [-1.0, 0.0, -2.0]
-    odom_topic: "/sim_f02/odom"
+    odom_topic: "/sim_f03/odom"
     odom_duration: 0.1
