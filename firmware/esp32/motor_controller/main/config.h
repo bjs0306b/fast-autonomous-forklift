@@ -223,8 +223,35 @@
 #define MOTOR_B_BIN1_CHANNEL            3
 #define MOTOR_B_BIN2_CHANNEL            4
 
-/* Mechanical steering limits */
-#define DRIVE_REAR_STEER_CENTER_ANGLE_DEG       100.0f
+/*
+ * Mechanical steering limits
+ *
+ * !! 2026-08-06: CENTER 를 TELEOP_STEERING_CENTER_CDEG 에서 **유도**하도록 바꿨다.
+ *    100.0f 가 그대로 박혀 있었는데, 조향 중립은 그 뒤 10000 -> 9600 -> 9400 ->
+ *    9000 으로 세 번 옮겨졌다(197 · 198 · 152). 즉 **부팅·워치독 정지 때 서보가
+ *    100도로 가는데, 코드가 믿는 중립은 90도** 인 상태였다.
+ *
+ *    조용히 틀리는 경로는 이렇다:
+ *      1) 워치독 만료 -> motor_apply_safe_stop() 이 servo_set_angle(100도) 실행
+ *      2) 같은 함수 뒤에서 applied_command.steering_cdeg = 9000 으로 기록
+ *      3) 브리지가 복귀해 중립(9000)을 보내면, task_motor 는 "이미 9000 이다" 로
+ *         보고 **servo_set_angle 을 호출하지 않는다**(중복 회피 최적화)
+ *      4) 결과: 서보는 100도(좌 10도)에 있는데 양쪽 다 중립이라고 믿는다
+ *
+ *    08-04 실측에서 뒷바퀴 2.31도 틀어짐이 3초에 40mm 편차였다 — 10도면 그보다
+ *    훨씬 크게 휜다. 정렬 중 브리지가 한 번 끊기면 그 뒤 주행이 계속 편향된다.
+ *
+ * !! **재플래시해야 반영된다.** 주행 중 조향각은 브리지가 매 프레임 보내므로
+ *    정상 주행은 지금도 맞게 돌지만, **부팅 직후와 워치독 정지 자세**는 펌웨어
+ *    값이 정한다.
+ */
+#define DRIVE_REAR_STEER_CENTER_ANGLE_DEG       ((float)TELEOP_STEERING_CENTER_CDEG / 100.0f)
+/*
+ * !! 아래 둘은 **현재 아무 데서도 쓰지 않는다**(2026-08-06 확인 — 참조처 0).
+ *    옛 중립 100도 기준의 +-30도 값이라 지금 중립(90도)과 짝이 맞지 않는다.
+ *    되살릴 일이 있으면 TELEOP_STEERING_MIN/MAX_CDEG 와 teleop.yaml 의
+ *    steering_min/max_cdeg 에서 유도할 것 — 여기에 숫자를 다시 박지 말 것.
+ */
 #define DRIVE_REAR_STEER_RIGHT_TURN_ANGLE_DEG   70.0f
 #define DRIVE_REAR_STEER_LEFT_TURN_ANGLE_DEG    130.0f
 
