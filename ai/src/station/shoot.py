@@ -94,9 +94,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="저장 폴더 (없으면 만든다)")
     parser.add_argument("--prefix", default="rig", help="파일명 접두사")
     parser.add_argument("--camera", type=int, help="카메라 인덱스 (기본: config)")
-    # 온보드 -s 촬영(S15P11A304-144)은 스테이션 BRIO와 다른 USB 카메라(1280x960)를 쓴다.
-    # 해상도는 학습 시 어차피 리사이즈되므로 도메인만 맞으면 되고, 여기서 실제 카메라
-    # 네이티브 해상도를 지정해 매 프레임 mismatch 경고가 뜨지 않게 한다.
+    # 온보드 -s 촬영(S15P11A304-144)은 스테이션 BRIO와 다른 USB 카메라를 쓴다.
+    #
+    # ⚠️ **판매 스펙은 1280x960이지만 실제로는 안 나온다** — 요청해도 조용히 800으로
+    #    떨어진다(라벨 가이드 §해상도에서 실측). 실제 지원 모드는 640x480 · 800x600 ·
+    #    1280x720 · **1280x800**(30fps)이고, 학습·평가셋은 전부 **1280x800**으로 찍었다.
+    #    젯슨에 물리면 최대가 **1280x720**이라 800도 안 나온다.
+    #
+    # 해상도는 학습 시 어차피 리사이즈되므로 도메인만 맞으면 되고, 여기서 실제로 잡히는
+    # 해상도를 지정해 매 프레임 mismatch 경고가 뜨지 않게 한다.
     parser.add_argument("--width", type=int, help="캡처 폭 (기본: config)")
     parser.add_argument("--height", type=int, help="캡처 높이 (기본: config)")
     parser.add_argument("--burst", type=int, default=5, help="B키 1회에 저장할 장수")

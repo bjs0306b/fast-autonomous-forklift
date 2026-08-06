@@ -1,5 +1,8 @@
 import math
+import pathlib
 import unittest
+
+import yaml
 
 from forklift_teleop.mapping import TeleopLimits, map_twist, select_command
 
@@ -69,11 +72,18 @@ class MappingTest(unittest.TestCase):
 
     def test_values_are_clamped(self):
         command = map_twist(99.0, -99.0, self.limits)
-        self.assertEqual(command.drive_percent, 60)
+        self.assertEqual(command.drive_percent, self.limits.max_drive_percent)
         # 상한으로 잘린 입력은 **상한값을 직접 준 것과 같아야** 한다.
-        # ⚠️ 이때 조향이 최대(RIGHT_FULL)가 되는 것이 아니다 — 0.2 m/s 에서는
-        #    같은 각속도가 더 작은 곡률이라 14° 정도다. 속도가 조향각을 정한다.
-        self.assertEqual(command, map_twist(0.2, -0.35, self.limits))
+        # ⚠️ 이때 조향이 반드시 최대(RIGHT_FULL)가 되는 것은 아니다 — 조향각은
+        #    곡률(angular/linear)에서 나오므로 **속도가 조향각을 정한다.**
+        #
+        # ⚠️ 상한을 숫자로 적지 않는다. 2026-08-05 에 max_angular_rps 가
+        #    0.35 → 0.75 로 바뀌자 여기 적힌 0.35 때문에 이 테스트만 깨졌다.
+        self.assertEqual(
+            command,
+            map_twist(self.limits.max_linear_mps,
+                      -self.limits.max_angular_rps,
+                      self.limits))
 
     def test_defaults_match_the_deployed_config(self):
         """기본값이 config/teleop.yaml 과 어긋나지 않게 못 박는다.
@@ -81,13 +91,32 @@ class MappingTest(unittest.TestCase):
         브리지는 늘 yaml 을 명시적으로 넘기므로 기본값이 낡아도 **동작에는 영향이
         없다.** 그래서 낡은 줄 모르고 지나간다 — 인자 없이 `TeleopLimits()` 를
         만드는 코드가 하나 생기는 순간 조용히 틀린 조향값을 쓴다.
+
+        ⚠️ **기대값을 여기 적지 않고 yaml 을 읽어서 비교한다.** 종전에는 필드를
+        골라 숫자로 적었는데, 그러면 **적어두지 않은 필드는 안 지켜진다** —
+        2026-08-05 에 `max_angular_rps` 가 0.35 → 0.75 로 바뀌었을 때 여기서
+        안 잡혔다. 이제 두 곳에 다 있는 필드는 전부 자동으로 비교된다.
         """
-        self.assertEqual(self.limits.steering_center_cdeg, self.CENTER)
-        self.assertEqual(self.limits.steering_min_cdeg, self.RIGHT_FULL)
-        self.assertEqual(self.limits.steering_max_cdeg, self.LEFT_FULL)
-        self.assertEqual(self.limits.min_drive_percent, 35)
+        params = self._deployed_params()
+        common = [f for f in vars(self.limits) if f in params]
+        # 필드가 실수로 하나도 안 겹치면(키 구조 변경 등) 통과처럼 보이면 안 된다.
+        self.assertGreaterEqual(len(common), 8, f"비교된 필드: {common}")
+        for field in common:
+            with self.subTest(field=field):
+                self.assertEqual(getattr(self.limits, field), params[field])
+
+        # yaml 에 없는 관계(조향 폭 ↔ 각도 한계)는 여기서 따로 못 박는다.
         self.assertEqual(self.limits.rear_steering_limit_deg,
                          (self.LEFT_FULL - self.CENTER) / 100.0)
+
+    def _deployed_params(self):
+        path = (pathlib.Path(__file__).resolve().parent.parent
+                / "config" / "teleop.yaml")
+        if not path.exists():                       # 설치 트리에서 실행된 경우
+            self.skipTest(f"config/teleop.yaml 을 찾지 못했다: {path}")
+        with path.open(encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle)
+        return loaded["uart_teleop_bridge"]["ros__parameters"]
 
     def test_slower_speed_increases_steering_for_same_yaw_rate(self):
         fast = map_twist(0.2, 0.2, self.limits)

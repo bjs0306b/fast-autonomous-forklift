@@ -23,9 +23,16 @@ MQTT 발행을 대체한다(2026-07-31). 백엔드가 `fast/station/+/measuremen
 적재 판단에서 파렛트 높이 0.12m를 따로 더한다(`requiredHeight = cargoHeight + 0.12 +
 clearance`). 총높이를 보내면 파렛트를 두 번 더하게 된다.
 
-⚠️ **세션이 먼저 열려 있어야 한다.** `sessionId`는 보내지 않고 백엔드가 활성 세션을
-찾아 붙인다. 없으면 409 `STATION_SESSION_NOT_ACTIVE` —
-`POST /api/stations/sessions?cargoId=...`로 먼저 연다.
+⚠️ **세션이 먼저 열려 있어야 하고, `sessionId`를 실어 보내야 한다.**
+`POST /api/stations/sessions?cargoId=...`로 열어 받은 값을 그대로 넣는다(아래
+`to_request` 참조). 빠지면 400 `sessionId 는 필수입니다`.
+
+> ⚠️ 종전 이 자리에 *"`sessionId`는 보내지 않고 백엔드가 활성 세션을 찾아 붙인다"*
+> 고 적혀 있었다. **2026-07-31에 바뀐 것을 이 머리말만 안 따라왔다**(같은 파일
+> `to_request` 주석은 맞게 적고 있었다 — 한 파일 안에서 서로 모순, 2026-08-06 정정).
+> 바뀐 이유가 중요하다: 활성 세션에 붙이면 **세션 A가 TTL로 풀리고 B가 열린 뒤 도착한
+> A의 늦은 측정이 B에 오귀속**된다. 그래서 불일치는 409 `STATION_SESSION_MISMATCH`로
+> 거부되고, **그때 새 세션 id로 바꿔 재전송하면 막으려던 오귀속을 되살린다.**
 
 409 `STATION_MEASUREMENT_ID_DUPLICATED`는 이미 저장됐다는 뜻이라 재전송이 필요 없다.
 
@@ -268,8 +275,9 @@ def measurement_session(cargo_id: str, base_url: str | None = None,
                     f"  sessionId = {session_id}\n"
                     f"  사유      = {e.body or e}\n"
                     f"  복구      : python src/station/serve.py --release-session\n"
-                    f"  (측정이 저장되기 전에는 백엔드가 종료를 거부한다. TTL이 없어\n"
-                    f"   방치하면 다른 화물이 측정을 시작할 수 없다.)\n",
+                    f"  (측정이 저장되기 전에는 백엔드가 종료를 거부한다.\n"
+                    f"   방치하면 TTL 60초까지 다른 화물이 측정을 시작할 수 없고,\n"
+                    f"   그 뒤 자동 해제되면서 이 작업은 FAILED 로 끝난다 — 재측정은 없다.)\n",
                     file=sys.stderr)
     # 원래 예외가 있었다면 이 지점에 오지 않는다 — 덮어쓰지 않는다는 뜻이다.
     if failed_to_close is not None:

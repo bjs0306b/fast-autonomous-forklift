@@ -85,7 +85,15 @@ class StationConfig:
     miniature_scale: int = 10          # 실물 ÷10 = 미니어처 (명세 §2.1)
     # 파렛트 높이(실물 cm). 화물은 **항상 파렛트 위에 실려** 운반되므로, 적재 위치
     # 산출(FR-202)에 넘길 값은 화물 높이가 아니라 **파렛트를 포함한 총높이**다.
-    # T-11 표준 120mm (hardware/pallet_mini.scad R_height).
+    # T-11 표준 **120mm**. 스테이션이 재는 것은 **실물 크기** 화물·파렛트이므로 이 값도
+    # 실물 기준이고, 백엔드의 `storage.placement.pallet-height-m: 0.12` 과 같은 값이다.
+    #
+    # ⚠️ `hardware/pallet_mini.scad` 의 `R_height` 와 **다르다**(거기는 140). 그쪽은
+    #    3D 출력된 **미니어처** 파렛트를 실측한 값이다 — 설계는 12mm(=실물 120mm)였는데
+    #    출력 공차로 14mm 로 나왔고, 그래서 온보드 포크 높이를 7mm 로 다시 잡았다.
+    #    스테이션(실물)과 온보드(미니어처)는 **다른 물건을 재므로 값이 달라도 맞다.**
+    #    종전 이 주석이 "T-11 표준 120mm (scad R_height)" 라고 두 값을 같은 것처럼
+    #    가리키고 있었다(2026-08-06 정정).
     pallet_height_cm: float = 12.0
     eccentric_threshold: float = 0.3   # 편하중 임계 (load_balance 기본과 동일)
 

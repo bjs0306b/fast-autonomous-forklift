@@ -17,6 +17,7 @@ from control.fork_servo import (
     RETREAT_MAX_ANGULAR,
     RETREAT_MAX_STEP_MM,
     RETREAT_MIN_STEP_MM,
+    RETREAT_SPEED_ACTUAL,
     RETREAT_TARGET_MM,
     VERIFY_FRAMES,
     ForkServo,
@@ -505,7 +506,11 @@ def test_정상_전진이면_멎음으로_안_본다() -> None:
         assert cmd.phase is not Phase.ABORT, "정상 접근을 멎음으로 오판했다"
         if cmd.phase is Phase.INSERT:
             break
-        distance -= 0.15 * 1000 * DT      # ALIGN 실속도 0.15 m/s
+        # ⚠️ **`ALIGN_SPEED`(0.06)로 바꾸지 말 것.** 그건 명령값이고 이건 실측 속도다 —
+        #    구동 PWM 하한 때문에 실제로는 명령보다 빨리 구른다(S15P11A304-198).
+        #    대응하는 상수가 없어서 리터럴로 둔다. 둘을 같은 값으로 만들면 이 시뮬은
+        #    2.5배 느리게 돌아 멎음 판정을 잘못 검증한다.
+        distance -= 0.15 * 1000 * DT      # ALIGN 실측 속도 0.15 m/s
     assert servo.episode.outcome != "stalled"
 
 
@@ -519,7 +524,10 @@ def test_후진은_거리가_늘어야_나아간_것이다() -> None:
         assert cmd.phase is not Phase.ABORT, "정상 후진을 멎음으로 오판했다"
         if cmd.phase is not Phase.RETREAT:
             break
-        distance += 0.138 * 1000 * DT     # 실측 후진 속도
+        # ⚠️ 실측 후진 속도를 **상수에서 가져온다.** 종전엔 0.138 이 박혀 있었는데,
+        #    전진 쪽 INSERT_SPEED_ACTUAL 은 0.244 → 0.138 → 0.110 으로 두 번 바뀌었다.
+        #    후진 값이 바뀌는 날 이 테스트만 옛 속도로 시뮬레이션하게 된다.
+        distance += RETREAT_SPEED_ACTUAL * 1000 * DT
     assert servo.episode.outcome != "stalled"
 
 

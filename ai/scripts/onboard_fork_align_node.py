@@ -90,8 +90,10 @@ def main(argv=None) -> int:
                     help="좌우 오차 게인. 안 주면 fork_servo 기본값")
     ap.add_argument("--k-lateral-rate", type=float, default=None,
                     help="좌우 오차 **변화율**에 걸리는 감쇠 게인. 기본 0(꺼짐). "
-                         "ALIGN 한계진동이 감쇠 부재 때문인지 시험할 때 켠다 — "
-                         "먼저 --k-lateral 0.10 으로 게인 문제인지부터 가른다")
+                         "ALIGN 한계진동이 감쇠 부재 때문인지 시험할 때 켠다. "
+                         "⚠️ 진동 관측은 조향이 8°이던 시절(08-05 펄스 수정 전) 것이고, "
+                         "지금은 정렬이 끝나므로 더 안 판다. 정렬이 다시 안 끝나면 "
+                         "그때 --k-lateral 0.10 으로 게인 문제인지 먼저 가른다")
     ap.add_argument("--insert-margin", type=float, default=None,
                     help="진입 목표에서 빼는 여유(mm). 줄일수록 깊이 들어간다. "
                          "⚠️ 한 번에 많이 줄이면 파렛트를 민다 — 한 단계씩")
@@ -101,19 +103,20 @@ def main(argv=None) -> int:
                          "재접근(154)이 확실히 발동한다. 실주행 기본값으로 쓰지 말 것")
     ap.add_argument("--max-retries", type=int, default=None,
                     help="진입 거리에서 미정렬일 때 물러나 재접근하는 횟수 "
-                         "(S15P11A304-154, 기본 2). 0 이면 종전처럼 바로 ABORT")
+                         "(S15P11A304-154, 기본 20). 0 이면 종전처럼 바로 ABORT. "
+                         "⚠️ 한 걸음이 80~120mm 라 걸음 수가 많아야 한다 — "
+                         "실질 예산은 --max-seconds 다")
     ap.add_argument("--retreat-target", type=float, default=None,
-                    help="후진 목표 거리(mm, 기본 700 = ALIGN 진입 거리). "
-                         "⚠️ 줄이면 재접근 때 정렬 구간이 그만큼 짧아져 같은 이유로 "
-                         "또 실패한다")
+                    help="거리를 **모를 때만** 쓰는 후진 목표(mm, 기본 600). "
+                         "거리를 알면 틀어진 만큼 계산한다(80~120mm 로 절삭)")
     ap.add_argument("--retreat-max-s", type=float, default=None,
-                    help="후진 시간 상한(초, 기본 4.0 ≈ 71cm). 목표가 아니라 "
+                    help="후진 시간 상한(초, 기본 5.0). 목표가 아니라 "
                          "**안전 상한**이다 — 거리 판정이 죽었을 때만 걸린다. "
                          "⚠️ 뒤는 카메라가 안 본다")
     ap.add_argument("--retreat-steer", type=float, default=None,
-                    help="후진 중 조향 세기. **1.0 = 최대 조향까지 쓴다**(기본 0 = "
-                         "곧게 물러남). ⚠️ **부호 미검증** — 1.0 으로 돌려 후진 구간 "
-                         "yaw_deg 절댓값이 줄면 맞고, 커지면 -1.0 으로 뒤집는다")
+                    help="후진 중 조향 세기. **1.0 = 최대 조향, 음수 = 방향 반전** "
+                         "(기본 -1.0). ⚠️ 부호는 2026-08-05 실측으로 확정했다 — "
+                         "+1.0 은 lat 이 +0.33 → +4.8 로 발산했다. 0 이면 곧게 물러난다")
     ap.add_argument("--yaw-deg-tolerance", type=float, default=None,
                     help="진입을 허가할 요각 상한(도, 기본 10). ⚠️ 이게 없던 동안 "
                          "요각 -58.5° 인 채로 진입이 허가돼 포크가 비스듬히 스쳤다")

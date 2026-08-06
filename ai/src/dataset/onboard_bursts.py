@@ -291,7 +291,8 @@ def cmd_expand(a) -> int:
     print(f"  라벨 없는 프레임 {stats['empty']}장 "
           "(네거티브 42장이 여기 포함돼야 정상)")
     if not stats["per_class"].get("hole"):
-        print("⚠️ hole이 0개다 — 3클래스 학습의 의미가 없다. 라벨을 확인할 것.")
+        print("⚠️ hole이 0개다 — 온보드는 pallet·hole 2클래스이고, hole 이 없으면 "
+              "포크 정렬이 성립하지 않는다. 라벨을 확인할 것.")
     return 0
 
 

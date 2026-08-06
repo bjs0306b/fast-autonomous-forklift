@@ -15,10 +15,20 @@ Spring Backend
   → forklift/{vehicleId}/command-result → Spring Backend
 ```
 
-현재 저장소에는 Nav2 `NavigateToPose`, 정지·비상정지 service, 상태 원본 message type가 없습니다.
-따라서 MOVE/EMERGENCY_STOP을 임의 토픽으로 보내지 않으며 기본 adapter는 `REJECTED` 결과를
-회신합니다. mock adapter 통합 테스트로 명령 전달/성공/실패 결과 흐름을 검증했고, 실제 제어
-adapter는 팀이 ROS2 interface를 확정한 뒤 연결해야 합니다.
+> ✅ **MOVE 는 2026-08-03에 연결됐다**(S15P11A304-192·193). `nav2_adapter.py` ·
+> `nav2_goal_sender.py` 가 `NavigateToPose` 액션으로 실행하고, 회전 없이 도는 행동트리
+> (`forklift_teleop/behavior_trees/navigate_to_pose_no_spin.xml`)를 물렸습니다.
+> **배선까지만 검증됐고 실주행은 미검증**입니다.
+>
+> ⚠️ **`/cmd_vel` 인계 규칙이 없습니다**(S15P11A304-**199**). Nav2 와 포크 정렬 루프
+> (`ai/scripts/onboard_fork_align_node.py`)가 같은 토픽을 동시에 잡을 수 있어, 지금은
+> 포크 정렬 전에 사람이 Nav2 를 내립니다.
+
+MOVE 를 뺀 나머지는 아직 연결되지 않았습니다 — 정지·비상정지 service, 상태 원본
+message type 가 저장소에 없습니다. 따라서 EMERGENCY_STOP 을 임의 토픽으로 보내지 않으며
+기본 adapter 는 `REJECTED` 결과를 회신합니다. mock adapter 통합 테스트로 명령 전달·성공·
+실패 결과 흐름을 검증했고, 실제 제어 adapter 는 팀이 ROS2 interface 를 확정한 뒤
+연결해야 합니다.
 
 ## 조사된 ROS2 연결
 
@@ -28,7 +38,7 @@ adapter는 팀이 ROS2 interface를 확정한 뒤 연결해야 합니다.
 | 위치 | parameter `location_topic` | `nav_msgs/msg/Odometry` | 토픽을 명시한 경우만 연결 |
 | 경로 | parameter `path_topic` | `nav_msgs/msg/Path` | 토픽을 명시한 경우만 연결 |
 | 상태 | 팀 확인 필요 | 팀 확인 필요 | adapter API만 제공 |
-| MOVE | Nav2/action 또는 이동 service 팀 확인 필요 | 팀 확인 필요 | 기본 adapter는 REJECTED |
+| MOVE | `navigate_to_pose` (action) | `nav2_msgs/action/NavigateToPose` | ✅ **연결됨**(`nav2_adapter.py`, 2026-08-03). 배선까지만 검증 |
 | STOP | 백엔드상 `EMBEDDED+SAFETY` | 팀 확인 필요 | ROS2에서 실행 안 함 |
 | EMERGENCY_STOP | `ALL+SAFETY` | 팀 확인 필요 | 실제 모터 제어 안 함, REJECTED |
 | 포크/적재 | 임베디드 대상 | 임베디드 규격 | ROS2에서 실행 안 함 |

@@ -2,6 +2,21 @@
 
 > 대상: `frontend/monitoring-control-system` (Next.js 16 App Router · React 19 · TS · Tailwind v4 · SockJS/STOMP)
 > 기준일: 2026-07-29 · **실제 코드 검증 기준**
+>
+> ⚠️ **그 뒤 프론트가 움직였다** — 2026-08-04 에 측정 실패 원인 코드 대시보드·
+> 관제 실패 카드가 들어갔다(Jira 190). 아래 §2 "구현·미구현" 표는 **07-29 스냅샷**이다.
+>
+> **2026-08-06 재확인** — §2 항목별로 다시 봤다:
+>
+> | §2 항목 | 지금 |
+> |---|---|
+> | 명령 결과 표시 (`/topic/vehicles/result` 미구독) | ✅ **구독한다** — `hooks/useMonitoringSocket.ts` 가 `TOPIC_VEHICLE_RESULT` 로 구독 중 |
+> | `RESET_ESTOP` | ⚠️ **여전히 타입뿐** — `types/command.ts` 의 유니온 값이고 호출하는 UI가 없다 |
+>
+> ⚠️ **08-05 에 이 자리에 "`/topic/vehicles/result` 구독도 없다"고 적었던 것은 틀렸다.**
+> 토픽 문자열이 `types/websocket.ts` 에만 보인다고 미구독으로 판단했는데, 상수를 타입
+> 파일에 정의하고 훅에서 import 해 쓰는 구조였다. **문자열이 어디 있나가 아니라
+> `subscribe(` 호출을 봐야 한다**(2026-08-06 정정).
 > 선행 문서: `wireframe-monitoring.md`(유지, 삭제하지 않음) → 이 문서가 구현용 최종본
 > 코드 수정·Git 명령·서버 실행·API 호출 **없음**
 

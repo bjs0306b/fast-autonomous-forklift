@@ -13,7 +13,11 @@ class ActuatorCommand:
 @dataclass(frozen=True)
 class TeleopLimits:
     max_linear_mps: float = 0.20
-    max_angular_rps: float = 0.35
+    # ⚠️ 0.35 → 0.75 (2026-08-05, S15P11A304-152). teleop.yaml 이 0.75 로 올라갈 때
+    #    여기만 안 따라왔다 — 아래 steering_* 주석이 경고한 바로 그 자리다.
+    #    상한을 올린 것이지 명령을 키운 것이 아니다: 전진 조향은 fork_servo 의
+    #    MAX_ANGULAR(0.35)이 그대로 자르고, 후진만 RETREAT_MAX_ANGULAR(0.60)를 쓴다.
+    max_angular_rps: float = 0.75
     linear_deadband_mps: float = 0.01
     wheelbase_m: float = 0.144
     # ⚠️ 이 값은 아래 steering_min/max 로 표현 가능한 각도와 **같아야 한다**

@@ -64,8 +64,25 @@
 #define STEPPER_MOTOR_MAX_ACCEL_SPS2      20000U
 
 /*
- * Keep disabled by default. Enable only for a wheel-off/load-free bench test.
- * The normal firmware never moves the lift automatically at boot.
+ * !! **부팅 시 포크는 움직인다.** (2026-08-06 정정)
+ *
+ *    종전 이 자리에 "The normal firmware never moves the lift automatically at
+ *    boot" 라고 적혀 있었는데 **사실이 아니다** — 바로 아래 STARTUP_HOME_ENABLED 가
+ *    1 이고, main.c 가 부팅 때 호밍을 실행한다:
+ *
+ *      전원 인가 -> 10초 카운트다운 경고 로그 -> 하한 리밋까지 하강
+ *                -> 리밋 감지 -> 500ms 대기 -> 1600스텝 상승(백오프)
+ *
+ *    즉 **전원을 넣으면 10초 뒤 포크가 내려간다.** 포크 아래에 손·화물·파렛트가
+ *    있으면 안 된다. 10초 카운트다운은 그걸 치우라고 있는 것이고, 로그에
+ *    "keep power cutoff ready" 가 같이 찍힌다.
+ *
+ * !! 호밍이 실패하면 ESP_ERROR_CHECK 가 **MCU 를 abort(재부팅)** 시킨다.
+ *    리밋 스위치가 눌린 채 고장나면 부팅 -> 호밍 실패 -> 재부팅 루프가 된다.
+ *    그때는 STARTUP_HOME_ENABLED 를 0 으로 두고 플래시해 원인을 먼저 본다.
+ *
+ * STARTUP_TEST_ENABLED 는 호밍 대신 도는 무부하 벤치 테스트다(#elif 라 둘이 동시에
+ * 안 돈다). 바퀴를 띄우고 부하를 뗀 상태에서만 켤 것.
  */
 #define STEPPER_MOTOR_STARTUP_TEST_ENABLED 0
 #define STEPPER_MOTOR_STARTUP_HOME_ENABLED 1
@@ -223,8 +240,35 @@
 #define MOTOR_B_BIN1_CHANNEL            3
 #define MOTOR_B_BIN2_CHANNEL            4
 
-/* Mechanical steering limits */
-#define DRIVE_REAR_STEER_CENTER_ANGLE_DEG       100.0f
+/*
+ * Mechanical steering limits
+ *
+ * !! 2026-08-06: CENTER 를 TELEOP_STEERING_CENTER_CDEG 에서 **유도**하도록 바꿨다.
+ *    100.0f 가 그대로 박혀 있었는데, 조향 중립은 그 뒤 10000 -> 9600 -> 9400 ->
+ *    9000 으로 세 번 옮겨졌다(197 · 198 · 152). 즉 **부팅·워치독 정지 때 서보가
+ *    100도로 가는데, 코드가 믿는 중립은 90도** 인 상태였다.
+ *
+ *    조용히 틀리는 경로는 이렇다:
+ *      1) 워치독 만료 -> motor_apply_safe_stop() 이 servo_set_angle(100도) 실행
+ *      2) 같은 함수 뒤에서 applied_command.steering_cdeg = 9000 으로 기록
+ *      3) 브리지가 복귀해 중립(9000)을 보내면, task_motor 는 "이미 9000 이다" 로
+ *         보고 **servo_set_angle 을 호출하지 않는다**(중복 회피 최적화)
+ *      4) 결과: 서보는 100도(좌 10도)에 있는데 양쪽 다 중립이라고 믿는다
+ *
+ *    08-04 실측에서 뒷바퀴 2.31도 틀어짐이 3초에 40mm 편차였다 — 10도면 그보다
+ *    훨씬 크게 휜다. 정렬 중 브리지가 한 번 끊기면 그 뒤 주행이 계속 편향된다.
+ *
+ * !! **재플래시해야 반영된다.** 주행 중 조향각은 브리지가 매 프레임 보내므로
+ *    정상 주행은 지금도 맞게 돌지만, **부팅 직후와 워치독 정지 자세**는 펌웨어
+ *    값이 정한다.
+ */
+#define DRIVE_REAR_STEER_CENTER_ANGLE_DEG       ((float)TELEOP_STEERING_CENTER_CDEG / 100.0f)
+/*
+ * !! 아래 둘은 **현재 아무 데서도 쓰지 않는다**(2026-08-06 확인 — 참조처 0).
+ *    옛 중립 100도 기준의 +-30도 값이라 지금 중립(90도)과 짝이 맞지 않는다.
+ *    되살릴 일이 있으면 TELEOP_STEERING_MIN/MAX_CDEG 와 teleop.yaml 의
+ *    steering_min/max_cdeg 에서 유도할 것 — 여기에 숫자를 다시 박지 말 것.
+ */
 #define DRIVE_REAR_STEER_RIGHT_TURN_ANGLE_DEG   70.0f
 #define DRIVE_REAR_STEER_LEFT_TURN_ANGLE_DEG    130.0f
 

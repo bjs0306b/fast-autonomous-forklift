@@ -1,30 +1,52 @@
 # AI / 비전 (EPIC-1)
 
-지게차 화물 인식 파트. **박스·파렛트 2클래스**로 RTMDet을 학습해
-Jetson Orin Nano에 배포하는 것이 최종 목표다 (FR-101).
+지게차 화물 인식 파트. RTMDet 기반이고 **배포처가 둘로 갈린다**(2026-07-22 결정, MR !36).
 
-| 목표 지표 | 값 |
-|---|---|
-| 박스 인식 정확도 | mAP@0.5 ≥ 92% |
-| 추론 지연 | ≤ 100ms (≥ 10 FPS) |
+| | 어디서 | 모델 | 클래스 | 하는 일 |
+|---|---|---|---|---|
+| 측정 스테이션 | 측정 PC (추론은 젯슨 위임) | RTMDet-**m** @800 | `box` · `pallet` | 화물 치수·전복·편하중 |
+| 온보드 | Jetson Orin Nano | RTMDet-**s** @640 TRT FP16 | `pallet` · `hole` | 포크 정렬 |
+
+⚠️ **둘 다 2클래스지만 내용이 다르다.** 온보드 `box` 는 흰 파렛트를 오인해 2026-07-30에
+폐기했다. "온보드 3클래스" 라고 적힌 옛 기술이 있으면 그건 틀린 것이다.
+
+| 목표 지표 | 값 | 실측 |
+|---|---|---|
+| 박스 인식 정확도 | mAP@0.5 ≥ 92% | ✅ 리그 평가셋 **0.9898**(exp8) |
+| 추론 지연 | ≤ 100ms (≥ 10 FPS) | ✅ 온보드 TRT **10.18ms**(엔진) · 종단 44.96ms/22.2fps |
+| 치수 오차 | ≤ 4mm | ✅ 평균 **0.66mm** / 최대 2.10mm |
 
 ## 디렉터리
 
+> ⚠️ **이 README 본문은 데이터셋 구축(FR-101-1·2) 단계의 기록이다.** 그 뒤로 `ai/` 는
+> **측정 스테이션**·**온보드 포크 정렬**까지 담게 됐고, 그쪽 문서는 아래 표를 따라간다.
+
 ```
 ai/
-├─ configs/datasets.yaml   데이터셋 소스·카테고리 매핑 정의
-├─ src/dataset/
-│  ├─ coco.py              COCO 빌더, 중복 판별(image_identity)
-│  ├─ sources.py           소스별 변환기 (COCO / SKU-110K CSV)
-│  ├─ convert.py           변환 CLI
-│  ├─ review.py            라벨 검수 CLI
-│  ├─ split.py             train/val 분할 CLI (원본 단위)
-│  └─ extract_roboflow.py  Roboflow zip 추출 (Windows 경로 길이 대응)
-├─ tests/                  변환 로직 테스트
-└─ data/                   원본·변환 결과 (git 제외)
-   ├─ raw/                 내려받은 원본
-   └─ processed/           변환된 COCO json
+├─ configs/               데이터셋 정의(datasets.yaml) · 학습 config
+├─ src/
+│  ├─ dataset/            데이터셋 변환·검수·분할·라벨링 (이 README 본문)
+│  ├─ perception/         검출기 래퍼(OnnxDetector·TrtDetector) · 포크 정렬 오차 산출
+│  ├─ control/            fork_servo — 포크 정렬 상태기계(SEARCH~RETREAT~INSERT)
+│  ├─ station/            측정 스테이션 서비스(카메라·TF-Nova·추론·REST 전송)
+│  └─ rtmdet_ext/         MMDetection 확장
+├─ scripts/               실행 진입점 (아래 표)
+├─ models/                ONNX·체크포인트 (대용량은 git 제외)
+├─ tests/                 변환 로직 · fork_servo 테스트
+└─ data/                  원본·변환 결과 (git 제외)
+   ├─ raw/                내려받은 원본
+   └─ processed/          변환된 COCO json
 ```
+
+### 어디를 볼 것인가
+
+| 하려는 일 | 진입점 | 문서 |
+|---|---|---|
+| 화물 치수·전복·편하중 측정 | `python -m station.serve` | `docs/ai/station-measurement-handoff.md` |
+| 포크 정렬 실주행 | `scripts/onboard_fork_align_node.py` | `docs/ai/onboard-fork-align-runbook.md` |
+| 젯슨 TRT 엔진 빌드 | `scripts/onboard_trt_bench.py` | `docs/ai/onboard-tensorrt-runbook.md` |
+| 온보드 재학습·라벨링 | `src/dataset/label_onboard.py` | `docs/ai/onboard-finetune-runbook.md` · `onboard-hole-label-guide.md` |
+| 데이터셋 구축 | `src/dataset/convert.py` | **이 README 본문** |
 
 ## 환경 준비
 
@@ -339,5 +361,8 @@ Benewake TF-Nova 단일 점 거리계. UART 115200 8N1, 9바이트 프레임(헤
 
 ```bash
 cd ai
-python -m pytest
+conda run -n ai_env python -m pytest
 ```
+
+⚠️ `python.exe` 를 전체 경로로 직접 호출하면 환경이 활성화되지 않아 MKL DLL 을 못 찾고
+`numpy` 의 `@`·`linalg` 에서 프로세스가 죽는다. 항상 `conda run` 으로 실행한다.
