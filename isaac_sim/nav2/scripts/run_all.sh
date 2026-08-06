@@ -89,8 +89,22 @@ sleep 2
 if [ "$USE_MQTT" -eq 1 ]; then
   if python3 -c "import paho.mqtt.client" 2>/dev/null; then
     echo ">>> MQTT 브릿지 (${MQTT_HOST:-localhost}:${MQTT_PORT:-1883}, 로그: /tmp/mqtt_bridge.log)"
-    # 브로커 주소·계정은 환경변수로 넘긴다. 인증이 걸린 팀 브로커면:
-    #   MQTT_HOST=192.168.0.10 MQTT_USER=fast MQTT_PASS=... ./run_all.sh
+    # 브로커 주소·계정은 환경변수로 넘긴다.
+    #
+    # ⚠️ **운영 브로커는 TLS 8883 이다** (2026-08-06 정정). 아래 예시가 평문 인증만
+    #    보여주고 있어서 그대로 따라 하면 붙지 않는다 — EC2 는 1883 에 아무것도
+    #    리스닝하지 않고, 8883 에 평문으로 붙으면 핸드셰이크에서 끊긴다.
+    #
+    #   운영(EC2):
+    #     MQTT_HOST=i15a304.p.ssafy.io MQTT_PORT=8883 MQTT_TLS=1 \
+    #     MQTT_CA=/path/to/fast-mqtt-ca.crt \
+    #     MQTT_USER=<아이디> MQTT_PASS=<비번> ./run_all.sh
+    #
+    #   로컬 개발(직접 띄운 브로커):
+    #     ./run_all.sh                      # 기본 localhost:1883 평문
+    #
+    # CA 없이 급히 볼 때만 MQTT_INSECURE=1 (검증 생략 — 도청·위장에 취약).
+    # 브로커 주소·계정 상세는 isaac_sim/docs/backend-mqtt-guide.md 참조.
     python3 "$DIR/mqtt_bridge.py" > /tmp/mqtt_bridge.log 2>&1 &
     PIDS+=($!)
   else
