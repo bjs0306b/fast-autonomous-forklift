@@ -103,7 +103,7 @@ public class VehicleCommandPublisher {
         }
         String externalVehicleId = externalVehicleId(message.vehicleId());
         mqttPublisher.publish(
-                new IsaacVehicleControlMessage(isaacCommand),
+                IsaacVehicleControlMessage.now(isaacCommand),
                 mqttTopics.isaacVehicleControl(externalVehicleId), COMMAND_QOS, COMMAND_RETAINED);
     }
 
@@ -121,7 +121,7 @@ public class VehicleCommandPublisher {
     /** 전체 비상정지는 Isaac이 명시한 broadcast 토픽에도 즉시 한 번 발행한다. */
     public void publishIsaacGlobalEmergencyStop() {
         mqttPublisher.publish(
-                new IsaacVehicleControlMessage("ESTOP"),
+                IsaacVehicleControlMessage.now("ESTOP"),
                 mqttTopics.isaacGlobalControl(), COMMAND_QOS, COMMAND_RETAINED);
     }
 
