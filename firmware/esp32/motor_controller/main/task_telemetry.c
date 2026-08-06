@@ -20,6 +20,8 @@ static const char *TAG = "TELEMETRY";
 static QueueHandle_t s_imu_queue = NULL;
 static QueueHandle_t s_tof_queue = NULL;
 static QueueHandle_t s_imu_status_queue = NULL;
+static QueueHandle_t s_encoder_queue = NULL;
+static QueueHandle_t s_tof_status_queue = NULL;
 
 /*
  * Incremented from both the producer and this task, so the count is a
@@ -131,6 +133,26 @@ static void telemetry_write_tof(const tof_sample_t *sample)
     telemetry_write_frame(body);
 }
 
+static void telemetry_write_encoder(const encoder_sample_t *sample)
+{
+    char body[TELEMETRY_FRAME_MAX_LENGTH];
+    int body_length = snprintf(
+        body,
+        sizeof(body),
+        "ENC,%lu,%lld,%ld,%lu",
+        (unsigned long)sample->sequence,
+        (long long)sample->timestamp_us,
+        (long)sample->count,
+        (unsigned long)sample->read_errors
+    );
+
+    if (body_length <= 0 || (size_t)body_length >= sizeof(body)) {
+        return;
+    }
+
+    telemetry_write_frame(body);
+}
+
 static void telemetry_write_imu_status(const imu_status_t *status)
 {
     char body[TELEMETRY_FRAME_MAX_LENGTH];
@@ -143,6 +165,29 @@ static void telemetry_write_imu_status(const imu_status_t *status)
         status->idle ? 1U : 0U,
         (unsigned long)s_dropped_samples,
         (unsigned long)status->sequence
+    );
+
+    if (body_length <= 0 || (size_t)body_length >= sizeof(body)) {
+        return;
+    }
+
+    telemetry_write_frame(body);
+}
+
+static void telemetry_write_tof_status(const tof_status_t *status)
+{
+    char body[TELEMETRY_FRAME_MAX_LENGTH];
+    int body_length = snprintf(
+        body,
+        sizeof(body),
+        "TFS,%u,%u,%lu,%lu,%lu,%lu,%lu",
+        (unsigned)status->sensor_id,
+        status->present ? 1U : 0U,
+        (unsigned long)status->read_errors,
+        (unsigned long)status->data_ready_errors,
+        (unsigned long)status->interrupts,
+        (unsigned long)status->published,
+        (unsigned long)status->polled
     );
 
     if (body_length <= 0 || (size_t)body_length >= sizeof(body)) {
@@ -190,6 +235,12 @@ static void telemetry_task(void *argument)
             telemetry_write_tof(&tof_sample);
         }
 
+        encoder_sample_t encoder_sample;
+
+        while (xQueueReceive(s_encoder_queue, &encoder_sample, 0) == pdTRUE) {
+            telemetry_write_encoder(&encoder_sample);
+        }
+
         TickType_t elapsed = xTaskGetTickCount() - last_status_tick;
 
         if (elapsed >= pdMS_TO_TICKS(TELEMETRY_STATUS_PERIOD_MS)) {
@@ -197,6 +248,15 @@ static void telemetry_task(void *argument)
 
             if (xQueuePeek(s_imu_status_queue, &status, 0) == pdTRUE) {
                 telemetry_write_imu_status(&status);
+            }
+
+            /* One frame per sensor, drained rather than peeked so a sensor
+             * that stopped reporting also stops appearing */
+            tof_status_t tof_status;
+
+            while (xQueueReceive(s_tof_status_queue, &tof_status, 0)
+                   == pdTRUE) {
+                telemetry_write_tof_status(&tof_status);
             }
 
             last_status_tick = xTaskGetTickCount();
@@ -240,6 +300,27 @@ esp_err_t telemetry_submit_tof(const tof_sample_t *sample)
     return ESP_OK;
 }
 
+esp_err_t telemetry_submit_encoder(const encoder_sample_t *sample)
+{
+    if (sample == NULL || s_encoder_queue == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /*
+     * Dropping the oldest is right here where it would not be for the gyro:
+     * the count is cumulative, so the newest reading already contains every
+     * one that was thrown away.
+     */
+    if (xQueueSend(s_encoder_queue, sample, 0) != pdTRUE) {
+        encoder_sample_t discarded;
+
+        (void)xQueueReceive(s_encoder_queue, &discarded, 0);
+        (void)xQueueSend(s_encoder_queue, sample, 0);
+    }
+
+    return ESP_OK;
+}
+
 void telemetry_publish_imu_status(const imu_status_t *status)
 {
     if (status == NULL || s_imu_status_queue == NULL) {
@@ -247,6 +328,15 @@ void telemetry_publish_imu_status(const imu_status_t *status)
     }
 
     xQueueOverwrite(s_imu_status_queue, status);
+}
+
+void telemetry_publish_tof_status(const tof_status_t *status)
+{
+    if (status == NULL || s_tof_status_queue == NULL) {
+        return;
+    }
+
+    xQueueSend(s_tof_status_queue, status, 0);
 }
 
 esp_err_t telemetry_task_start(void)
@@ -277,12 +367,30 @@ esp_err_t telemetry_task_start(void)
         return ESP_ERR_NO_MEM;
     }
 
-    s_imu_status_queue = xQueueCreate(1, sizeof(imu_status_t));
+    s_tof_status_queue = xQueueCreate(
+        TOF_SENSOR_COUNT,
+        sizeof(tof_status_t)
+    );
 
-    if (s_imu_status_queue == NULL) {
-        ESP_LOGE(TAG, "Failed to create telemetry status queue");
+    if (s_tof_status_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create ToF status queue");
         vQueueDelete(s_tof_queue);
         vQueueDelete(s_imu_queue);
+        s_tof_queue = NULL;
+        s_imu_queue = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_imu_status_queue = xQueueCreate(1, sizeof(imu_status_t));
+    s_encoder_queue = xQueueCreate(TELEMETRY_ENCODER_QUEUE_LENGTH,
+                                   sizeof(encoder_sample_t));
+
+    if (s_imu_status_queue == NULL || s_encoder_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create telemetry status queue");
+        vQueueDelete(s_tof_status_queue);
+        vQueueDelete(s_tof_queue);
+        vQueueDelete(s_imu_queue);
+        s_tof_status_queue = NULL;
         s_tof_queue = NULL;
         s_imu_queue = NULL;
         return ESP_ERR_NO_MEM;
@@ -301,9 +409,17 @@ esp_err_t telemetry_task_start(void)
     if (task_result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create telemetry task");
         vQueueDelete(s_imu_status_queue);
+
+        if (s_encoder_queue != NULL) {
+            vQueueDelete(s_encoder_queue);
+        }
+
+        vQueueDelete(s_tof_status_queue);
         vQueueDelete(s_tof_queue);
         vQueueDelete(s_imu_queue);
         s_imu_status_queue = NULL;
+        s_encoder_queue = NULL;
+        s_tof_status_queue = NULL;
         s_tof_queue = NULL;
         s_imu_queue = NULL;
         return ESP_FAIL;

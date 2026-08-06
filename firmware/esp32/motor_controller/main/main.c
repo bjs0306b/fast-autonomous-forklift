@@ -3,6 +3,7 @@
 #include "task_motor.h"
 #include "task_telemetry.h"
 #include "task_tof.h"
+#include "task_encoder.h"
 #include "stepper_motor.h"
 #include "config.h"
 
@@ -167,6 +168,14 @@ void app_main(void)
             ESP_LOGE(TAG,
                      "Front ToF unavailable, continuing without it: %s",
                      esp_err_to_name(tof_result));
+        }
+
+        esp_err_t encoder_result = encoder_task_start();
+
+        if (encoder_result != ESP_OK) {
+            ESP_LOGE(TAG,
+                     "Wheel encoder unavailable, continuing without it: %s",
+                     esp_err_to_name(encoder_result));
         }
     } else {
         ESP_LOGW(TAG, "Skipping IMU and ToF start; nowhere to publish");

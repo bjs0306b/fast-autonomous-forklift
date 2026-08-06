@@ -285,10 +285,24 @@
  *
  *   MOSI_SDA   A4 / GPIO11    pull-up to 3V3 (one pair for the whole bus)
  *   MCLK_SCL   A5 / GPIO12    pull-up to 3V3
- *   LPn        A6 / GPIO13    left  - gates the I2C comms block
- *   LPn        A7 / GPIO14    right
- *   INT        A0 / GPIO1     left
- *   INT        A1 / GPIO2     right
+ *   LPn        A6 / GPIO13    right - gates the I2C comms block
+ *   LPn        A7 / GPIO14    left
+ *   INT        A0 / GPIO1     right
+ *   INT        A1 / GPIO2     left
+ *
+ * The harness crosses: the left module lands on A7/A1, so the defines below
+ * are crossed relative to the pin names. Confirmed 2026-08-06 by covering each
+ * module in turn with tools/tof_identify.py --serial, against a boot log that
+ * named the image being tested.
+ *
+ * Nothing in a frame says where a sensor sits -- the index comes from whichever
+ * LPn is raised first -- so a crossed harness mirrors the topic, frame, static
+ * TF and mask list together, and a mirrored pair cannot be put right by a
+ * transform. Two things make this checkable: the mapping line the firmware
+ * logs at boot, and covering BOTH modules in turn. Neither alone is enough --
+ * without the log a wrong mapping looks like a flash that never happened, and
+ * a single-direction cover test was misread three times before both were
+ * used together.
  *   SPI_I2C_N  GND            selects I2C mode
  *   NCS        3V3            SPI deselected
  *   MISO       unconnected    SPI only
@@ -300,10 +314,10 @@
 #define TOF_I2C_PORT                    I2C_NUM_1
 #define TOF_I2C_SDA_GPIO                GPIO_NUM_11
 #define TOF_I2C_SCL_GPIO                GPIO_NUM_12
-#define TOF_LEFT_LPN_GPIO               GPIO_NUM_13
-#define TOF_RIGHT_LPN_GPIO              GPIO_NUM_14
-#define TOF_LEFT_INT_GPIO               GPIO_NUM_1
-#define TOF_RIGHT_INT_GPIO              GPIO_NUM_2
+#define TOF_LEFT_LPN_GPIO               GPIO_NUM_14
+#define TOF_RIGHT_LPN_GPIO              GPIO_NUM_13
+#define TOF_LEFT_INT_GPIO               GPIO_NUM_2
+#define TOF_RIGHT_INT_GPIO              GPIO_NUM_1
 #define TOF_PROBE_TIMEOUT_MS            50
 
 /*
@@ -366,5 +380,46 @@
 #define TELEMETRY_USB_RX_BUFFER_SIZE    256U
 #define TELEMETRY_FRAME_MAX_LENGTH      384U
 #define TELEMETRY_STATUS_PERIOD_MS      1000U
+
+/*
+ * Wheel encoder on the drive motor (JGA25-370 with quadrature hall sensors).
+ *
+ *   Signal 1   D1 / GPIO43     channel A
+ *   Signal 2   D0 / GPIO44     channel B
+ *
+ * D0 and D1 carry UART0 on a stock Arduino Nano ESP32, but the console here is
+ * on USB Serial/JTAG (CONFIG_ESP_CONSOLE_UART_NUM=-1) and the Jetson link is
+ * UART1 on GPIO17/18, so both pins are free. Neither is a strapping pin.
+ *
+ * Counts per wheel revolution is NOT taken from the datasheet. The gear ratio
+ * varies across JGA25-370 variants sold under the same name, and a wrong ratio
+ * scales every distance the encoder reports without ever looking wrong. Turn
+ * the wheel a whole number of revolutions and read the count instead --
+ * tools/encoder_scale_check.py does this -- and put the answer in the ROS
+ * bridge, which is where counts become metres.
+ */
+#define ENCODER_A_GPIO                  GPIO_NUM_43     /* D1 */
+#define ENCODER_B_GPIO                  GPIO_NUM_44     /* D0 */
+
+/*
+ * Half the 16-bit counter range. Wraps are folded into a 32-bit accumulator,
+ * so this only sets how often that fold happens, not how far the count can go.
+ */
+#define ENCODER_PCNT_LIMIT              16000
+
+/*
+ * Motor brushes and the stepper put fast spikes on nearby wiring. 1 us is far
+ * longer than any of those and far shorter than the ~140 us between edges at
+ * full speed, so it cannot swallow a real transition.
+ */
+#define ENCODER_GLITCH_FILTER_NS        1000
+
+#define ENCODER_PUBLISH_RATE_HZ         50U
+#define ENCODER_TASK_STACK_SIZE         3072
+#define ENCODER_TASK_PRIORITY           9
+#define ENCODER_ERROR_LOG_INTERVAL      100U
+
+/* Four samples of slack at 50 Hz; the count is cumulative so depth is cheap */
+#define TELEMETRY_ENCODER_QUEUE_LENGTH  4
 
 #endif

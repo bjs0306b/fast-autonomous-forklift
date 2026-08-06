@@ -13,6 +13,10 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
+        (
+            "share/" + package_name + "/config",
+            glob("config/*.rviz"),
+        ),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         (
             "share/" + package_name + "/behavior_trees",
@@ -33,6 +37,8 @@ setup(
         "console_scripts": [
             "uart_teleop_bridge = forklift_teleop.uart_teleop_bridge:main",
             "sensor_bridge = forklift_teleop.sensor_bridge:main",
+            "obstacle_avoidance = "
+            "forklift_teleop.obstacle_avoidance_node:main",
             "unmanned_mission = forklift_teleop.unmanned_mission:main",
         ],
     },
