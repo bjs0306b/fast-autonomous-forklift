@@ -4,6 +4,7 @@ import com.fast.backend.station.domain.StationSession;
 import com.fast.backend.storage.domain.Cargo;
 import com.fast.backend.storage.domain.StorageSlot;
 import com.fast.backend.storage.domain.StorageSlotStatus;
+import com.fast.backend.storage.event.NextCargoCreationRequestedEvent;
 import com.fast.backend.storage.mapper.CargoMapper;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.transport.dto.TransportTaskCreateRequest;
@@ -21,6 +22,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -30,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@RecordApplicationEvents
 class TransportTaskServiceIntegrationTest {
 
     @Autowired private TransportTaskService service;
@@ -40,17 +44,18 @@ class TransportTaskServiceIntegrationTest {
     @Autowired private TransportSchedulingService schedulingService;
     @Autowired private VehicleMapper vehicleMapper;
     @Autowired private VehicleCurrentStatusMapper vehicleStatusMapper;
+    @Autowired private ApplicationEvents applicationEvents;
 
     @Test
     void automaticScheduling_assignsOldestPendingTaskToIdleVehicle() {
         LocalDateTime now = LocalDateTime.now();
-        insertCargo("CARGO-SCHEDULE-OLD", now);
-        insertCargo("CARGO-SCHEDULE-NEW", now);
+        Long oldCargoId = insertCargo(now);
+        Long newCargoId = insertCargo(now);
 
         TransportTask oldTask = pendingTask(
-                "TASK-SCHEDULE-OLD", "CARGO-SCHEDULE-OLD", now.minusMinutes(1));
+                "TASK-SCHEDULE-OLD", oldCargoId, now.minusMinutes(1));
         TransportTask newTask = pendingTask(
-                "TASK-SCHEDULE-NEW", "CARGO-SCHEDULE-NEW", now);
+                "TASK-SCHEDULE-NEW", newCargoId, now);
         taskMapper.insert(oldTask);
         taskMapper.insert(newTask);
 
@@ -82,7 +87,6 @@ class TransportTaskServiceIntegrationTest {
     void measurementResult_completesPendingPlacementAndOwnsReservation() {
         LocalDateTime now = LocalDateTime.now();
         Cargo cargo = new Cargo();
-        cargo.setCargoId("CARGO-TRANSPORT");
         cargo.setCreatedAt(now);
         cargoMapper.insert(cargo);
         StorageSlot slot = new StorageSlot();
@@ -105,6 +109,10 @@ class TransportTaskServiceIntegrationTest {
                 task.getId(), TaskStatus.PENDING, TaskStatus.ASSIGNED, null, null)).isEqualTo(1);
         assertThat(taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.ASSIGNED, TaskStatus.MOVING_TO_PICKUP, now, null)).isEqualTo(1);
+        assertThat(taskMapper.updateStatusIfCurrent(
+                task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING, null, null)).isEqualTo(1);
+        assertThat(taskMapper.markMeasurementRequested(
+                task.getId(), now, now.minusMinutes(5))).isEqualTo(1);
         StationSession session = measurementService.openSession(cargo.getCargoId());
         TransportTask measuring = taskMapper.findById(task.getId()).orElseThrow();
         assertThat(measuring.getStatus()).isEqualTo(TaskStatus.MEASURING);
@@ -120,16 +128,23 @@ class TransportTaskServiceIntegrationTest {
         StorageSlot reserved = slotMapper.findBySlotCode("SLOT-TRANSPORT").orElseThrow();
         assertThat(reserved.getStatus()).isEqualTo(StorageSlotStatus.RESERVED);
         assertThat(reserved.getReservedTaskId()).isEqualTo(task.getId());
+
+        assertThat(applicationEvents.stream(NextCargoCreationRequestedEvent.class))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.previousCargoId()).isEqualTo(cargo.getCargoId());
+                    assertThat(event.measurementId()).isEqualTo("MEASUREMENT-TRANSPORT");
+                });
     }
 
-    private void insertCargo(String cargoId, LocalDateTime createdAt) {
+    private Long insertCargo(LocalDateTime createdAt) {
         Cargo cargo = new Cargo();
-        cargo.setCargoId(cargoId);
         cargo.setCreatedAt(createdAt);
         cargoMapper.insert(cargo);
+        return cargo.getCargoId();
     }
 
-    private TransportTask pendingTask(String taskCode, String cargoId, LocalDateTime createdAt) {
+    private TransportTask pendingTask(String taskCode, Long cargoId, LocalDateTime createdAt) {
         TransportTask task = new TransportTask();
         task.setTaskCode(taskCode);
         task.setCargoId(cargoId);

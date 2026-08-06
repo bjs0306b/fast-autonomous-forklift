@@ -38,7 +38,7 @@ public class TransportTaskController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String vehicleId,
-            @RequestParam(required = false) String cargoId) {
+            @RequestParam(required = false) Long cargoId) {
         return ApiResponse.success(
                 transportTaskService.list(page, size, parseStatus(status), vehicleId, cargoId));
     }

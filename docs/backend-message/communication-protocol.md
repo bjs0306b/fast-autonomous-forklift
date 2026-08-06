@@ -6,7 +6,7 @@
 
 ```text
 차량 제어: 관제 REST 요청 → Spring Boot MQTT 명령 → ROS2 처리 → MQTT 상태/결과 수신
-화물 측정: taskId 연결 MOVE 성공 → 백엔드 MQTT 측정 요청 → AI 세션 생성 및 1회 측정
+화물 측정: taskId 연결 MOVE 성공 → 설비 해제 대기 → 백엔드 MQTT 측정 요청 → AI 세션 생성 및 1회 측정
              → AI REST 결과 등록
   → MySQL 저장
   → REST 조회 및 STOMP WebSocket 갱신
@@ -16,7 +16,12 @@
 
 - MQTT v3, QoS 1, retained false
 - 브로커: `MQTT_BROKER_URL` 환경변수로 주입
-- 개발 기본값: `tcp://70.12.130.106:1883` (AI 측정 프로그램 기본 브로커와 동일)
+- 운영(EC2): `ssl://fast-mosquitto:8883` — TLS + 계정 인증(`allow_anonymous false`).
+  백엔드는 도커 네트워크 안이라 컨테이너명으로 붙고, 밖(AI·ROS2)에서는 EC2 주소로 붙는다.
+- 개발 기본값: `tcp://localhost:1883` (로컬에 브로커를 띄운 경우)
+- ⚠️ 종전 공용 브로커 `tcp://70.12.130.106:1883`(GPU서버)은 **쓰지 않는다** — GPU서버
+  미사용 결정 + mosquitto 미가동(2026-08-03 실측). 세 주체가 같은 브로커를 봐야 한다.
+  백엔드만 EC2, 스테이션만 GPU서버를 보던 탓에 측정 트리거가 통째로 사라진 적이 있다(S15P11A304-188).
 - 차량 식별자는 토픽의 `{vehicleId}`와 payload 식별자가 같아야 한다.
 - 측정 결과는 `measurementId`, 차량 명령은 `commandId`로 중복을 방지한다.
 - 잘못된 JSON 또는 지원하지 않는 토픽은 저장하지 않고 로그만 남긴다.
@@ -63,11 +68,17 @@ Isaac 호환 형식은 MQTT 수신 경계에서 `frameId=map`인 표준 위치�
 아직 `UnavailableCommandAdapter`이므로, 물리 실행 완료로 간주하면 안 된다.
 
 MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다. 이 안에 결과가 없으면 운반 작업을
-`FAILED`로 종료한다. MOVE 성공 뒤 AI 측정 요청·활성 세션에는 별도 60초 TTL을 적용한다.
+`FAILED`로 종료한다. MOVE 성공 상태를 커밋한 직후 설비를 확인하고, 점유 중이면 MQTT를 발행하지 않고
+1초마다 다시 확인한다. 이 대기까지 `started_at` 기준 300초를 넘으면 실패 처리한다. AI 측정 요청·활성
+세션에는 별도 60초 TTL을 적용한다.
 
 ### 측정 결과
 
-백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 `cargoId`로 MQTT 측정 요청을 발행한다. 측정 AI는 세션 생성 API를 호출하고, 응답으로 받은 `sessionId`를 포함해 `POST /api/stations/measurements`로 최종 결과를 등록한다. 세션 생성 시 백엔드는 같은 화물의 측정 대기 작업과 세션을 연결한다.
+백엔드는 작업에 연결된 MOVE 성공 결과를 받으면 작업을 `MEASURING`으로 커밋한다. 커밋 직후 활성
+세션을 확인하고, 비어 있을 때만 `cargoId`로 MQTT 측정 요청을 발행한다. 점유 중이면 요청을 보내지 않고
+1초마다 다시 확인한다. 측정 AI는 세션
+생성 API를 호출하고, 응답으로 받은 `sessionId`를 포함해 `POST /api/stations/measurements`로 최종 결과를
+등록한다. 세션 생성 시 백엔드는 같은 화물의 측정 대기 작업과 세션을 연결한다.
 
 ```json
 {
@@ -91,17 +102,19 @@ MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다
 
 | Method | 경로 | 역할 |
 |---|---|---|
-| `POST` | `/api/cargos` | 측정 전 화물 등록 |
+| `POST` | `/api/cargos` | 화물 ID 자동 생성 및 대기 운반 작업 원자적 생성 |
 | `POST` | `/api/stations/sessions?cargoId=...` | 측정 세션 생성 |
 | `GET` | `/api/stations/sessions/active` | 현재 측정 중인 세션 조회 |
 | `GET` | `/api/stations/sessions/{sessionId}/measurements/latest` | 세션 측정 결과 조회 |
 | `POST` | `/api/stations/measurements` | 측정 결과 등록 |
-| `POST` | `/api/transport-tasks` | 측정 전 운반 작업 생성 |
+| `POST` | `/api/transport-tasks` | 기존 화물에 운반 작업을 수동 생성하는 호환 API |
 | `PATCH` | `/api/transport-tasks/{taskId}/assign` | 차량 배정 |
 | `PATCH` | `/api/transport-tasks/{taskId}/status` | 작업 상태 전이 |
 | `POST` | `/api/vehicles/{vehicleId}/commands` | 차량 명령 생성·MQTT 발행. 측정 위치 MOVE에는 `taskId` 포함 |
 
-측정 위치 MOVE 요청 예시는 다음과 같다. `taskId`는 `POST /api/transport-tasks` 응답의 문자열 작업 식별자다.
+신규 입하는 본문 없이 `POST /api/cargos`를 호출한다. 백엔드는 `BIGINT AUTO_INCREMENT` 화물 ID와
+`PENDING` 운반 작업을 같은 트랜잭션에서 만들고 `cargoId`, `taskId`, `taskStatus`를 반환한다.
+측정 위치 MOVE 요청의 `taskId`는 이 응답에 포함된 문자열 작업 식별자다.
 
 ```json
 {

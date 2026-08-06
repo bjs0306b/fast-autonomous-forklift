@@ -17,7 +17,7 @@
 
 G3의 임계가 낮은 이유는 실측 근거가 있다 — 현역 exp8로 네거티브 42장에 프리라벨을 돌렸을 때 **box를 35개 잡았다.** 어두운 틈은 실제로 오탐을 부른다.
 
-⚠️ **스테이션 -m(exp8)은 건드리지 않는다.** 온보드 -s만 3클래스다. exp8 계보를 손대면 이미 통과한 치수 KPI(평균 0.66mm)와 편하중 판정을 다시 검증해야 한다.
+⚠️ **스테이션 -m(exp8)은 건드리지 않는다.** 온보드 -s는 **`pallet`·`hole`**, 스테이션 -m은 **`box`·`pallet`** — 둘 다 2클래스지만 구성이 다르다(§1 참조). exp8 계보를 손대면 이미 통과한 치수 KPI(평균 0.66mm)와 편하중 판정을 다시 검증해야 한다.
 
 ## 1. 라벨링 — 사람이 pallet·hole만 그린다 (2클래스)
 
@@ -189,7 +189,7 @@ config에 박아둔 결정 (근거는 파일 상단 주석):
 블로커는 68에서 모두 해소됐다. 절차는 `docs/ai/onboard-tensorrt-runbook.md` 그대로:
 
 1. GPU 서버에서 `configs/deploy/detection_tensorrt_static_onboard.py`로 재-export
-2. ONNX를 젯슨으로 전송 (**서버 아웃바운드 차단 → 노트북 경유**)
+2. ONNX를 젯슨으로 전송 — **GPU서버에서 직접 보내도 된다**(2026-08-03 실측: 젯슨 22 포트 도달 가능). 종전 "아웃바운드 차단" 기술은 사실이 아니었다. 상세는 `onboard-tensorrt-runbook.md` §②
 3. 젯슨에서 `trtexec --fp16` 빌드 (플러그인 `libmmdeploy_tensorrt_ops.so` 필요, mmdeploy 1.3.1로 버전 일치)
 4. **입력 640 고정** — config의 `img_size`를 바꿨다면 엔진도 다시 빌드해야 한다
 

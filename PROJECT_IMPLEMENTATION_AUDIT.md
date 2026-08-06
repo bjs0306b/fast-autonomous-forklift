@@ -1,5 +1,23 @@
 # PROJECT IMPLEMENTATION AUDIT
 
+> # ⚠️ 2026-07-24 시점의 스냅샷이다 — 현재 상태가 아니다
+>
+> 감사 문서라 **내용은 그날 본 것 그대로 둔다**(고치면 기록으로서 가치가 없다).
+> 다만 아래 "없다" 판정들은 **이후 전부 해소됐으므로**, 이 문서를 근거로
+> "아직 안 돼 있다"고 판단하면 안 된다. 2026-08-03 확인:
+>
+> | 이 문서의 판정 | 현재 |
+> |---|---|
+> | "브로커 구축 산출물이 없다 — `docker-compose.yml`·`mosquitto.conf` 부재" | **있다.** `docker-compose.yml` · `Dockerfile.backend` · `infra/mqtt/`(config·compose·README) |
+> | "`ros2_ws`는 UART teleop 전용" | **아니다.** `ros2_ws/src/fast_mqtt_bridge` 가 있다 |
+> | "실제 ROS2 MQTT 발행 코드가 저장소에 없다" | **있다.** `fast_mqtt_bridge`(bridge_core·command_handler·dto·mqtt_policy) |
+>
+> 그 밖에 07-24 이후 바뀐 큰 것: 백엔드 **EC2 배포**(07-31) · 스테이션 측정
+> **MQTT → REST 전환**(07-31) · **MQTT 브로커 EC2 TLS 8883 일원화**(08-03,
+> GPU서버 브로커 폐지) · 백엔드 대규모 리팩터(08-02, -30,728줄).
+>
+> **현재 상태는 `CLAUDE.md` 와 `docs/` 를 볼 것.**
+
 ## 1. 조사 기준 경로
 
 `C:\SSAFY\fast-backend`
@@ -169,7 +187,7 @@ topic/payload 식별자 일치 검증) → 도메인 Service → DB → WebSocke
 | `forklift/+/fork-status` | 구독 | O — `routeForkStatus` | 1 | — |
 | `forklift/+/error` | 구독 | O — `routeEmbeddedError` | 1 | — |
 | `cargo/detected` | 구독 | O — `routeCargoDetected` | 1 | — |
-| `fast/station/+/measurement` | 구독 | O — `routeStationMeasurement` | 1 | — |
+| ~~`fast/station/+/measurement`~~ | ~~구독~~ | **X — 폐기됨(2026-07-31 REST 전환). 코드에 없음** | — | — |
 | `forklift/%s/command` | 발행 | O — `Embedded`/`IsaacForkliftCommandPublisher` | 1 | false |
 | `forklift/%s/emergency` | — | **X — 정의만 존재, 발행·구독 코드 없음** | — | — |
 
@@ -367,9 +385,11 @@ Docker container 생성도 하지 않았다.
 
 - **AI 화물 분석 도메인** (`com.fast.backend.ai.*`): `cargo/detected` 수신 → 검증 → 2테이블 저장 →
   `/topic/ai/cargo-analysis` 전송 + 조회 API 2종. 통합 테스트 포함.
-- **측정 스테이션 도메인** (`com.fast.backend.station.*`): `fast/station/+/measurement` 수신 →
-  snake_case DTO + OffsetDateTime 오프셋 보존 저장 → 전용 destination 전송 + 조회 API 2종.
-  자기정합성 검증(magnitude/eccentric/miniature) 구현.
+- **측정 스테이션 도메인** (`com.fast.backend.station.*`): ~~`fast/station/+/measurement` 수신 →
+  snake_case DTO + OffsetDateTime 오프셋 보존 저장~~ → **2026-07-31 REST 전환으로 바뀌었다.**
+  `POST /api/stations/measurements`로 camelCase 6필드(`sessionId`·`measurementId`·`status`·
+  `cargoHeight`·`tippingLevel`·`overhangRatio`)를 받는다. MQTT 구독·라우팅·DTO는 제거됐다.
+  세션 뮤텍스(`station_state`)와 TTL 자동 해제가 추가됐다.
 - **임베디드 포크 상태·오류 이력** (`com.fast.backend.embedded.*`): `fork-status`/`error` 수신 → 저장 →
   전송 + 조회 API 2종.
 - **Isaac Sim 도메인** (`com.fast.backend.isaac.*`): 상태·위치·경로 수신 및 명령 발행.

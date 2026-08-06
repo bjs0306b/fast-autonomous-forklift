@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 public record StationMeasurementResponse(
         String measurementId,
         String sessionId,
-        String cargoId,
+        Long cargoId,
         StationMeasurementStatus status,
         Double cargoHeight,
         String tippingLevel,

@@ -54,7 +54,7 @@ export function CommandNotice({
 
   return (
     <div
-      className={cn("flex items-start gap-2 rounded-lg border px-3 py-2", toneClass, className)}
+      className={cn("flex shrink-0 items-start gap-2 rounded-lg border px-3 py-1.5", toneClass, className)}
       // 실패는 즉시 읽히도록 assertive, 성공은 polite
       role={notice.tone === "success" ? "status" : "alert"}
       aria-live={notice.tone === "success" ? "polite" : "assertive"}

@@ -8,7 +8,7 @@ import java.time.OffsetDateTime;
  * <pre>
  * {
  *   "eventType": "VEHICLE_STATUS_UPDATED",
- *   "vehicleId": "REAL-F01",
+ *   "vehicleId": "SIM-F01",
  *   "occurredAt": "2026-07-23T11:20:27+09:00",
  *   "data": { ... }
  * }

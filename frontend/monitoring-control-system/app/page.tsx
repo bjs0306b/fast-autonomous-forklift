@@ -1,15 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react"
+import { AlertTriangle, RefreshCw } from "lucide-react"
+import { AiMeasurementVideo, type AiVideoConnectionStatus } from "@/components/monitoring/AiMeasurementVideo"
 import { MainRealtimeMonitoringView } from "@/components/monitoring/MainRealtimeMonitoringView"
+import { MonitoringSlider } from "@/components/monitoring/MonitoringSlider"
 import { MiniMap } from "@/components/monitoring/MiniMap"
 import { VehicleDetailPanel } from "@/components/monitoring/VehicleDetailPanel"
 import { GlobalEmergencyStopBar } from "@/components/monitoring/GlobalEmergencyStopBar"
 import { CommandNotice, type CommandNoticeState } from "@/components/monitoring/CommandNotice"
 import { useMonitoringDashboard } from "@/hooks/useMonitoringDashboard"
 import { useMonitoringSocket } from "@/hooks/useMonitoringSocket"
-import { emergencyStopAll, emergencyStopVehicle } from "@/lib/api/commandApi"
+import { emergencyStopAll, emergencyStopVehicle, stopVehicle } from "@/lib/api/commandApi"
+import { AI_MEASUREMENT_STREAM_URL } from "@/lib/config/aiMeasurement"
 import { useIsaacSimStream } from "@/components/monitoring/IsaacSimStream"
 import type { RealtimeConnectionStatus, SelectedVehicleSummary } from "@/types/monitoring"
 
@@ -24,6 +27,7 @@ export default function MonitoringPage() {
     loadDashboard,
     applyStatusEvent,
     applyLocationEvent,
+    applyTaskEvent,
   } = useMonitoringDashboard()
 
   /**
@@ -43,10 +47,16 @@ export default function MonitoringPage() {
   // --- FR-503 비상정지 상태 ---
   // 차량별 진행 중 명령(중복 클릭 방지). 차량 A 요청 중에도 차량 B 는 독립적으로 사용 가능하다.
   const [pendingCommandByVehicleId, setPendingCommandByVehicleId] = useState<
-    Record<string, "EMERGENCY_STOP" | null>
+    Record<string, "STOP" | "EMERGENCY_STOP" | null>
   >({})
   const [globalEmergencyStopPending, setGlobalEmergencyStopPending] = useState(false)
   const [notice, setNotice] = useState<CommandNoticeState | null>(null)
+  const [activeSlide, setActiveSlide] = useState(0)
+  const [aiVideoStatus, setAiVideoStatus] = useState<AiVideoConnectionStatus>(
+    AI_MEASUREMENT_STREAM_URL ? "CONNECTING" : "DISCONNECTED",
+  )
+  const [aiVideoRetryKey, setAiVideoRetryKey] = useState(0)
+  const [lastAiFrameReceivedAt, setLastAiFrameReceivedAt] = useState<string | null>(null)
 
   // unmount 후 setState 방어
   const mountedRef = useRef(true)
@@ -94,6 +104,7 @@ export default function MonitoringPage() {
     enabled: loadState !== "error",
     onStatusEvent: applyStatusEvent,
     onLocationEvent: applyLocationEvent,
+    onTaskEvent: applyTaskEvent,
     onConnected: handleSocketConnected,
   })
 
@@ -154,6 +165,51 @@ export default function MonitoringPage() {
         safeSet(setNotice, {
           tone: "error",
           message: `${vehicleId} 비상정지 요청 실패`,
+          detail: error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.",
+        })
+      } finally {
+        if (mountedRef.current) {
+          setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: null }))
+        }
+      }
+    },
+    [pendingCommandByVehicleId, safeSet],
+  )
+
+  /** 선택 차량 일반 정지. 발행 성공 뒤에도 상태는 WebSocket 수신 전까지 그대로 둔다. */
+  const handleStopVehicle = useCallback(
+    async (vehicleId: string) => {
+      if (pendingCommandByVehicleId[vehicleId]) return
+
+      setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: "STOP" }))
+      setNotice(null)
+      try {
+        const response = await stopVehicle(vehicleId)
+        if (response.status === "PUBLISHED") {
+          safeSet(setNotice, {
+            tone: "success",
+            message: `${vehicleId} 정지 명령을 전송했습니다.`,
+            detail: `commandId ${response.commandId} · 실제 상태는 차량 상태 이벤트로 갱신됩니다.`,
+          })
+        } else if (response.status === "PUBLISH_FAILED") {
+          safeSet(setNotice, {
+            tone: "error",
+            message: `${vehicleId} 정지 명령 발행에 실패했습니다.`,
+            detail:
+              response.resultMessage ??
+              "MQTT 브로커로 명령을 발행하지 못했습니다. 차량 상태를 확인해 주세요.",
+          })
+        } else {
+          safeSet(setNotice, {
+            tone: "warning",
+            message: `${vehicleId} 정지 명령 상태를 확인할 수 없습니다.`,
+            detail: `응답 status=${response.status ?? "null"}`,
+          })
+        }
+      } catch (error) {
+        safeSet(setNotice, {
+          tone: "error",
+          message: `${vehicleId} 정지 요청에 실패했습니다.`,
           detail: error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.",
         })
       } finally {
@@ -229,83 +285,136 @@ export default function MonitoringPage() {
   }, [selectedVehicle])
 
   return (
-    <main className="flex min-h-svh w-full flex-col gap-3 bg-slate-950 p-3 text-slate-100">
-      <header className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-base font-semibold text-balance">디지털 트윈 실시간 관제</h1>
-          <p className="text-xs text-slate-400">
-            좌측 영상 · 우측 상세/미니맵 · 차량 상태·위치 실시간 연동(FR-402-1)
-          </p>
-        </div>
+    <main className="flex h-dvh w-full min-w-0 flex-col gap-[clamp(0.375rem,0.6vw,0.5rem)] overflow-hidden bg-slate-950 p-[clamp(0.5rem,0.7vw,0.75rem)] text-slate-100">
+      {activeSlide === 0 ? (
+        <>
+          <header className="flex shrink-0 items-center justify-between gap-3">
+            <div>
+              <h1 className="text-base font-semibold text-balance">디지털 트윈 통합 관제</h1>
+              <p className="text-xs text-slate-400">Isaac Sim · AI 측정 영상 · 차량 상태/위치 실시간 연동</p>
+            </div>
+          </header>
 
-        {/*
-          영상 상태를 사람이 고르는 컨트롤은 없다(prompt80).
-          dev 전용 select 도 제거했다 — 개발 중이든 아니든 화면의 연결 문구는 실제 WebRTC
-          상태여야 하고, 손으로 바꿀 수 있는 상태값은 결국 "가짜 연결됨"을 만든다.
-        */}
-      </header>
-
-      {/* 초기 조회 실패 배너. 마지막으로 받은 차량 데이터는 지우지 않는다. */}
-      {loadState === "error" ? (
-        <DashboardErrorBanner message={errorMessage} onRetry={() => void loadDashboard()} />
+          {loadState === "error" ? (
+            <DashboardErrorBanner message={errorMessage} onRetry={() => void loadDashboard()} />
+          ) : null}
+          <CommandNotice notice={notice} onDismiss={() => setNotice(null)} />
+          <GlobalEmergencyStopBar
+            onTriggerAll={() => void handleGlobalEmergencyStop()}
+            activeVehicleCount={activeVehicleCount}
+            pending={globalEmergencyStopPending}
+          />
+        </>
       ) : null}
 
-      {/* 안전 명령 결과 알림 (PUBLISHED / PUBLISH_FAILED / 부분 실패 구분) */}
-      <CommandNotice notice={notice} onDismiss={() => setNotice(null)} />
+      <MonitoringSlider activeIndex={activeSlide} onChange={setActiveSlide}>
+        {/* 2컬럼이 되면서 lg 부터 한 화면에 들어간다 — 세로 스크롤은 그보다 좁을 때만 남긴다. */}
+        <div className="h-full w-1/2 shrink-0 overflow-y-auto pb-5 lg:overflow-hidden lg:pb-1" aria-label="디지털 트윈 통합 관제 화면">
+          {/* AI 측정 영상 전용 컬럼은 없앴다 — Isaac Sim 영상 안쪽 오른쪽 위 PIP 로 들어간다.
+              남는 축은 "중심 영상 : 차량 관제" 둘뿐이다. */}
+          <div className="grid min-h-full min-w-0 grid-cols-1 gap-2 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.42fr)] 2xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.34fr)]">
+            <div className="flex min-h-[480px] min-w-0 flex-col lg:min-h-0">
+              <MainRealtimeMonitoringView
+                streamStatus={streamStatus}
+                streamError={streamError}
+                streamContainerRef={streamContainerRef}
+                streamVideoRef={streamVideoRef}
+                onRetryConnection={reconnectStream}
+                selectedVehicle={selectedSummary}
+                realtimeStatus={realtimeStatus}
+                pip={
+                  <AiMeasurementVideo
+                    streamUrl={AI_MEASUREMENT_STREAM_URL}
+                    connectionStatus={aiVideoStatus}
+                    active={activeSlide === 0}
+                    pip
+                    retryKey={aiVideoRetryKey}
+                    onConnectionStatusChange={setAiVideoStatus}
+                    onFrameLoaded={setLastAiFrameReceivedAt}
+                    onOpenFullscreen={() => setActiveSlide(1)}
+                    onRetry={() => setAiVideoRetryKey((value) => value + 1)}
+                  />
+                }
+              />
+            </div>
 
-      {/* 전체 비상정지 바 (FR-503 — 실제 API 연결) */}
-      <GlobalEmergencyStopBar
-        onTriggerAll={() => void handleGlobalEmergencyStop()}
-        activeVehicleCount={activeVehicleCount}
-        pending={globalEmergencyStopPending}
-      />
-
-      {/* 관제 본문: 좌측 영상 / 우측 상세+미니맵 */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
-        {/* 좌측: 디지털 트윈 영상 전용 영역 */}
-        <div className="flex min-h-0 flex-col">
-          <MainRealtimeMonitoringView
-            streamStatus={streamStatus}
-            streamError={streamError}
-            streamContainerRef={streamContainerRef}
-            streamVideoRef={streamVideoRef}
-            // 자동 재연결(3초)과 별개로, 기다리지 않고 즉시 다시 시도한다.
-            onRetryConnection={reconnectStream}
-            selectedVehicle={selectedSummary}
-            realtimeStatus={realtimeStatus}
-          />
-        </div>
-
-        {/* 우측: 상세 패널(위) + 미니맵(아래) */}
-        <div className="grid min-h-0 grid-rows-2 gap-3">
-          {loadState === "loading" && vehicles.length === 0 ? (
-            <PanelSkeleton label="차량 정보를 불러오는 중…" />
-          ) : (
-            <VehicleDetailPanel
-              vehicle={selectedVehicle}
-              // STOP 은 아직 프론트 연결 계약이 없어 패널 내부에서 비활성으로 표시된다.
-              // 여기서 Mock 핸들러를 넘기지 않는다 — 호출되지 않는 핸들러는 오해만 남긴다.
-              onEmergencyStop={(id) => void handleEmergencyStopVehicle(id)}
-              emergencyStopPending={
-                selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] != null : false
-              }
-            />
-          )}
-
-          {loadState === "loading" && vehicles.length === 0 ? (
-            <PanelSkeleton label="미니맵을 불러오는 중…" />
-          ) : vehicles.length === 0 ? (
-            <EmptyVehiclesPanel onRetry={() => void loadDashboard()} />
-          ) : (
-            <MiniMap
+            <VehicleControlPanel
               vehicles={vehicles}
               selectedVehicleId={selectedVehicleId}
-              onSelectVehicle={setSelectedVehicleId}
+              selectedVehicle={selectedVehicle}
+              setSelectedVehicleId={setSelectedVehicleId}
+              realtimeStatus={realtimeStatus}
+              loadState={loadState}
+              loadDashboard={loadDashboard}
+              handleStopVehicle={handleStopVehicle}
+              handleEmergencyStopVehicle={handleEmergencyStopVehicle}
+              pendingCommandByVehicleId={pendingCommandByVehicleId}
             />
-          )}
+          </div>
         </div>
-      </div>
+
+        <div className="h-full w-1/2 shrink-0 overflow-hidden px-0.5 pb-5" aria-label="AI 측정 영상 전체 보기 화면">
+          <AiMeasurementVideo
+            streamUrl={AI_MEASUREMENT_STREAM_URL}
+            connectionStatus={aiVideoStatus}
+            active={activeSlide === 1}
+            fullscreen
+            retryKey={aiVideoRetryKey}
+            lastFrameReceivedAt={lastAiFrameReceivedAt}
+            onConnectionStatusChange={setAiVideoStatus}
+            onFrameLoaded={setLastAiFrameReceivedAt}
+            onCloseFullscreen={() => setActiveSlide(0)}
+            onRetry={() => setAiVideoRetryKey((value) => value + 1)}
+            className="h-full"
+          />
+        </div>
+      </MonitoringSlider>
     </main>
+  )
+}
+
+function VehicleControlPanel({
+  vehicles,
+  selectedVehicleId,
+  selectedVehicle,
+  setSelectedVehicleId,
+  realtimeStatus,
+  loadState,
+  loadDashboard,
+  handleStopVehicle,
+  handleEmergencyStopVehicle,
+  pendingCommandByVehicleId,
+}: {
+  vehicles: ReturnType<typeof useMonitoringDashboard>["vehicles"]
+  selectedVehicleId: string | null
+  selectedVehicle: ReturnType<typeof useMonitoringDashboard>["selectedVehicle"]
+  setSelectedVehicleId: (id: string | null) => void
+  realtimeStatus: RealtimeConnectionStatus
+  loadState: ReturnType<typeof useMonitoringDashboard>["loadState"]
+  loadDashboard: () => Promise<void>
+  handleStopVehicle: (id: string) => Promise<void>
+  handleEmergencyStopVehicle: (id: string) => Promise<void>
+  pendingCommandByVehicleId: Record<string, "STOP" | "EMERGENCY_STOP" | null>
+}) {
+  return (
+    // 컬럼이 하나 줄어 세로 여유가 생겼다 — 고정 min-h 를 낮춰 패널 자체가 화면 높이를
+    // 넘기지 않게 한다(넘기면 우측 패널에 불필요한 세로 스크롤이 생긴다).
+    <section className="flex min-h-[520px] min-w-0 flex-col overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220] lg:h-full lg:min-h-0" aria-label="차량 관제" aria-busy={loadState === "loading"}>
+      <header className="shrink-0 border-b border-slate-700 px-3 py-1.5"><h2 className="text-sm font-semibold text-slate-100">차량 관제</h2></header>
+      <div className="h-[clamp(240px,30dvh,340px)] min-h-0 shrink-0 overflow-hidden">
+        <MiniMap vehicles={vehicles} selectedVehicleId={selectedVehicleId} onSelectVehicle={setSelectedVehicleId} onClearSelection={() => setSelectedVehicleId(null)} realtimeStatus={realtimeStatus} onRefresh={() => void loadDashboard()} className="h-full min-h-0 min-w-0 overflow-hidden rounded-none border-0 bg-transparent" />
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden border-t border-slate-700">
+        <VehicleDetailPanel
+          vehicle={selectedVehicle}
+          onStop={(id) => void handleStopVehicle(id)}
+          onEmergencyStop={(id) => void handleEmergencyStopVehicle(id)}
+          stopPending={selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "STOP" : false}
+          emergencyStopPending={selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "EMERGENCY_STOP" : false}
+          className="h-full min-h-0 rounded-none border-0 bg-transparent"
+        />
+      </div>
+    </section>
   )
 }
 
@@ -318,7 +427,7 @@ function DashboardErrorBanner({
 }) {
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2"
+      className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-1.5"
       role="alert"
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -339,31 +448,6 @@ function DashboardErrorBanner({
   )
 }
 
-function PanelSkeleton({ label }: { label: string }) {
-  return (
-    <section
-      className="flex min-h-0 flex-col items-center justify-center gap-2 rounded-lg border border-slate-700 bg-[#0b1220]"
-      aria-busy="true"
-      aria-live="polite"
-    >
-      <Loader2 className="size-6 animate-spin text-sky-400" aria-hidden="true" />
-      <p className="text-xs text-slate-400">{label}</p>
-    </section>
-  )
-}
-
-function EmptyVehiclesPanel({ onRetry }: { onRetry: () => void }) {
-  return (
-    <section className="flex min-h-0 flex-col items-center justify-center gap-3 rounded-lg border border-slate-700 bg-[#0b1220] p-6 text-center">
-      <p className="text-xs text-slate-400">등록된 활성 차량이 없습니다.</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-      >
-        <RefreshCw className="size-3.5" aria-hidden="true" />
-        새로고침
-      </button>
-    </section>
-  )
-}
+// 차량 0대 안내는 MiniMap 안으로 옮겼다(지도를 지우지 않고 위에 얹는다).
+// 별도 패널 컴포넌트는 더 이상 쓰이지 않아 제거했다 — 호출되지 않는 컴포넌트가 남아 있으면
+// 다음 사람이 "이 화면도 뜨는구나"라고 오해한다.

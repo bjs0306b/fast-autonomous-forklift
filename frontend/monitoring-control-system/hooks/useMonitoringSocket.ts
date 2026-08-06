@@ -4,14 +4,24 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Client, type IMessage, type StompSubscription } from "@stomp/stompjs"
 import SockJS from "sockjs-client"
 import { API_BASE_URL } from "@/lib/api/httpClient"
-import { parseRealtimeEvent } from "@/lib/realtimeEvent"
-import type { RealtimeEvent } from "@/types/websocket"
-import { TOPIC_VEHICLE_LOCATION, TOPIC_VEHICLE_STATUS } from "@/types/websocket"
+import { parseRealtimeEvent, parseTransportTaskEvent } from "@/lib/realtimeEvent"
+import type { RealtimeEvent, TransportTaskEvent } from "@/types/websocket"
+import {
+  TOPIC_TRANSPORT_TASKS,
+  TOPIC_VEHICLE_LOCATION,
+  TOPIC_VEHICLE_PATH,
+  TOPIC_VEHICLE_RESULT,
+  TOPIC_VEHICLE_STATUS,
+} from "@/types/websocket"
 
 export interface UseMonitoringSocketOptions {
   enabled: boolean
   onStatusEvent: (event: RealtimeEvent<unknown>) => void
   onLocationEvent: (event: RealtimeEvent<unknown>) => void
+  /** 운반 작업 이벤트(실패 포함). 백엔드가 이미 발행하던 토픽을 구독만 추가한다. */
+  onTaskEvent?: (event: TransportTaskEvent) => void
+  onPathEvent?: (event: RealtimeEvent<unknown>) => void
+  onCommandResultEvent?: (event: RealtimeEvent<unknown>) => void
   onConnected?: () => void | Promise<void>
   onDisconnected?: () => void
   onError?: (error: Error) => void
@@ -28,6 +38,9 @@ export function useMonitoringSocket({
   enabled,
   onStatusEvent,
   onLocationEvent,
+  onTaskEvent,
+  onPathEvent,
+  onCommandResultEvent,
   onConnected,
   onDisconnected,
   onError,
@@ -37,11 +50,29 @@ export function useMonitoringSocket({
   const [errored, setErrored] = useState(false)
   const clientRef = useRef<Client | null>(null)
   const subscriptionsRef = useRef<StompSubscription[]>([])
-  const handlersRef = useRef({ onStatusEvent, onLocationEvent, onConnected, onDisconnected, onError })
+  const handlersRef = useRef({
+    onStatusEvent,
+    onLocationEvent,
+    onTaskEvent,
+    onPathEvent,
+    onCommandResultEvent,
+    onConnected,
+    onDisconnected,
+    onError,
+  })
 
   useEffect(() => {
-    handlersRef.current = { onStatusEvent, onLocationEvent, onConnected, onDisconnected, onError }
-  }, [onStatusEvent, onLocationEvent, onConnected, onDisconnected, onError])
+    handlersRef.current = {
+      onStatusEvent,
+      onLocationEvent,
+      onTaskEvent,
+      onPathEvent,
+      onCommandResultEvent,
+      onConnected,
+      onDisconnected,
+      onError,
+    }
+  }, [onStatusEvent, onLocationEvent, onTaskEvent, onPathEvent, onCommandResultEvent, onConnected, onDisconnected, onError])
 
   const handleMessage = useCallback((message: IMessage, kind: "status" | "location") => {
     const event = parseRealtimeEvent(message.body)
@@ -49,6 +80,22 @@ export function useMonitoringSocket({
     if (kind === "status") handlersRef.current.onStatusEvent(event)
     else handlersRef.current.onLocationEvent(event)
   }, [])
+
+  const handleTaskMessage = useCallback((message: IMessage) => {
+    const event = parseTransportTaskEvent(message.body)
+    if (!event) return
+    handlersRef.current.onTaskEvent?.(event)
+  }, [])
+
+  const handleAdditionalVehicleMessage = useCallback(
+    (message: IMessage, kind: "path" | "result") => {
+      const event = parseRealtimeEvent(message.body)
+      if (!event) return
+      if (kind === "path") handlersRef.current.onPathEvent?.(event)
+      else handlersRef.current.onCommandResultEvent?.(event)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!enabled || clientRef.current) return
@@ -69,7 +116,22 @@ export function useMonitoringSocket({
       subscriptionsRef.current = [
         client.subscribe(TOPIC_VEHICLE_STATUS, (message) => handleMessage(message, "status")),
         client.subscribe(TOPIC_VEHICLE_LOCATION, (message) => handleMessage(message, "location")),
+        client.subscribe(TOPIC_TRANSPORT_TASKS, handleTaskMessage),
       ]
+      if (handlersRef.current.onPathEvent) {
+        subscriptionsRef.current.push(
+          client.subscribe(TOPIC_VEHICLE_PATH, (message) =>
+            handleAdditionalVehicleMessage(message, "path"),
+          ),
+        )
+      }
+      if (handlersRef.current.onCommandResultEvent) {
+        subscriptionsRef.current.push(
+          client.subscribe(TOPIC_VEHICLE_RESULT, (message) =>
+            handleAdditionalVehicleMessage(message, "result"),
+          ),
+        )
+      }
       void handlersRef.current.onConnected?.()
     }
     client.onWebSocketClose = () => {
@@ -96,7 +158,7 @@ export function useMonitoringSocket({
       clientRef.current = null
       void client.deactivate()
     }
-  }, [enabled, handleMessage])
+  }, [enabled, handleMessage, handleTaskMessage, handleAdditionalVehicleMessage])
 
   const disconnect = useCallback(async () => {
     subscriptionsRef.current.forEach((subscription) => subscription.unsubscribe())

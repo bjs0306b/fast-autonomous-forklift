@@ -19,13 +19,14 @@
         <result property="measurementRequestedAt" column="measurement_requested_at"/>
         <result property="completedAt" column="completed_at"/>
         <result property="failedAt" column="failed_at"/>
+        <result property="failureCode" column="failure_code"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
     <sql id="columns">
         id, task_code, cargo_id, measurement_session_id, measurement_id, vehicle_id, destination_slot_code,
         destination_x, destination_y, destination_heading, fork_height, status,
         assigned_at, started_at, measurement_requested_at,
-        completed_at, failed_at, created_at
+        completed_at, failed_at, failure_code, created_at
     </sql>
     <sql id="activeStatuses">('ASSIGNED','MOVING_TO_PICKUP','MEASURING','PICKING_UP','TRANSPORTING','PLACING')</sql>
 
@@ -35,12 +36,12 @@
             (task_code, cargo_id, measurement_session_id, measurement_id, vehicle_id, destination_slot_code,
              destination_x, destination_y, destination_heading, fork_height, status,
              assigned_at, started_at, measurement_requested_at,
-             completed_at, failed_at, created_at)
+             completed_at, failed_at, failure_code, created_at)
         VALUES
             (#{taskCode}, #{cargoId}, #{measurementSessionId}, #{measurementId}, #{vehicleId}, #{destinationSlotCode},
              #{destinationX}, #{destinationY}, #{destinationHeading}, #{forkHeight}, #{status},
              #{assignedAt}, #{startedAt}, #{measurementRequestedAt},
-             #{completedAt}, #{failedAt}, #{createdAt})
+             #{completedAt}, #{failedAt}, #{failureCode}, #{createdAt})
     </insert>
     <select id="findById" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task WHERE id=#{id}
@@ -76,6 +77,14 @@
         WHERE vehicle_id IS NOT NULL AND status IN <include refid="activeStatuses"/>
         ORDER BY vehicle_id, id DESC
     </select>
+    <!-- 최근 실패 작업. 차량당 1건만 쓰지만 GROUP BY 대신 정렬 + 상위 N 으로 단순하게 둔다
+         (관제 화면은 "가장 최근 실패"만 필요하고, 호출부가 차량별 첫 행만 취한다). -->
+    <select id="findLatestFailedTasksWithVehicle" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE vehicle_id IS NOT NULL AND status='FAILED'
+        ORDER BY failed_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
     <update id="updateAssignment">
         UPDATE transport_task SET vehicle_id=#{vehicleId}, status='ASSIGNED', assigned_at=#{assignedAt}
         WHERE task_code=#{taskCode} AND status='PENDING' AND vehicle_id IS NULL
@@ -95,6 +104,12 @@
         task_code=task_code
         WHERE id=#{id} AND status=#{expectedStatus}
     </update>
+    <!-- 실패 원인 코드를 남기는 유일한 실패 전이. 조건부 UPDATE 라 이미 상태가 바뀐 작업은 건드리지 않는다. -->
+    <update id="failWithCode">
+        UPDATE transport_task
+        SET status='FAILED', failed_at=#{failedAt}, failure_code=#{failureCode}
+        WHERE id=#{id} AND status=#{expectedStatus}
+    </update>
     <update id="completeMeasurement">
         UPDATE transport_task
         SET measurement_id=#{measurementId},
@@ -108,22 +123,47 @@
     </update>
     <update id="startMeasurement">
         UPDATE transport_task
-        SET measurement_session_id=#{sessionId}, status='MEASURING'
-        WHERE id=#{id} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
+        SET measurement_session_id=#{sessionId}
+        WHERE id=#{id}
+          AND status='MEASURING'
+          AND measurement_requested_at IS NOT NULL
+          AND measurement_session_id IS NULL
     </update>
     <update id="markMeasurementRequested">
         UPDATE transport_task
         SET measurement_requested_at=#{measurementRequestedAt}
         WHERE id=#{id}
-          AND status='MOVING_TO_PICKUP'
+          AND status='MEASURING'
           AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &gt; #{waitExpiredBefore}
     </update>
+    <select id="findOldestMeasurementAwaitingRequest" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='MEASURING'
+          AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+        ORDER BY started_at, id
+        LIMIT 1
+        FOR UPDATE
+    </select>
     <select id="findExpiredMeasurementRequests" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
-        WHERE status='MOVING_TO_PICKUP'
+        WHERE status='MEASURING'
           AND measurement_requested_at IS NOT NULL
+          AND measurement_session_id IS NULL
           AND measurement_requested_at &lt;= #{expiredBefore}
         ORDER BY measurement_requested_at, id
+    </select>
+    <select id="findExpiredMeasurementLaneWaits" resultMap="result">
+        SELECT <include refid="columns"/> FROM transport_task
+        WHERE status='MEASURING'
+          AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &lt;= #{expiredBefore}
+        ORDER BY started_at, id
     </select>
     <select id="findExpiredMovesAwaitingResult" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
@@ -135,16 +175,29 @@
     </select>
     <update id="failMoveIfAwaitingResult">
         UPDATE transport_task
-        SET status='FAILED', failed_at=#{failedAt}
+        SET status='FAILED', failed_at=#{failedAt}, failure_code=#{failureCode}
         WHERE id=#{id}
           AND status='MOVING_TO_PICKUP'
           AND measurement_requested_at IS NULL
           AND started_at IS NOT NULL
           AND started_at &lt;= #{expiredBefore}
     </update>
+    <update id="failMeasurementLaneWaitIfExpired">
+        UPDATE transport_task
+        SET status='FAILED', failed_at=#{failedAt}
+        WHERE id=#{id}
+          AND status='MEASURING'
+          AND measurement_requested_at IS NULL
+          AND measurement_session_id IS NULL
+          AND started_at IS NOT NULL
+          AND started_at &lt;= #{expiredBefore}
+    </update>
     <select id="findPendingMeasurementByCargoId" resultMap="result">
         SELECT <include refid="columns"/> FROM transport_task
-        WHERE cargo_id=#{cargoId} AND status='MOVING_TO_PICKUP' AND measurement_session_id IS NULL
+        WHERE cargo_id=#{cargoId}
+          AND status='MEASURING'
+          AND measurement_requested_at IS NOT NULL
+          AND measurement_session_id IS NULL
         ORDER BY id DESC
         LIMIT 1
         FOR UPDATE

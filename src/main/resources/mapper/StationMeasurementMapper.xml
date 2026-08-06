@@ -46,4 +46,36 @@
         LIMIT 1
     </select>
 
+    <!-- 세션 목록의 측정 결과. 실패 작업은 measurement_id 가 없어 세션으로만 찾을 수 있다. -->
+    <select id="findBySessionIds" resultMap="stationMeasurementResultMap">
+        SELECT <include refid="columns"/>
+        FROM station_measurement
+        WHERE session_id IN
+        <foreach collection="sessionIds" item="sessionId" open="(" separator="," close=")">
+            #{sessionId}
+        </foreach>
+        ORDER BY sequence_no ASC
+    </select>
+
+    <!-- record 는 setter 가 없으므로 생성자 매핑을 명시한다(자동 추론에 기대지 않는다). -->
+    <resultMap id="cargoMeasuredHeightResultMap" type="com.fast.backend.station.dto.CargoMeasuredHeight">
+        <constructor>
+            <idArg column="cargo_id" javaType="java.lang.Long"/>
+            <arg column="cargo_height" javaType="java.lang.Double"/>
+        </constructor>
+    </resultMap>
+
+    <!-- 화물 목록의 최근 측정 높이. 대시보드 차량 수와 무관하게 항상 1회만 실행된다(N+1 방지). -->
+    <select id="findLatestCargoHeights" resultMap="cargoMeasuredHeightResultMap">
+        SELECT s.cargo_id AS cargo_id, m.cargo_height AS cargo_height
+        FROM station_measurement m
+        JOIN station_session s ON s.session_id = m.session_id
+        WHERE m.cargo_height IS NOT NULL
+          AND s.cargo_id IN
+        <foreach collection="cargoIds" item="cargoId" open="(" separator="," close=")">
+            #{cargoId}
+        </foreach>
+        ORDER BY m.sequence_no ASC
+    </select>
+
 </mapper>

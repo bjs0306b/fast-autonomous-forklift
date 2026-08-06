@@ -7,6 +7,12 @@ spring:
     default-property-inclusion: always
     deserialization:
       adjust-dates-to-context-time-zone: false
+  spring:
+    datasource:
+      url: "jdbc:mysql://localhost:3306/fast_backend?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+      username: fastbackend
+      password: ${DB_PASSWORD:}
+      driver-class-name: com.mysql.cj.jdbc.Driver
 
 server:
   port: ${SERVER_PORT:8080}
@@ -21,6 +27,8 @@ storage:
 station:
   move:
     ttl-seconds: ${STATION_MOVE_TTL_SECONDS:300}
+  measurement-request:
+    dispatch-interval-ms: ${STATION_MEASUREMENT_REQUEST_DISPATCH_INTERVAL_MS:1000}
   session:
     ttl-seconds: ${STATION_SESSION_TTL_SECONDS:60}
     cleanup-interval-ms: ${STATION_SESSION_CLEANUP_INTERVAL_MS:5000}
@@ -30,7 +38,15 @@ transport:
     enabled: ${TRANSPORT_SCHEDULING_ENABLED:true}
     interval-ms: ${TRANSPORT_SCHEDULING_INTERVAL_MS:1000}
 
+cargo:
+  intake:
+    # 정상 측정 완료 후 다음 화물과 PENDING 작업을 자동 생성한다.
+    auto-create-enabled: ${CARGO_INTAKE_AUTO_CREATE_ENABLED:true}
+    next-delay-ms: ${CARGO_INTAKE_NEXT_DELAY_MS:5000}
+
 logging:
   level:
     root: INFO
     com.fast.backend: INFO
+
+

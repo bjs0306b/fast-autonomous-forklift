@@ -13,7 +13,11 @@ MQTT 발행을 대체한다(2026-07-31). 백엔드가 `fast/station/+/measuremen
 | `cargoHeight` | `dimensions.height_cm` | **cm ÷ 100 = m** |
 | `tippingLevel` | `tipping.level` | 소문자 그대로(백엔드가 대문자로 저장) |
 | `overhangRatio` | `tipping.overhang` | 없음 |
-| `measuredAt` | `measured_at` | 없음 |
+
+⚠️ **`measuredAt`은 보내지 않는다.** 2026-08-02 백엔드 리팩터로
+`StationMeasurementCreateRequest`에서 제거됐고, 저장 시각은 서버가 `createdAt`으로
+남긴다. 즉시 저장되는 흐름이라 실측에서 두 시각이 사실상 같았다(12:12:00 vs
+12:12:00.376).
 
 ⚠️ **`cargoHeight`는 `height_cm`(화물만)이지 `total_height_cm`이 아니다.** 백엔드가
 적재 판단에서 파렛트 높이 0.12m를 따로 더한다(`requiredHeight = cargoHeight + 0.12 +
@@ -100,7 +104,10 @@ def to_request(payload: dict, session_id: str | None = None) -> dict:
         "cargoHeight": round(height_cm / 100.0, 4) if height_cm is not None else None,
         "tippingLevel": _get(payload, "tipping", "level"),
         "overhangRatio": _get(payload, "tipping", "overhang"),
-        "measuredAt": payload.get("measured_at"),
+        # `measuredAt` 은 보내지 않는다 — 백엔드 DTO(StationMeasurementCreateRequest)
+        # 에서 제거됐고 저장 시각은 서버가 `createdAt` 으로 남긴다(2026-08-02 리팩터).
+        # 보내도 Spring 이 조용히 버려서 무해했지만, 계약에 없는 필드를 계속 실어
+        # 보내면 "이 값이 어딘가 쓰인다"고 오해하게 된다.
     }
 
 

@@ -1,12 +1,13 @@
 package com.fast.backend.transport.dto;
 
+import com.fast.backend.transport.domain.TaskFailureCode;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import java.time.LocalDateTime;
 
 public record TransportTaskResponse(
         String taskId,
-        String cargoId,
+        Long cargoId,
         String measurementSessionId,
         String measurementId,
         String vehicleId,
@@ -17,7 +18,9 @@ public record TransportTaskResponse(
         LocalDateTime startedAt,
         LocalDateTime measurementRequestedAt,
         LocalDateTime completedAt,
-        LocalDateTime failedAt
+        LocalDateTime failedAt,
+        /** 실패 원인 코드. 실패한 적이 없으면 null. 사용자 문구는 프론트가 코드로 매핑한다. */
+        TaskFailureCode failureCode
 ) {
     public record Placement(
             String slotCode,
@@ -37,6 +40,6 @@ public record TransportTaskResponse(
                 task.getStatus(), placement,
                 task.getCreatedAt(), task.getAssignedAt(), task.getStartedAt(),
                 task.getMeasurementRequestedAt(),
-                task.getCompletedAt(), task.getFailedAt());
+                task.getCompletedAt(), task.getFailedAt(), task.getFailureCode());
     }
 }

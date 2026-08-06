@@ -4,9 +4,11 @@ import com.fast.backend.station.config.StationMoveProperties;
 import com.fast.backend.station.config.StationSessionProperties;
 import com.fast.backend.station.domain.StationState;
 import com.fast.backend.station.mapper.StationSessionMapper;
+import com.fast.backend.transport.domain.TaskFailureCode;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
+import com.fast.backend.transport.websocket.TransportTaskBroadcaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -16,7 +18,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** MOVE 결과, 측정 요청 또는 활성 측정 세션이 각 TTL을 넘으면 작업을 실패 처리하고 차선을 비운다. */
+/** MOVE 결과·설비 대기·측정 요청·활성 세션이 각 TTL을 넘으면 작업을 실패 처리하고 차선을 비운다. */
 @Service
 public class StationMeasurementTimeoutService {
 
@@ -26,6 +28,7 @@ public class StationMeasurementTimeoutService {
     private final TransportTaskMapper taskMapper;
     private final StationSessionProperties sessionProperties;
     private final StationMoveProperties moveProperties;
+    private final TransportTaskBroadcaster broadcaster;
     private final Clock clock;
 
     public StationMeasurementTimeoutService(
@@ -33,11 +36,13 @@ public class StationMeasurementTimeoutService {
             TransportTaskMapper taskMapper,
             StationSessionProperties sessionProperties,
             StationMoveProperties moveProperties,
+            TransportTaskBroadcaster broadcaster,
             Clock clock) {
         this.sessionMapper = sessionMapper;
         this.taskMapper = taskMapper;
         this.sessionProperties = sessionProperties;
         this.moveProperties = moveProperties;
+        this.broadcaster = broadcaster;
         this.clock = clock;
     }
 
@@ -53,6 +58,7 @@ public class StationMeasurementTimeoutService {
 
         expireActiveSession(sessionExpiredBefore, now);
         expireUnopenedRequests(sessionExpiredBefore, now);
+        expireMeasurementLaneWaits(moveExpiredBefore, now);
         expireMovesAwaitingResult(moveExpiredBefore, now);
     }
 
@@ -64,12 +70,14 @@ public class StationMeasurementTimeoutService {
 
         String sessionId = state.getActiveSessionId();
         taskMapper.findByMeasurementSessionId(sessionId).ifPresent(task -> {
-            int updated = taskMapper.updateStatusIfCurrent(
-                    task.getId(), TaskStatus.MEASURING, TaskStatus.FAILED,
-                    null, failedAt);
+            // MEASURING 일 때만 실패로 넘긴다. TTL 직전에 정상 결과가 도착해 PICKING_UP 으로 넘어간
+            // 작업은 여기서 0행이 되어 무응답 실패로 덮이지 않는다.
+            int updated = taskMapper.failWithCode(
+                    task.getId(), TaskStatus.MEASURING, failedAt, TaskFailureCode.MEASUREMENT_NO_RESPONSE);
             if (updated == 1) {
-                log.warn("Measurement task expired during session: taskId={}, sessionId={}",
-                        task.getTaskCode(), sessionId);
+                notifyFailed(task);
+                log.warn("Measurement task expired during session: taskId={}, sessionId={}, failureCode={}",
+                        task.getTaskCode(), sessionId, TaskFailureCode.MEASUREMENT_NO_RESPONSE);
             }
         });
 
@@ -82,11 +90,23 @@ public class StationMeasurementTimeoutService {
     private void expireUnopenedRequests(LocalDateTime expiredBefore, LocalDateTime failedAt) {
         List<TransportTask> expired = taskMapper.findExpiredMeasurementRequests(expiredBefore);
         for (TransportTask task : expired) {
-            if (taskMapper.updateStatusIfCurrent(
-                    task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.FAILED,
-                    null, failedAt) == 1) {
+            if (taskMapper.failWithCode(
+                    task.getId(), TaskStatus.MEASURING, failedAt,
+                    TaskFailureCode.MEASUREMENT_NO_RESPONSE) == 1) {
+                notifyFailed(task);
                 log.warn("Measurement request expired before session open: taskId={}, cargoId={}, requestedAt={}",
                         task.getTaskCode(), task.getCargoId(), task.getMeasurementRequestedAt());
+            }
+        }
+    }
+
+    private void expireMeasurementLaneWaits(LocalDateTime expiredBefore, LocalDateTime failedAt) {
+        List<TransportTask> expired = taskMapper.findExpiredMeasurementLaneWaits(expiredBefore);
+        for (TransportTask task : expired) {
+            if (taskMapper.failMeasurementLaneWaitIfExpired(
+                    task.getId(), expiredBefore, failedAt) == 1) {
+                log.warn("Measurement lane wait timed out: taskId={}, cargoId={}, startedAt={}, ttlSeconds={}",
+                        task.getTaskCode(), task.getCargoId(), task.getStartedAt(), moveProperties.ttlSeconds());
             }
         }
     }
@@ -94,10 +114,27 @@ public class StationMeasurementTimeoutService {
     private void expireMovesAwaitingResult(LocalDateTime expiredBefore, LocalDateTime failedAt) {
         List<TransportTask> expired = taskMapper.findExpiredMovesAwaitingResult(expiredBefore);
         for (TransportTask task : expired) {
-            if (taskMapper.failMoveIfAwaitingResult(task.getId(), expiredBefore, failedAt) == 1) {
+            if (taskMapper.failMoveIfAwaitingResult(
+                    task.getId(), expiredBefore, failedAt, TaskFailureCode.MEASUREMENT_NO_RESPONSE) == 1) {
+                notifyFailed(task);
                 log.warn("MOVE result timed out: taskId={}, cargoId={}, startedAt={}, ttlSeconds={}",
                         task.getTaskCode(), task.getCargoId(), task.getStartedAt(), moveProperties.ttlSeconds());
             }
         }
+    }
+
+    /**
+     * TTL 실패도 실시간으로 알린다.
+     *
+     * <p>이전에는 만료 처리가 DB 상태만 바꾸고 아무것도 보내지 않아, 관제 화면은 다음 새로고침
+     * 전까지 실패를 몰랐다 — "조용히 사라지는 실패"의 실제 원인이다. 기존 토픽·이벤트 타입을
+     * 그대로 쓰고 원인 코드만 얹는다.
+     *
+     * <p>조건부 UPDATE 가 1행을 바꾼 경우에만 호출되므로 같은 세션에 중복 이벤트가 나가지 않는다.
+     */
+    private void notifyFailed(TransportTask task) {
+        broadcaster.broadcastAfterCommit(
+                "TRANSPORT_TASK_FAILED", task.getTaskCode(), TaskStatus.FAILED.name(),
+                task.getVehicleId(), TaskFailureCode.MEASUREMENT_NO_RESPONSE);
     }
 }

@@ -14,7 +14,7 @@ import java.time.OffsetDateTime;
  * <pre>
  * {
  *   "commandId": "CMD-001",
- *   "vehicleId": "REAL-F01",
+ *   "vehicleId": "SIM-F01",
  *   "targetSystem": "ROS2",
  *   "commandCategory": "MOVE",
  *   "command": "MOVE",

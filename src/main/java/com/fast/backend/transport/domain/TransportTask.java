@@ -7,7 +7,7 @@ import java.util.stream.Stream;
 public class TransportTask {
     private Long id;
     private String taskCode;
-    private String cargoId;
+    private Long cargoId;
     private String measurementSessionId;
     private String measurementId;
     private String vehicleId;
@@ -22,14 +22,16 @@ public class TransportTask {
     private LocalDateTime measurementRequestedAt;
     private LocalDateTime completedAt;
     private LocalDateTime failedAt;
+    /** 실패 원인 코드({@link TaskFailureCode} 이름). 실패한 적이 없으면 null. */
+    private TaskFailureCode failureCode;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getTaskCode() { return taskCode; }
     public void setTaskCode(String taskCode) { this.taskCode = taskCode; }
-    public String getCargoId() { return cargoId; }
-    public void setCargoId(String cargoId) { this.cargoId = cargoId; }
+    public Long getCargoId() { return cargoId; }
+    public void setCargoId(Long cargoId) { this.cargoId = cargoId; }
     public String getMeasurementSessionId() { return measurementSessionId; }
     public void setMeasurementSessionId(String measurementSessionId) { this.measurementSessionId = measurementSessionId; }
     public String getMeasurementId() { return measurementId; }
@@ -60,6 +62,8 @@ public class TransportTask {
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
     public LocalDateTime getFailedAt() { return failedAt; }
     public void setFailedAt(LocalDateTime failedAt) { this.failedAt = failedAt; }
+    public TaskFailureCode getFailureCode() { return failureCode; }
+    public void setFailureCode(TaskFailureCode failureCode) { this.failureCode = failureCode; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 

@@ -170,7 +170,6 @@ public class VehicleService {
         }
         return new VehicleStatusResponse(
                 status.getStatus(),
-                status.getBattery(),
                 status.getPositionX(),
                 status.getPositionY(),
                 status.getPositionFrame(),

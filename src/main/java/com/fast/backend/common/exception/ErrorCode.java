@@ -14,7 +14,6 @@ public enum ErrorCode {
     VEHICLE_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 등록된 vehicleId입니다."),
     VEHICLE_INACTIVE(HttpStatus.CONFLICT, "비활성 차량에는 명령을 발행할 수 없습니다."),
     INVALID_VEHICLE_ID(HttpStatus.BAD_REQUEST, "vehicleId 형식이 올바르지 않습니다."),
-    VEHICLE_BATTERY_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "battery는 0~100 범위여야 합니다."),
 
     // 통합 차량 명령(prompt32.md 1장 7~12번). 구 EMBEDDED_COMMAND_* 코드를 대체한다 — 이 도메인은
     // 더 이상 임베디드 전용이 아니라 ROS2 이동 명령까지 함께 다루기 때문이다.
@@ -50,7 +49,6 @@ public enum ErrorCode {
     // 화물 크기 기반 적재 위치 추천 및 운반 작업 디스패치(prompt46.md). 기존 공통 예외 구조(BusinessException +
     // ErrorCode)를 그대로 쓰고, 도메인별 예외 클래스를 새로 만들지 않는다(이 프로젝트의 기존 관례).
     CARGO_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 화물입니다."),
-    CARGO_ID_DUPLICATED(HttpStatus.CONFLICT, "이미 등록된 cargoId입니다."),
     CARGO_DIMENSION_INVALID(HttpStatus.BAD_REQUEST, "화물 높이는 0보다 커야 합니다."),
     TASK_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "이미 배정된(또는 PENDING이 아닌) 작업입니다."),
     NO_AVAILABLE_STORAGE_SLOT(HttpStatus.CONFLICT, "화물이 들어갈 수 있는 빈 슬롯이 없습니다."),

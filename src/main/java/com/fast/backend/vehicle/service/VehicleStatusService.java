@@ -14,7 +14,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
-/** 위치 메시지 시각을 변경하지 않고 저주기 차량 상태를 저장한다. */
+/**
+ * 위치 메시지 시각을 변경하지 않고 저주기 차량 상태를 저장한다.
+ *
+ * <p>차량당 <b>현재 상태 1행</b>({@code vehicle_current_status})만 유지하며 과거 이력 테이블은 두지 않는다.
+ * 관제 화면·대시보드·미니맵 어느 것도 이력을 소비하지 않는데 상태 메시지마다 INSERT가 쌓였고, 그 INSERT
+ * 실패가 같은 트랜잭션의 현재 상태 저장까지 롤백시켜 실시간 관제를 멈추는 구조였다(팀 합의로 제거).
+ */
 @Service
 public class VehicleStatusService {
 
@@ -36,16 +42,11 @@ public class VehicleStatusService {
         if (!vehicleMapper.existsByVehicleId(vehicleId)) {
             throw new BusinessException(ErrorCode.VEHICLE_NOT_FOUND, "등록되지 않은 차량입니다: " + vehicleId);
         }
-        if (command.battery() != null && (command.battery() < 0 || command.battery() > 100)) {
-            throw new BusinessException(ErrorCode.VEHICLE_BATTERY_OUT_OF_RANGE,
-                    "battery는 0~100 범위여야 합니다: " + command.battery());
-        }
 
         LocalDateTime receivedAt = CommunicationTime.nowLocal();
         VehicleCurrentStatus update = new VehicleCurrentStatus();
         update.setVehicleId(vehicleId);
         update.setStatus(VehicleStatus.fromRaw(command.status()));
-        update.setBattery(command.battery());
         update.setReceivedAt(receivedAt);
         statusMapper.upsert(update);
 
@@ -58,7 +59,7 @@ public class VehicleStatusService {
 
     private VehicleStatusResponse toResponse(VehicleCurrentStatus status) {
         return new VehicleStatusResponse(
-                status.getStatus(), status.getBattery(), status.getPositionX(), status.getPositionY(),
+                status.getStatus(), status.getPositionX(), status.getPositionY(),
                 status.getPositionFrame(), status.getHeading(), status.getSpeed(),
                 status.getHasCargo(), status.getCargoId(),
                 CommunicationTime.toOffset(status.getMessageAt()),

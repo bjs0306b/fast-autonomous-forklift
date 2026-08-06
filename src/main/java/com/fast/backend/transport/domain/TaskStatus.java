@@ -59,6 +59,17 @@ public enum TaskStatus {
         ALLOWED = Collections.unmodifiableMap(map);
     }
 
+    /**
+     * 이 작업 상태에서 차량이 <b>화물을 싣고 있다고 볼 수 있는지</b>.
+     *
+     * <p>차량이 직접 보고하는 {@code vehicle_current_status.has_cargo} 가 비어 있을 때만 쓰는
+     * 보조 판단이다. 집기 직전(MOVING_TO_PICKUP·MEASURING)과 집는 중(PICKING_UP)은 아직 실린
+     * 상태가 아니라고 본다 — 애매한 구간을 "적재 중"으로 넓히면 화면이 실제보다 앞서 나간다.
+     */
+    public boolean impliesCargoOnVehicle() {
+        return this == TRANSPORTING || this == PLACING;
+    }
+
     /** 종료 상태(추가 전이 불가)인지. */
     public boolean isTerminal() {
         return ALLOWED.get(this).isEmpty();

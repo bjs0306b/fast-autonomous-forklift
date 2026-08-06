@@ -10,6 +10,7 @@ import com.fast.backend.storage.mapper.StorageSlotPlacementRow;
 import com.fast.backend.storage.placement.PlacementCandidate;
 import com.fast.backend.storage.placement.PlacementRecommendation;
 import com.fast.backend.storage.placement.PlacementService;
+import com.fast.backend.transport.domain.TaskFailureCode;
 import com.fast.backend.transport.domain.TaskStatus;
 import com.fast.backend.transport.domain.TransportTask;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
@@ -45,18 +46,27 @@ public class TransportTaskMeasurementService {
         this.broadcaster = broadcaster;
     }
 
-    public void complete(StationSession session, StationMeasurement measurement) {
+    /**
+     * 측정 결과를 작업과 적재 위치에 연결한다.
+     *
+     * @return 작업이 정상적으로 {@link TaskStatus#PICKING_UP} 상태가 되어 다음 입하를 준비해도 되면
+     *         {@code true}, 측정 부적합·추천 실패 등으로 작업을 실패 처리했으면 {@code false}
+     */
+    public boolean complete(StationSession session, StationMeasurement measurement) {
         TransportTask task = taskMapper.findByMeasurementSessionId(session.getSessionId()).orElse(null);
         if (task == null) {
-            return;
+            return false;
         }
         if (!session.getCargoId().equals(task.getCargoId())) {
             throw new IllegalStateException("측정 세션과 운반 작업의 화물이 일치하지 않습니다: "
                     + session.getSessionId());
         }
         if (!eligibility.isEligible(measurement)) {
-            fail(task, "측정 결과가 적재 조건을 만족하지 않음");
-            return;
+            // 측정 상태가 실패 원인을 결정한다. status=ok 인데 여기 걸렸다면 남은 원인은 적재 부적합뿐이라
+            // 재측정이 아니라 "화물을 다시 쌓아야 한다"는 안내로 갈라진다.
+            fail(task, TaskFailureCode.fromMeasurement(measurement.getStatus()),
+                    "측정 결과가 적재 조건을 만족하지 않음");
+            return false;
         }
 
         final PlacementRecommendation recommendation;
@@ -64,13 +74,14 @@ public class TransportTaskMeasurementService {
             recommendation = placementService.recommend(
                     measurement.getCargoHeight(), loadEmptyCandidates());
         } catch (BusinessException exception) {
-            fail(task, exception.getMessage());
-            return;
+            fail(task, TaskFailureCode.PLACEMENT_SLOT_UNAVAILABLE, exception.getMessage());
+            return false;
         }
 
         if (slotMapper.reserveIfEmpty(recommendation.slotCode(), task.getId()) != 1) {
-            fail(task, "선택된 적재 위치를 예약하지 못함: " + recommendation.slotCode());
-            return;
+            fail(task, TaskFailureCode.PLACEMENT_SLOT_UNAVAILABLE,
+                    "선택된 적재 위치를 예약하지 못함: " + recommendation.slotCode());
+            return false;
         }
         if (taskMapper.completeMeasurement(
                 task.getId(), measurement.getMeasurementId(), recommendation.slotCode(),
@@ -83,6 +94,7 @@ public class TransportTaskMeasurementService {
                 "TRANSPORT_TASK_MEASURED", task.getTaskCode(), TaskStatus.PICKING_UP.name(), task.getVehicleId());
         log.info("Transport task measurement completed: taskId={}, measurementId={}, slotCode={}",
                 task.getTaskCode(), measurement.getMeasurementId(), recommendation.slotCode());
+        return true;
     }
 
     private List<PlacementCandidate> loadEmptyCandidates() {
@@ -98,12 +110,13 @@ public class TransportTaskMeasurementService {
                 null, row.getStatus());
     }
 
-    private void fail(TransportTask task, String reason) {
-        taskMapper.updateStatusIfCurrent(
-                task.getId(), TaskStatus.MEASURING, TaskStatus.FAILED,
-                null, CommunicationTime.nowLocal());
+    private void fail(TransportTask task, TaskFailureCode failureCode, String reason) {
+        taskMapper.failWithCode(
+                task.getId(), TaskStatus.MEASURING, CommunicationTime.nowLocal(), failureCode);
         broadcaster.broadcastAfterCommit(
-                "TRANSPORT_TASK_FAILED", task.getTaskCode(), TaskStatus.FAILED.name(), task.getVehicleId());
-        log.warn("Transport task failed after measurement: taskId={}, reason={}", task.getTaskCode(), reason);
+                "TRANSPORT_TASK_FAILED", task.getTaskCode(), TaskStatus.FAILED.name(),
+                task.getVehicleId(), failureCode);
+        log.warn("Transport task failed after measurement: taskId={}, failureCode={}, reason={}",
+                task.getTaskCode(), failureCode, reason);
     }
 }

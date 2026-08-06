@@ -1,11 +1,21 @@
-"""측정 트리거 — 시뮬 신호를 받아 스테이션이 스스로 측정하게 한다 (S15P11A304-91).
+"""측정 트리거 — 신호를 받아 스테이션이 스스로 측정하게 한다 (S15P11A304-174).
 
-시연에서 스테이션(의자 위 노트북)은 지게차와 함께 움직이고, **Isaac Sim이 적재 위치에
-도착하면 신호를 쏜다.** 사람이 버튼을 누르는 방식은 "무인 스마트팩토리"와 맞지 않는다.
+시연에서 스테이션(의자 위 노트북)은 지게차와 함께 움직이고, 도착하면 신호가 온다.
+사람이 버튼을 누르는 방식은 "무인 스마트팩토리"와 맞지 않는다.
+
+⚠️ **발행 주체는 백엔드다**(2026-08-02 계약 변경,
+`docs/backend-message/cargo-measurement-workflow-contract.md`). 백엔드가 MOVE 명령을
+내고 → ROS2 가 Nav2 도착을 `SUCCESS` 로 회신하면 → 백엔드가 이 토픽을 발행한다.
+**Isaac Sim·ROS2 는 직접 발행하지 않는다** — 종전 기술("Isaac Sim이 쏜다")은 그
+계약 이전 것이다.
 
     from station.trigger import MeasureTrigger, wait_until_still
 
-    with MeasureTrigger(broker="70.12.130.106") as trig:
+    # 브로커는 EC2(TLS·인증). 인자를 직접 쓰기보다 `station.envfile.mqtt_settings()` 를
+    # 거치는 편이 낫다 — `.env` 값을 그대로 쓰고 주소가 한 곳에만 남는다.
+    with MeasureTrigger(broker="3.38.178.143", port=8883,
+                        tls_ca="infra/mqtt-ca.crt",
+                        username="...", password="...") as trig:
         for req in trig.requests():          # 신호가 올 때까지 블록
             wait_until_still(grab_frame)     # 흔들림이 멎을 때까지
             measure(req.cargo_id)
@@ -138,13 +148,21 @@ class MeasureTrigger:
 
     def __init__(self, broker: str, port: int = DEFAULT_BROKER_PORT,
                  topic: str = DEFAULT_TOPIC, cargo_field: str = "cargoId",
-                 client_id: str = "fast-station", keepalive: int = 60) -> None:
+                 client_id: str = "fast-station", keepalive: int = 60,
+                 tls_ca: str | None = None,
+                 username: str | None = None,
+                 password: str | None = None) -> None:
         self.broker = broker
         self.port = port
         self.topic = topic
         self.cargo_field = cargo_field
         self.client_id = client_id
         self.keepalive = keepalive
+        # TLS·인증 — EC2 브로커(8883)는 `allow_anonymous false` 라 둘 다 필요하다.
+        # GPU서버(1883) 평문 브로커를 쓰던 시절엔 없었다(2026-08-03 추가, Jira 188).
+        self.tls_ca = tls_ca
+        self.username = username
+        self.password = password
         self._q: queue.Queue[MeasureRequest] = queue.Queue()
         self._client = None
         self._stop = threading.Event()
@@ -162,6 +180,23 @@ class MeasureTrigger:
         self._client = mqtt.Client(client_id=self.client_id)
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
+
+        # TLS 를 먼저 건다 — connect() 뒤에 걸면 적용되지 않는다.
+        # ROS2 브리지(`fast_mqtt_bridge/mqtt_policy.configure_tls`)와 같은 정책:
+        # CA 검증 필수, 호스트명 검증 켬. 인증서가 없으면 **조용히 평문으로 떨어지지
+        # 않고** 여기서 죽는다 — 암호화된 줄 알고 평문으로 붙는 게 더 나쁘다.
+        if self.tls_ca:
+            import os
+            import ssl
+            ca = os.path.abspath(os.path.expanduser(self.tls_ca))
+            if not os.path.isfile(ca):
+                raise FileNotFoundError(f"MQTT CA 인증서가 없다: {ca}")
+            self._client.tls_set(ca_certs=ca, cert_reqs=ssl.CERT_REQUIRED)
+            self._client.tls_insecure_set(False)
+
+        if self.username:
+            self._client.username_pw_set(self.username, self.password)
+
         self._client.connect(self.broker, self.port, self.keepalive)
         self._client.loop_start()
         return self

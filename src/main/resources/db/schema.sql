@@ -4,13 +4,13 @@
 -- 신규 데이터베이스 생성용 파일이며 운영 데이터 마이그레이션은 범위에서 제외한다.
 
 CREATE TABLE IF NOT EXISTS cargo (
-    cargo_id   VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '화물 고유 식별자',
+    cargo_id   BIGINT      NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '백엔드가 자동 생성하는 화물 고유 식별자',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '화물 등록 시각'
 );
 
 CREATE TABLE IF NOT EXISTS station_session (
     session_id VARCHAR(100) NOT NULL PRIMARY KEY COMMENT '측정 세션 식별자',
-    cargo_id   VARCHAR(50)  NOT NULL COMMENT '측정 대상 화물 식별자',
+    cargo_id   BIGINT       NOT NULL COMMENT '측정 대상 화물 식별자',
     CONSTRAINT fk_station_session_cargo
         FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
 );
@@ -66,17 +66,15 @@ CREATE TABLE IF NOT EXISTS vehicle (
 CREATE TABLE IF NOT EXISTS vehicle_current_status (
     vehicle_id      VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '상태 대상 차량 식별자',
     status          VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN' COMMENT '차량 주행 상태',
-    battery         INT         NULL COMMENT '배터리 잔량(%)',
     position_x      DOUBLE      NULL COMMENT '지도 X 좌표(m)',
     position_y      DOUBLE      NULL COMMENT '지도 Y 좌표(m)',
     position_frame  VARCHAR(10) NULL COMMENT '좌표계(map 또는 odom)',
     heading         DOUBLE      NULL COMMENT '차량 진행 방향(degree)',
     speed           DOUBLE      NULL COMMENT '차량 속도(m/s)',
     has_cargo       BOOLEAN     NULL COMMENT '화물 적재 여부',
-    cargo_id        VARCHAR(50) NULL COMMENT '차량이 보고한 화물 식별자',
+    cargo_id        BIGINT      NULL COMMENT '차량이 보고한 화물 식별자',
     message_at      DATETIME(6) NULL COMMENT '최신 위치 메시지 원본 발생 시각',
     received_at     DATETIME(6) NOT NULL COMMENT '최신 상태 수신 시각',
-    CONSTRAINT chk_vehicle_status_battery CHECK (battery IS NULL OR battery BETWEEN 0 AND 100),
     CONSTRAINT chk_vehicle_status_frame CHECK (position_frame IS NULL OR position_frame IN ('map', 'odom')),
     CONSTRAINT chk_vehicle_status_heading CHECK (heading IS NULL OR (heading >= 0 AND heading < 360)),
     CONSTRAINT fk_vehicle_current_status_vehicle
@@ -92,7 +90,7 @@ CREATE TABLE IF NOT EXISTS storage_slot (
     destination_heading DOUBLE      NOT NULL COMMENT '적재 위치 접근 방향(degree)',
     status              VARCHAR(20) NOT NULL DEFAULT 'EMPTY' COMMENT '적재 위치 상태(EMPTY, RESERVED, OCCUPIED, BLOCKED)',
     reserved_task_id    BIGINT      NULL COMMENT '현재 적재 위치를 예약한 운반 작업',
-    stored_cargo_id     VARCHAR(50) NULL COMMENT '현재 적재된 화물 식별자',
+    stored_cargo_id     BIGINT      NULL COMMENT '현재 적재된 화물 식별자',
     CONSTRAINT uk_storage_slot_cargo UNIQUE (stored_cargo_id),
     CONSTRAINT chk_storage_slot_geometry CHECK (usable_height > 0 AND fork_height >= 0),
     CONSTRAINT chk_storage_slot_status CHECK (status IN ('EMPTY', 'RESERVED', 'OCCUPIED', 'BLOCKED')),
@@ -110,7 +108,7 @@ CREATE TABLE IF NOT EXISTS storage_slot (
 CREATE TABLE IF NOT EXISTS transport_task (
     id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '운반 작업 내부 식별자',
     task_code             VARCHAR(50)  NOT NULL COMMENT '외부 운반 작업 식별자',
-    cargo_id              VARCHAR(50)  NOT NULL COMMENT '운반 대상 화물 식별자',
+    cargo_id              BIGINT       NOT NULL COMMENT '운반 대상 화물 식별자',
     measurement_session_id VARCHAR(100) NULL COMMENT 'AI의 세션 생성 요청 후 연결된 세션 식별자',
     measurement_id        VARCHAR(100) NULL COMMENT '측정 완료 후 연결되는 배치 판단 결과',
     vehicle_id            VARCHAR(50)  NULL COMMENT '배정된 차량 식별자',
@@ -125,6 +123,7 @@ CREATE TABLE IF NOT EXISTS transport_task (
     measurement_requested_at DATETIME(6) NULL COMMENT 'AI 측정 요청 발행 시각. TTL 실패 판정 기준',
     completed_at          DATETIME(6)  NULL COMMENT '운반 작업 완료 시각',
     failed_at             DATETIME(6)  NULL COMMENT '운반 작업 실패 시각',
+    failure_code          VARCHAR(40)  NULL COMMENT '실패 원인 코드. 관제 화면이 원인별 문구를 고르는 근거',
     created_at            DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '운반 작업 생성 시각',
     CONSTRAINT uk_transport_task_code UNIQUE (task_code),
     CONSTRAINT uk_transport_task_measurement_session UNIQUE (measurement_session_id),
@@ -133,6 +132,13 @@ CREATE TABLE IF NOT EXISTS transport_task (
         'PENDING', 'ASSIGNED', 'MOVING_TO_PICKUP', 'MEASURING', 'PICKING_UP',
         'TRANSPORTING', 'PLACING', 'COMPLETED', 'FAILED', 'CANCELLED'
     )),
+    CONSTRAINT chk_transport_task_failure_code CHECK (
+        failure_code IS NULL OR failure_code IN (
+            'MEASUREMENT_NO_DETECTION', 'MEASUREMENT_DISTANCE_UNRELIABLE',
+            'MEASUREMENT_PALLET_NOT_DETECTED', 'PLACEMENT_INELIGIBLE',
+            'MEASUREMENT_NO_RESPONSE', 'PLACEMENT_SLOT_UNAVAILABLE'
+        )
+    ),
     CONSTRAINT chk_transport_task_placement CHECK (
         (measurement_id IS NULL
             AND destination_slot_code IS NULL

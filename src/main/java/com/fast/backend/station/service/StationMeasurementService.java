@@ -14,12 +14,13 @@ import com.fast.backend.station.mapper.StationMeasurementMapper;
 import com.fast.backend.station.mapper.StationMeasurementResponseMapper;
 import com.fast.backend.station.mapper.StationSessionMapper;
 import com.fast.backend.station.websocket.StationMeasurementBroadcaster;
-import com.fast.backend.storage.domain.Cargo;
+import com.fast.backend.storage.event.NextCargoCreationRequestedEvent;
 import com.fast.backend.storage.mapper.CargoMapper;
 import com.fast.backend.transport.mapper.TransportTaskMapper;
 import com.fast.backend.transport.service.TransportTaskMeasurementService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,6 +64,7 @@ public class StationMeasurementService {
     private final TransportTaskMapper transportTaskMapper;
     private final StationSessionProperties sessionProperties;
     private final TransportTaskMeasurementService transportTaskMeasurementService;
+    private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
     public StationMeasurementService(StationMeasurementMapper measurementMapper,
@@ -74,6 +76,7 @@ public class StationMeasurementService {
             TransportTaskMapper transportTaskMapper,
             StationSessionProperties sessionProperties,
             TransportTaskMeasurementService transportTaskMeasurementService,
+            ApplicationEventPublisher eventPublisher,
             Clock clock) {
         this.measurementMapper = measurementMapper;
         this.sessionMapper = sessionMapper;
@@ -84,6 +87,7 @@ public class StationMeasurementService {
         this.transportTaskMapper = transportTaskMapper;
         this.sessionProperties = sessionProperties;
         this.transportTaskMeasurementService = transportTaskMeasurementService;
+        this.eventPublisher = eventPublisher;
         this.clock = clock;
     }
 
@@ -97,9 +101,13 @@ public class StationMeasurementService {
      * 판정하게 하고 영향 행 수로 승패를 가른다.
      */
     @Transactional
-    public StationSession openSession(String cargoId) {
-        if (cargoId == null || cargoId.isBlank()) {
+    public StationSession openSession(Long cargoId) {
+        if (cargoId == null) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "cargoId 는 필수입니다.");
+        }
+        if (!cargoMapper.existsByCargoId(cargoId)) {
+            throw new BusinessException(ErrorCode.CARGO_NOT_FOUND,
+                    "등록되지 않은 화물입니다: " + cargoId);
         }
 
         LocalDateTime now = LocalDateTime.now(clock);
@@ -108,11 +116,6 @@ public class StationMeasurementService {
         // 점유를 빼앗기 전에 "무엇을 회수하는지" 먼저 읽어 둔다. 로그 전용이며 판정에는 쓰지 않는다 —
         // 판정은 아래 조건부 UPDATE 가 단독으로 한다(이 조회와 UPDATE 사이에 상태가 바뀌어도 안전).
         StationState before = sessionMapper.findState().orElse(null);
-
-        Cargo cargo = new Cargo();
-        cargo.setCargoId(cargoId);
-        cargo.setCreatedAt(now);
-        cargoMapper.insertIfAbsent(cargo);
 
         String sessionId = UUID.randomUUID().toString();
         sessionMapper.insert(new StationSession(sessionId, cargoId));
@@ -134,10 +137,10 @@ public class StationMeasurementService {
         if (before != null && before.isOccupied() && before.isExpired(expiredBefore)) {
             // 스케줄러 실행 사이에 직접 새 세션이 만료 점유를 회수한 경우에도 이전 작업을 남기지 않는다.
             transportTaskMapper.findByMeasurementSessionId(before.getActiveSessionId()).ifPresent(task ->
-                    transportTaskMapper.updateStatusIfCurrent(
+                    // 스케줄러가 도는 TTL 만료와 같은 사유다 — 결과가 오지 않은 채 세션이 회수됐다.
+                    transportTaskMapper.failWithCode(
                             task.getId(), com.fast.backend.transport.domain.TaskStatus.MEASURING,
-                            com.fast.backend.transport.domain.TaskStatus.FAILED,
-                            null, now));
+                            now, com.fast.backend.transport.domain.TaskFailureCode.MEASUREMENT_NO_RESPONSE));
             // 정상 종료를 못 하고 죽은 세션을 회수한 경우다. 조용히 넘어가면 "왜 남의 세션이
             // 끊겼는지" 추적할 수 없으므로 WARN 으로 남긴다.
             log.warn("Station session expired and released: expiredSessionId={}, acquiredAt={}, "
@@ -271,7 +274,11 @@ public class StationMeasurementService {
         }
 
         boolean eligible = placementEligibility.isEligible(entity);
-        transportTaskMeasurementService.complete(session, entity);
+        boolean nextCargoReady = transportTaskMeasurementService.complete(session, entity);
+        if (nextCargoReady) {
+            eventPublisher.publishEvent(new NextCargoCreationRequestedEvent(
+                    session.getCargoId(), entity.getMeasurementId()));
+        }
         log.info("Station measurement accepted: measurementId={}, sessionId={}, cargoId={}, status={}, "
                         + "cargoHeightM={}, tippingLevel={}, overhangRatio={}, placementEligible={}",
                 entity.getMeasurementId(), session.getSessionId(), session.getCargoId(), status,
@@ -317,7 +324,7 @@ public class StationMeasurementService {
     }
 
     private StationMeasurementResponse toResponse(StationMeasurement m) {
-        String cargoId = m.getSessionId() == null ? null
+        Long cargoId = m.getSessionId() == null ? null
                 : sessionMapper.findBySessionId(m.getSessionId())
                         .map(StationSession::getCargoId)
                         .orElse(null);

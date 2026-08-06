@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from forklift_teleop.mapping import TeleopLimits, map_twist, select_command
@@ -7,13 +8,23 @@ class MappingTest(unittest.TestCase):
     def setUp(self):
         self.limits = TeleopLimits()
 
-    # 기대값은 **기본 설정**(중립 9400 · 좌우 각 2800 · 한계 28°) 기준이다.
-    # ⚠️ 2026-08-04 오후까지 이 파일은 낡은 기본값(중립 10000 · ±1500 · 15°)을
-    #    검증하고 있었다. 실제 설정은 197·198 로 두 번 바뀌었는데 여기가 안
-    #    따라와서, **테스트가 오히려 틀린 값을 고정하고** 있었다.
-    CENTER = 9400
-    LEFT_FULL = 12200
-    RIGHT_FULL = 6600
+    # ⚠️ **기대값을 숫자로 적지 않는다. 설정에서 유도한다.**
+    #
+    # 2026-08-04 오후까지 이 파일은 낡은 기본값(중립 10000 · ±1500 · 15°)을
+    # 검증하고 있었고, 실제 설정이 197·198 로 두 번 바뀌는 동안 안 따라와서
+    # **테스트가 오히려 틀린 값을 고정하고** 있었다. 2026-08-05 에 152 로 또
+    # 바뀌었다(9000 · ±3600 · 36°). 숫자를 적어두는 한 이 일은 반복된다.
+    @property
+    def CENTER(self):
+        return self.limits.steering_center_cdeg
+
+    @property
+    def LEFT_FULL(self):
+        return self.limits.steering_max_cdeg
+
+    @property
+    def RIGHT_FULL(self):
+        return self.limits.steering_min_cdeg
 
     def test_stop_and_in_place_turn_are_centered(self):
         self.assertEqual(map_twist(0.0, 0.35, self.limits).drive_percent, 0)
@@ -23,10 +34,18 @@ class MappingTest(unittest.TestCase):
         )
 
     def test_forward_left_and_right(self):
+        """조향값은 **중립 + 뒷바퀴각×100** 이어야 한다.
+
+        `rear_steering_limit_deg` 와 좌우 폭(cdeg)이 일치하는 한(둘 다 1° = 100cdeg)
+        이 관계가 성립한다. 둘이 어긋나면 여기서 깨진다 — 그게 이 테스트의 목적이다.
+        """
+        expected = round(math.degrees(
+            math.atan(self.limits.wheelbase_m * 0.35 / 0.2)) * 100)
         left = map_twist(0.2, 0.35, self.limits)
         right = map_twist(0.2, -0.35, self.limits)
-        self.assertEqual(left, type(left)(60, 10814))
-        self.assertEqual(right, type(right)(60, 7986))
+        self.assertEqual(left.drive_percent, 60)
+        self.assertEqual(left.steering_cdeg, self.CENTER + expected)
+        self.assertEqual(right.steering_cdeg, self.CENTER - expected)
 
     def test_left_and_right_are_symmetric_about_center(self):
         """중립을 옮기면 좌우 폭이 어긋나기 쉬워 대칭성을 못 박아둔다.
@@ -42,14 +61,19 @@ class MappingTest(unittest.TestCase):
     def test_reverse_flips_rear_steering(self):
         forward_left = map_twist(0.2, 0.35, self.limits)
         reverse_same_yaw = map_twist(-0.2, 0.35, self.limits)
-        self.assertEqual(forward_left.steering_cdeg, 10814)
-        self.assertEqual(reverse_same_yaw.steering_cdeg, 7986)
-        self.assertEqual(reverse_same_yaw.drive_percent, -60)
+        offset = abs(forward_left.steering_cdeg - self.CENTER)
+        self.assertEqual(reverse_same_yaw.steering_cdeg, self.CENTER - offset)
+        # 후진은 상한이 다르다(전진 60 · 후진 100) — 같은 명령도 듀티가 크다.
+        self.assertEqual(reverse_same_yaw.drive_percent,
+                         -self.limits.max_drive_percent_reverse)
 
     def test_values_are_clamped(self):
         command = map_twist(99.0, -99.0, self.limits)
         self.assertEqual(command.drive_percent, 60)
-        self.assertEqual(command.steering_cdeg, 7986)
+        # 상한으로 잘린 입력은 **상한값을 직접 준 것과 같아야** 한다.
+        # ⚠️ 이때 조향이 최대(RIGHT_FULL)가 되는 것이 아니다 — 0.2 m/s 에서는
+        #    같은 각속도가 더 작은 곡률이라 14° 정도다. 속도가 조향각을 정한다.
+        self.assertEqual(command, map_twist(0.2, -0.35, self.limits))
 
     def test_defaults_match_the_deployed_config(self):
         """기본값이 config/teleop.yaml 과 어긋나지 않게 못 박는다.
@@ -62,7 +86,8 @@ class MappingTest(unittest.TestCase):
         self.assertEqual(self.limits.steering_min_cdeg, self.RIGHT_FULL)
         self.assertEqual(self.limits.steering_max_cdeg, self.LEFT_FULL)
         self.assertEqual(self.limits.min_drive_percent, 35)
-        self.assertEqual(self.limits.rear_steering_limit_deg, 28.0)
+        self.assertEqual(self.limits.rear_steering_limit_deg,
+                         (self.LEFT_FULL - self.CENTER) / 100.0)
 
     def test_slower_speed_increases_steering_for_same_yaw_rate(self):
         fast = map_twist(0.2, 0.2, self.limits)
@@ -105,7 +130,7 @@ class MappingTest(unittest.TestCase):
     def test_fresh_command_is_applied(self):
         command = select_command(0.2, 0.35, 0.499, 0.5, self.limits)
         self.assertEqual(command.drive_percent, 60)
-        self.assertEqual(command.steering_cdeg, 10814)
+        self.assertEqual(command.steering_cdeg, map_twist(0.2, 0.35, self.limits).steering_cdeg)
 
 
 if __name__ == "__main__":

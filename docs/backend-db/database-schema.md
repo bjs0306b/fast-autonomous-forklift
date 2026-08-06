@@ -16,7 +16,7 @@
 
 | 컬럼 | 의미 |
 |---|---|
-| `cargo_id` | 입하부터 출하까지 사용하는 화물 식별자. 팔레트와 화물을 분리하지 않는다. |
+| `cargo_id` | 백엔드가 `BIGINT AUTO_INCREMENT`로 생성하는 화물 식별자. 팔레트와 화물을 분리하지 않는다. |
 | `created_at` | 화물 최초 등록 시각 |
 
 ### station_session
@@ -104,7 +104,7 @@
 | `destination_slot_code` | 측정 완료 후 선택한 적재 위치. 측정 전에는 null |
 | `destination_x`, `destination_y`, `destination_heading`, `fork_height` | 측정 완료 시점의 목적지 스냅샷. 측정 전에는 null |
 | `status` | 작업 진행 상태 |
-| `started_at` | 작업 시작 시각. MOVE 결과 300초 TTL의 기준 |
+| `started_at` | 작업 시작 시각. MOVE 결과와 측정 설비 대기 300초 TTL의 기준 |
 | `measurement_requested_at` | AI 측정 요청 발행 시각. 세션 미생성 상태의 60초 TTL 기준 |
 | `assigned_at`, `completed_at`, `failed_at`, `created_at` | 주요 상태별 이력 시각 |
 

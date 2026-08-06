@@ -16,7 +16,7 @@ public interface StorageSlotMapper {
     int markOccupied(
             @Param("slotCode") String slotCode,
             @Param("reservedTaskId") Long reservedTaskId,
-            @Param("storedCargoId") String storedCargoId);
+            @Param("storedCargoId") Long storedCargoId);
     int releaseReservation(
             @Param("slotCode") String slotCode,
             @Param("reservedTaskId") Long reservedTaskId);

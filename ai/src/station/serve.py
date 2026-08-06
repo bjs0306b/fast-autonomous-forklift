@@ -14,11 +14,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 # 직접 실행(python src/station/serve.py)도 되게 src를 경로에 얹는다
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# `ai/` 루트 — 기본 CA 경로처럼 레포 안 파일을 가리킬 때 쓴다.
+# cwd 에 의존하면 실행 위치가 바뀔 때 조용히 못 찾는다(config.py 와 같은 이유).
+_AI_ROOT = Path(__file__).resolve().parents[2]
 
 import cv2  # noqa: E402
 
@@ -213,6 +218,12 @@ def check_wiring(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # ⚠️ argparse 기본값이 `os.environ.get(...)` 을 **파서를 만들 때** 읽는다.
+    #    그래서 .env 로드는 반드시 그 전에 해야 한다.
+    #    (수동 트리거 `station.send_trigger` 도 같은 모듈을 써서 설정이 갈리지 않는다.)
+    from station.envfile import load_dotenv
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="측정 스테이션 (FR-101-5)")
     parser.add_argument("--once", action="store_true", help="1회 측정 후 종료")
     parser.add_argument("--probe", action="store_true", help="카메라 인덱스 확인")
@@ -238,12 +249,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true",
                         help="측정하지 않고 점검만 — 추론 서버·백엔드 연결 확인 (시연 전용)")
     parser.add_argument("--listen", action="store_true",
-                        help="상시 모드 — 시뮬의 측정 요청(MQTT)을 기다렸다가 측정한다")
-    parser.add_argument("--broker", default="70.12.130.106",
-                        help="--listen 전용. MQTT 브로커 주소")
-    parser.add_argument("--broker-port", type=int, default=1883)
+                        help="상시 모드 — 백엔드의 측정 요청(MQTT)을 기다렸다가 측정한다")
+    # 기본값이 EC2 브로커다. 종전 GPU서버(70.12.130.106:1883)는 쓰지 않는다
+    # (2026-08-03: GPU서버 미사용 결정 + mosquitto 프로세스도 없어졌다, Jira 188).
+    #
+    # ⚠️ **호스트명이 아니라 IP 다.** 브로커 서버 인증서의 SAN 이
+    #    `IP Address:3.38.178.143` 뿐이고 DNS 이름이 없다. `i15a304.p.ssafy.io` 로
+    #    붙으면 호스트명 검증에서 막힌다(둘은 같은 서버다 — 실측 확인).
+    #    인증서를 DNS SAN 으로 재발급하면 호스트명으로 바꿀 수 있다.
+    parser.add_argument("--broker", default=os.environ.get(
+                            "STATION_MQTT_BROKER", "3.38.178.143"),
+                        help="--listen 전용. MQTT 브로커 주소 "
+                             "(환경변수 STATION_MQTT_BROKER). 인증서가 IP 로 "
+                             "발급돼 있어 기본값이 IP 다")
+    parser.add_argument("--broker-port", type=int,
+                        default=int(os.environ.get("STATION_MQTT_PORT", "8883")))
+    # ⚠️ EC2 브로커는 `allow_anonymous false` + TLS 다. 셋 다 있어야 붙는다.
+    #    비밀번호를 명령줄로 받지 않는 이유는 셸 이력·프로세스 목록에 남기 때문이다.
+    # CA 는 **레포 루트** `infra/` 에 있다(`ai/infra/` 아님). Dockerfile.backend 도
+    # 같은 경로를 COPY 하므로 백엔드·스테이션이 같은 인증서를 본다.
+    parser.add_argument("--broker-ca", default=os.environ.get(
+                            "STATION_MQTT_CA",
+                            str(_AI_ROOT.parent / "infra" / "mqtt-ca.crt")),
+                        help="브로커 CA 인증서 (환경변수 STATION_MQTT_CA). "
+                             "빈 값이면 평문 접속")
     parser.add_argument("--topic", default="fast/station/measure_request",
-                        help="측정 요청 토픽. 시뮬 쪽 규격에 맞춘다")
+                        help="측정 요청 토픽. 백엔드 application.yml 과 같아야 한다")
     parser.add_argument("--cargo-field", default="cargoId",
                         help="요청 페이로드에서 화물 ID를 담은 키 이름")
     parser.add_argument("--max-measurements", type=int, default=0,
@@ -402,8 +433,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 0 if publish(payload, session_id) else 1
         except StationApiError as e:
             # 세션 열기 실패(대개 409 ALREADY_OCCUPIED) — 측정은 시작도 안 했다.
+            #
+            # **측정 실패(1)와 구분해 3을 돌려준다.** 운영자가 할 일이 다르다:
+            #   1 → 화물 배치·조명·검출을 본다 (재려고 했는데 안 됐다)
+            #   3 → 설비 점유·백엔드 연결을 본다 (재려는 시도조차 못 했다)
+            # 종전엔 둘 다 1이라 로그 마지막 줄만 보면 원인을 가릴 수 없었다.
             print(f"[station-api] 세션을 열 수 없어 측정을 건너뜁니다: {e}", file=sys.stderr)
-            return 1
+            return 3
         except SessionNotReleased:
             return 2      # 잠긴 세션이 남았다 — 성공(0)·측정실패(1)와 구분한다
 
@@ -419,15 +455,42 @@ def main(argv: list[str] | None = None) -> int:
     # 0.8초라 측정 예산(≤1초)을 넘긴다.
     from station.trigger import MeasureTrigger, wait_until_still
 
+    # **백엔드를 트리거보다 먼저 확인한다.** 안 그러면 신호를 받은 **뒤에야** 백엔드가
+    # 안 닿는 걸 알게 되고, 그 신호는 그대로 날아간다(재발행이 없다). 2026-08-03에
+    # `STATION_API_BASE` 미설정으로 localhost 를 찌르다 트리거를 하나 잃었다.
+    from station.rest_client import active_session, base_url_of
+    backend = base_url_of(None)
+    try:
+        active_session()
+        print(f"[listen] 백엔드 {backend} ✅")
+    except Exception as e:
+        print(f"[listen] ❌ 백엔드 연결 실패 {backend} — {e}", file=sys.stderr)
+        if "localhost" in backend:
+            print("  `STATION_API_BASE` 가 설정되지 않아 기본값(localhost)을 씁니다. "
+                  "레포 루트 `.env` 에 배포 주소를 넣으세요.", file=sys.stderr)
+        return 1
+
     # **브로커를 카메라보다 먼저 연결한다.** 주소·포트가 틀렸으면 하드웨어를 잡기 전에
     # 실패하는 편이 낫다 — 카메라를 열어놓고 죽으면 다른 프로세스가 못 쓴다.
+    # 비밀번호는 환경변수로만 받는다 — 명령줄은 셸 이력·프로세스 목록에 남는다.
     trigger = MeasureTrigger(args.broker, args.broker_port, args.topic,
-                             args.cargo_field)
+                             args.cargo_field,
+                             tls_ca=args.broker_ca or None,
+                             username=os.environ.get("STATION_MQTT_USER"),
+                             password=os.environ.get("STATION_MQTT_PASSWORD"))
+    scheme = "TLS" if args.broker_ca else "평문"
+    auth = "인증" if os.environ.get("STATION_MQTT_USER") else "익명"
+    print(f"[listen] 브로커 {args.broker}:{args.broker_port} ({scheme}·{auth})")
     try:
         trigger.__enter__()
     except Exception as e:
         print(f"[listen] ❌ 브로커 연결 실패 {args.broker}:{args.broker_port} — "
               f"{type(e).__name__}: {e}", file=sys.stderr)
+        # 흔한 원인을 같이 알려준다 — 연결 실패는 원인 후보가 넓어서
+        # 메시지만 보면 어디부터 볼지 모른다.
+        print("  확인: ① CA 인증서 경로(--broker-ca) ② STATION_MQTT_USER/"
+              "PASSWORD 환경변수 ③ 포트(TLS 8883 / 평문 1883) ④ 방화벽",
+              file=sys.stderr)
         return 1
 
     detector = build_detector()
@@ -447,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"상시 모드 — {args.topic} 대기 중. Ctrl-C로 종료", flush=True)
     measured: set[str] = set()
-    rc = done = 0
+    rc = done = ok_count = fail_count = 0
     try:
         with trigger as trig:
             for req in trig.requests():
@@ -472,11 +535,26 @@ def main(argv: list[str] | None = None) -> int:
                 rc = measure_for_cargo(req.cargo_id, detector, frame)
                 if rc == 0:
                     measured.add(req.cargo_id)
+                    ok_count += 1
+                else:
+                    fail_count += 1
                 done += 1
+
+                # ⚠️ **성공과 시도를 구분해 찍는다.** 종전엔 실패해도 "N건 측정 완료"
+                #    라고 해서, 마지막 줄만 보면 성공한 것으로 읽혔다. 실제로 세션
+                #    점유(409)로 측정을 **시작조차 못 한** 경우에도 "완료"가 찍혔다.
+                #    위에 409 가 남아 있어도 결론 줄이 거짓이면 그쪽을 믿게 된다.
+                verdict = {
+                    0: "성공",
+                    2: "실패(내 세션이 안 풀림 — --release-session 필요)",
+                    3: "실패(세션을 못 열었다 — 설비 점유·백엔드 확인)",
+                }.get(rc, "실패(측정 불가 — 화물 배치·조명 확인)")
                 if args.max_measurements and done >= args.max_measurements:
-                    print(f"[listen] {done}건 측정 완료 — 종료", flush=True)
+                    tail = f" (성공 {ok_count} · 실패 {fail_count})" if fail_count else ""
+                    print(f"[listen] {done}건 시도{tail} — 종료  [{verdict}]", flush=True)
                     break
-                print(f"[listen] 측정 종료 rc={rc} — 다음 요청 대기", flush=True)
+                print(f"[listen] {verdict} — 다음 요청 대기 "
+                      f"(누적 성공 {ok_count} · 실패 {fail_count})", flush=True)
     except KeyboardInterrupt:
         print("\n종료", flush=True)
     finally:
