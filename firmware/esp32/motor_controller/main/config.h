@@ -64,8 +64,25 @@
 #define STEPPER_MOTOR_MAX_ACCEL_SPS2      20000U
 
 /*
- * Keep disabled by default. Enable only for a wheel-off/load-free bench test.
- * The normal firmware never moves the lift automatically at boot.
+ * !! **부팅 시 포크는 움직인다.** (2026-08-06 정정)
+ *
+ *    종전 이 자리에 "The normal firmware never moves the lift automatically at
+ *    boot" 라고 적혀 있었는데 **사실이 아니다** — 바로 아래 STARTUP_HOME_ENABLED 가
+ *    1 이고, main.c 가 부팅 때 호밍을 실행한다:
+ *
+ *      전원 인가 -> 10초 카운트다운 경고 로그 -> 하한 리밋까지 하강
+ *                -> 리밋 감지 -> 500ms 대기 -> 1600스텝 상승(백오프)
+ *
+ *    즉 **전원을 넣으면 10초 뒤 포크가 내려간다.** 포크 아래에 손·화물·파렛트가
+ *    있으면 안 된다. 10초 카운트다운은 그걸 치우라고 있는 것이고, 로그에
+ *    "keep power cutoff ready" 가 같이 찍힌다.
+ *
+ * !! 호밍이 실패하면 ESP_ERROR_CHECK 가 **MCU 를 abort(재부팅)** 시킨다.
+ *    리밋 스위치가 눌린 채 고장나면 부팅 -> 호밍 실패 -> 재부팅 루프가 된다.
+ *    그때는 STARTUP_HOME_ENABLED 를 0 으로 두고 플래시해 원인을 먼저 본다.
+ *
+ * STARTUP_TEST_ENABLED 는 호밍 대신 도는 무부하 벤치 테스트다(#elif 라 둘이 동시에
+ * 안 돈다). 바퀴를 띄우고 부하를 뗀 상태에서만 켤 것.
  */
 #define STEPPER_MOTOR_STARTUP_TEST_ENABLED 0
 #define STEPPER_MOTOR_STARTUP_HOME_ENABLED 1
