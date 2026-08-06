@@ -9,6 +9,7 @@ import type {
   WebRtcStatus,
 } from "@/types/monitoring"
 import { WEBRTC_STATUS_HEADLINE, WEBRTC_STATUS_TEXT } from "@/lib/config/webrtcStatusText"
+import { clampOverlayOffset, type Point } from "@/lib/monitoring/draggableOverlay"
 import { ConnectionStatusBadge } from "./ConnectionStatusBadge"
 import { DigitalTwinVideoLayer } from "./DigitalTwinVideoLayer"
 import { FullscreenButton } from "./FullscreenButton"
@@ -31,10 +32,10 @@ export interface MainRealtimeMonitoringViewProps {
   streamStatus?: WebRtcStatus
   /** 영상 연결 실패/끊김 사유 */
   streamError?: string | null
-  /** <video>/<audio> 컨테이너 ref (useIsaacSimStream 이 준다) */
+  /** iframe 컨테이너 ref (useIsaacSimStream 이 준다) */
   streamContainerRef: React.RefObject<HTMLDivElement | null>
-  /** video 요소 ref (재생 이벤트 관찰용) */
-  streamVideoRef: React.RefObject<HTMLVideoElement | null>
+  /** Isaac Sim MediaMTX 스트림 iframe 요소 ref (load/error 이벤트 관찰용) */
+  streamVideoRef: React.RefObject<HTMLIFrameElement | null>
   /** 연결 실패 상태에서 재시도 버튼 클릭 시 호출(자동 재연결과 별개인 수동 즉시 재시도) */
   onRetryConnection?: () => void
   /** 화면 위에 작게 표시할 선택 차량 요약 (선택 안 됐으면 null) */
@@ -67,7 +68,22 @@ export function MainRealtimeMonitoringView({
   className,
 }: MainRealtimeMonitoringViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const pipRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [pipOffset, setPipOffset] = useState<Point>({ x: 0, y: 0 })
+  const [isDraggingPip, setIsDraggingPip] = useState(false)
+  const pipOffsetRef = useRef(pipOffset)
+  const pipDragRef = useRef<{
+    pointerId: number
+    pointerStart: Point
+    offsetStart: Point
+    overlayAtStart: DOMRect
+    containerAtStart: DOMRect
+  } | null>(null)
+
+  useEffect(() => {
+    pipOffsetRef.current = pipOffset
+  }, [pipOffset])
 
   useEffect(() => {
     const handleChange = () => {
@@ -85,6 +101,44 @@ export function MainRealtimeMonitoringView({
     } else {
       void el.requestFullscreen?.()
     }
+  }, [])
+
+  const startPipDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return
+    if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return
+    const overlay = pipRef.current
+    const container = containerRef.current
+    if (!overlay || !container) return
+
+    event.preventDefault()
+    overlay.setPointerCapture(event.pointerId)
+    pipDragRef.current = {
+      pointerId: event.pointerId,
+      pointerStart: { x: event.clientX, y: event.clientY },
+      offsetStart: pipOffsetRef.current,
+      overlayAtStart: overlay.getBoundingClientRect(),
+      containerAtStart: container.getBoundingClientRect(),
+    }
+    setIsDraggingPip(true)
+  }, [])
+
+  const movePip = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = pipDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const next = clampOverlayOffset(
+      drag.offsetStart,
+      { x: event.clientX - drag.pointerStart.x, y: event.clientY - drag.pointerStart.y },
+      drag.overlayAtStart,
+      drag.containerAtStart,
+    )
+    pipOffsetRef.current = next
+    setPipOffset(next)
+  }, [])
+
+  const endPipDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (pipDragRef.current?.pointerId !== event.pointerId) return
+    pipDragRef.current = null
+    setIsDraggingPip(false)
   }, [])
 
   return (
@@ -144,8 +198,17 @@ export function MainRealtimeMonitoringView({
           right 는 요청대로 16px(좁은 화면 12px)다. */}
       {pip ? (
         <div
+          ref={pipRef}
+          data-testid="draggable-ai-video"
+          title="마우스로 끌어 위치 이동"
+          onPointerDown={startPipDrag}
+          onPointerMove={movePip}
+          onPointerUp={endPipDrag}
+          onPointerCancel={endPipDrag}
+          style={{ transform: `translate3d(${pipOffset.x}px, ${pipOffset.y}px, 0)` }}
           className={cn(
-            "absolute z-40",
+            "absolute z-40 touch-none select-none",
+            isDraggingPip ? "cursor-grabbing" : "cursor-grab",
             "right-4 top-[3.25rem] max-[1200px]:right-3 max-[1200px]:top-12",
             "w-[clamp(340px,32%,470px)] max-[1500px]:w-[clamp(300px,31%,410px)] max-[1200px]:w-[clamp(250px,35%,340px)]",
             // 컨테이너를 넘지 않게 하는 마지막 안전장치(아주 좁은 폭).

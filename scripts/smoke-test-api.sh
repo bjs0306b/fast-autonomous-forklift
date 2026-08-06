@@ -106,11 +106,11 @@ else
 
   s2="$(curl -s -o /dev/null -m 10 -w '%{http_code}' -X PUT \
         -H 'Content-Type: application/json' -d '{"status":"IDLE"}' \
-        "${BACKEND_BASE_URL}/api/vehicles/REAL-F01/status" 2>/dev/null)"
+        "${BACKEND_BASE_URL}/api/vehicles/SIM-F01/status" 2>/dev/null)"
   if [[ "${s2}" == "404" ]]; then
-    pass "PUT /api/vehicles/REAL-F01/status — HTTP 404 (비활성, 정상)"
+    pass "PUT /api/vehicles/SIM-F01/status — HTTP 404 (비활성, 정상)"
   else
-    fail "PUT /api/vehicles/REAL-F01/status — HTTP ${s2} (404 여야 함. 테스트 API 가 켜져 있다)"
+    fail "PUT /api/vehicles/SIM-F01/status — HTTP ${s2} (404 여야 함. 테스트 API 가 켜져 있다)"
   fi
 fi
 

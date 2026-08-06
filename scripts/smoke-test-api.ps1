@@ -113,9 +113,9 @@ if (-not $AllowTestCheck) {
     if ($s1 -eq 404) { Write-Pass 'POST /api/mqtt/test - HTTP 404 (비활성, 정상)' }
     else { Write-Fail "POST /api/mqtt/test - HTTP $s1 (404 여야 함. 테스트 API 가 켜져 있다)" }
 
-    $s2 = Get-StatusCode "$BackendBaseUrl/api/vehicles/REAL-F01/status" 'PUT' '{"status":"IDLE"}'
-    if ($s2 -eq 404) { Write-Pass 'PUT /api/vehicles/REAL-F01/status - HTTP 404 (비활성, 정상)' }
-    else { Write-Fail "PUT /api/vehicles/REAL-F01/status - HTTP $s2 (404 여야 함. 테스트 API 가 켜져 있다)" }
+    $s2 = Get-StatusCode "$BackendBaseUrl/api/vehicles/SIM-F01/status" 'PUT' '{"status":"IDLE"}'
+    if ($s2 -eq 404) { Write-Pass 'PUT /api/vehicles/SIM-F01/status - HTTP 404 (비활성, 정상)' }
+    else { Write-Fail "PUT /api/vehicles/SIM-F01/status - HTTP $s2 (404 여야 함. 테스트 API 가 켜져 있다)" }
 }
 
 Write-Header "프론트"

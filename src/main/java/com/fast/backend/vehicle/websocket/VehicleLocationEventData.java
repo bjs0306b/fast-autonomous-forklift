@@ -28,8 +28,44 @@ public record VehicleLocationEventData(
         Quaternion quaternion,
         Double speed,
         OffsetDateTime messageAt,
-        OffsetDateTime receivedAt
+        OffsetDateTime receivedAt,
+        Double forkHeight,
+        Double battery,
+        String reportedCargoId,
+        String reportedTaskId,
+        Boolean reportedLoaded,
+        Double reportedCargoHeight
 ) {
+
+    public VehicleLocationEventData(
+            String vehicleId,
+            VehicleStatus status,
+            Position position,
+            Double heading,
+            Quaternion quaternion,
+            Double speed,
+            OffsetDateTime messageAt,
+            OffsetDateTime receivedAt,
+            Double forkHeight,
+            Double battery,
+            String reportedCargoId,
+            String reportedTaskId) {
+        this(vehicleId, status, position, heading, quaternion, speed, messageAt, receivedAt,
+                forkHeight, battery, reportedCargoId, reportedTaskId, null, null);
+    }
+
+    public VehicleLocationEventData(
+            String vehicleId,
+            VehicleStatus status,
+            Position position,
+            Double heading,
+            Quaternion quaternion,
+            Double speed,
+            OffsetDateTime messageAt,
+            OffsetDateTime receivedAt) {
+        this(vehicleId, status, position, heading, quaternion, speed, messageAt, receivedAt,
+                null, null, null, null, null, null);
+    }
 
     public record Position(Double x, Double y, String frameId) {
     }

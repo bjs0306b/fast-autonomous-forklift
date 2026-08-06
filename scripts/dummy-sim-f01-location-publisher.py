@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""REAL-F01 위치 더미 MQTT 발행기 (통합 테스트용).
+"""SIM-F01 위치 더미 MQTT 발행기 (통합 테스트용).
 
 실제 ROS2 Orin 차량이나 Isaac Sim 없이 다음 전체 경로를 검증하기 위한 스크립트다.
 
     이 스크립트
-      → forklift/REAL-F01/location  (MQTT)
+      → forklift/SIM-F01/location  (MQTT)
       → Spring Boot MqttMessageRouter.routeLocation
       → ForkliftLocationService (검증 · 최신 위치 갱신)
       → STOMP /topic/vehicles/location
@@ -12,7 +12,7 @@
 
 발행 규격(prompt73 확정):
 
-    topic     forklift/REAL-F01/location
+    topic     forklift/SIM-F01/location
     QoS       1
     retained  false          ← 위치는 절대 retain 하지 않는다
     payload   {"vehicleId","position":{"x","y","frameId"},"heading","messageAt"}
@@ -24,21 +24,23 @@
   * 제어 명령 토픽(forklift/+/command)에는 절대 발행하지 않는다.
   * retained=false 를 유지한다. true 로 두면 재접속한 구독자가 오래된 좌표를 받아
     차량이 과거 위치에 있는 것처럼 보인다.
-  * REAL-F01 이 차량 마스터에 등록돼 있어야 백엔드가 메시지를 처리한다.
+  * SIM-F01 이 차량 마스터에 등록돼 있어야 백엔드가 메시지를 처리한다.
     등록돼 있지 않으면 백엔드가 "vehicle not registered" 경고 후 폐기한다.
+  * **Isaac Sim twin_bridge.py 와 동시에 띄우지 않는다.** 둘 다 SIM-F01 로 위치를 발행하므로
+    서로의 좌표를 덮어써 마커가 두 지점 사이를 튄다. 이 스크립트는 Isaac 이 없을 때의 대역이다.
 
 사전 준비
     pip install paho-mqtt
 
 실행
-    python scripts/dummy-real-f01-location-publisher.py
+    python scripts/dummy-sim-f01-location-publisher.py
 
 환경변수로 조정
     MQTT_HOST=localhost \
     MQTT_PORT=1883 \
     MQTT_INTERVAL_SECONDS=0.5 \
-    VEHICLE_ID=REAL-F01 \
-    python scripts/dummy-real-f01-location-publisher.py
+    VEHICLE_ID=SIM-F01 \
+    python scripts/dummy-sim-f01-location-publisher.py
 
 종료
     Ctrl+C  (정상 disconnect 후 종료)
@@ -66,7 +68,7 @@ MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
-VEHICLE_ID = os.getenv("VEHICLE_ID", "REAL-F01")
+VEHICLE_ID = os.getenv("VEHICLE_ID", "SIM-F01")
 INTERVAL_SECONDS = float(os.getenv("MQTT_INTERVAL_SECONDS", "0.5"))
 CLIENT_ID = os.getenv("MQTT_CLIENT_ID", f"dummy-location-{VEHICLE_ID}")
 

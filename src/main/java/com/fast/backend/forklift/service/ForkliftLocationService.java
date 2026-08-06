@@ -2,19 +2,13 @@ package com.fast.backend.forklift.service;
 
 import com.fast.backend.forklift.dto.ForkliftLocationMessage;
 import com.fast.backend.vehicle.domain.VehicleStatus;
-import com.fast.backend.vehicle.location.LatestVehicleLocationProvider;
-import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
-import com.fast.backend.vehicle.mapper.VehicleMapper;
-import com.fast.backend.vehicle.mapper.VehicleCurrentStatusMapper;
+import com.fast.backend.vehicle.location.VehicleLocationIngestion;
+import com.fast.backend.vehicle.location.VehicleLocationIngestionService;
 import com.fast.backend.vehicle.websocket.VehicleLocationEventData;
-import com.fast.backend.vehicle.websocket.VehicleWebSocketBroadcaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import com.fast.backend.common.time.CommunicationTime;
-
-import java.time.OffsetDateTime;
 import java.util.Set;
 
 /**
@@ -24,17 +18,14 @@ import java.util.Set;
  * 값을 null로 지우는 문제). payload에 상태값이 함께 오더라도 {@link com.fast.backend.vehicle.service.VehicleStatusService}를
  * 호출하지 않는다 — 상태 저장은 오직 상태 토픽·{@link ForkliftStatusService}만의 책임이다(prompt24.md 6장).
  *
- * <p>미등록 차량이면(prompt20.md 11장) 브로드캐스트하지 않고 경고 로그만 남긴다 — 존재 확인은
- * {@link VehicleMapper#existsByVehicleId}로 직접 수행한다({@code VehicleStatusService}를 거치지 않으므로
- * 그 메서드가 주는 예외 기반 존재 확인을 재사용할 수 없다).
+ * <p>미등록 차량 폐기·구식 메시지 차단·DB 갱신·인메모리 갱신·브로드캐스트는 이 클래스가 직접 하지 않고
+ * {@link VehicleLocationIngestionService} 가 맡는다. Isaac Sim telemetry 도 같은 처리기를 쓰므로,
+ * <b>이 클래스에 남은 책임은 ROS2 스키마 검증과 변환뿐</b>이다.
  */
 @Service
 public class ForkliftLocationService {
 
     private static final Logger log = LoggerFactory.getLogger(ForkliftLocationService.class);
-
-    /** position.frameId가 없을 때의 기본 좌표계(prompt32.md 1장 5번 확정). */
-    private static final String DEFAULT_FRAME_ID = "map";
 
     /**
      * 허용 frameId(prompt32.md 1장 5번 확정). {@code map}은 전역 지도 좌표계, {@code odom}은 주행거리계
@@ -47,20 +38,13 @@ public class ForkliftLocationService {
      */
     private static final Set<String> ALLOWED_FRAME_IDS = Set.of("map", "odom");
 
-    private final VehicleMapper vehicleMapper;
-    private final VehicleCurrentStatusMapper statusMapper;
-    private final VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster;
-    private final LatestVehicleLocationProvider latestVehicleLocationProvider;
+    /** 로그에서 어느 계약으로 들어온 위치인지 구분하기 위한 이름. */
+    private static final String SOURCE = "ros2-location";
 
-    public ForkliftLocationService(
-            VehicleMapper vehicleMapper,
-            VehicleCurrentStatusMapper statusMapper,
-            VehicleWebSocketBroadcaster vehicleWebSocketBroadcaster,
-            LatestVehicleLocationProvider latestVehicleLocationProvider) {
-        this.vehicleMapper = vehicleMapper;
-        this.statusMapper = statusMapper;
-        this.vehicleWebSocketBroadcaster = vehicleWebSocketBroadcaster;
-        this.latestVehicleLocationProvider = latestVehicleLocationProvider;
+    private final VehicleLocationIngestionService ingestionService;
+
+    public ForkliftLocationService(VehicleLocationIngestionService ingestionService) {
+        this.ingestionService = ingestionService;
     }
 
     public void handleLocation(ForkliftLocationMessage message) {
@@ -74,35 +58,8 @@ public class ForkliftLocationService {
             if (!isValid(message)) {
                 return;
             }
-
-            if (!vehicleMapper.existsByVehicleId(message.vehicleId())) {
-                // 폐기 사유와 messageAt을 함께 남긴다(prompt73 3.3장) — "왜 화면에 안 뜨지"를 추적할 때
-                // vehicleId만으로는 등록 누락인지 다른 원인인지 구분되지 않는다.
-                // topic/topicVehicleId는 MqttMessageRouter가 대조 단계에서 이미 남긴다.
-                log.warn("Vehicle location discarded: reason=vehicle not registered, "
-                                + "payloadVehicleId={}, messageAt={}",
-                        message.vehicleId(), message.messageAt());
-                return;
-            }
-
-            OffsetDateTime receivedAt = CommunicationTime.nowOffset();
-            int updated = statusMapper.updateLocationIfNewer(
-                    message.vehicleId(),
-                    message.position().x(),
-                    message.position().y(),
-                    normalizeFrameId(message.position().frameId()),
-                    normalizeHeading(message.heading()),
-                    message.speed(),
-                    CommunicationTime.toLocal(message.messageAt()),
-                    CommunicationTime.toLocal(receivedAt));
-            if (updated <= 0) {
-                log.debug("Stale vehicle location ignored: vehicleId={}, messageAt={}",
-                        message.vehicleId(), message.messageAt());
-                return;
-            }
-            latestVehicleLocationProvider.update(toSnapshot(message, receivedAt));
-            VehicleLocationEventData data = toEventData(message, receivedAt);
-            vehicleWebSocketBroadcaster.broadcastLocation(message.vehicleId(), data, message.messageAt());
+            // 검증까지가 이 클래스의 책임이다. DB·인메모리·브로드캐스트는 공통 처리기가 한 벌만 갖는다.
+            ingestionService.ingest(toIngestion(message), SOURCE);
         } catch (RuntimeException e) {
             log.error("Vehicle location broadcast failed unexpectedly: vehicleId={}, error={}",
                     message.vehicleId(), e.getMessage());
@@ -199,35 +156,17 @@ public class ForkliftLocationService {
         return !Double.isNaN(value) && !Double.isInfinite(value);
     }
 
-    private VehicleLocationSnapshot toSnapshot(ForkliftLocationMessage message, OffsetDateTime receivedAt) {
-        return new VehicleLocationSnapshot(
+    private VehicleLocationIngestion toIngestion(ForkliftLocationMessage message) {
+        return new VehicleLocationIngestion(
                 message.vehicleId(),
                 message.position().x(),
                 message.position().y(),
-                normalizeHeading(message.heading()),
-                message.speed(),
-                normalizeFrameId(message.position().frameId()),
-                message.messageAt(),
-                receivedAt);
-    }
-
-    private VehicleLocationEventData toEventData(ForkliftLocationMessage message, OffsetDateTime receivedAt) {
-        VehicleStatus status = VehicleStatus.fromRaw(message.status());
-
-        VehicleLocationEventData.Position position = new VehicleLocationEventData.Position(
-                message.position().x(),
-                message.position().y(),
-                normalizeFrameId(message.position().frameId()));
-
-        return new VehicleLocationEventData(
-                message.vehicleId(),
-                status,
-                position,
-                normalizeHeading(message.heading()),
-                toEventQuaternion(message.quaternion()),
+                message.position().frameId(),
+                message.heading(),
                 message.speed(),
                 message.messageAt(),
-                receivedAt);
+                VehicleStatus.fromRaw(message.status()),
+                toEventQuaternion(message.quaternion()));
     }
 
     /** 생략(null/빈 값)은 기본값 {@code map}으로 허용하고, 그 외에는 허용 목록에 있어야 한다. */
@@ -236,25 +175,6 @@ public class ForkliftLocationService {
             return true;
         }
         return ALLOWED_FRAME_IDS.contains(frameId.trim());
-    }
-
-    private String normalizeFrameId(String frameId) {
-        return (frameId == null || frameId.isBlank()) ? DEFAULT_FRAME_ID : frameId.trim();
-    }
-
-    /**
-     * heading(degree)을 [0, 360) 범위로 정규화한다(예: -90 → 270, 450 → 90, prompt24.md 5장). 이
-     * 프로젝트에 원본값 보존을 요구하는 기존 소비자가 없어(위와 동일 이유) 정규화 정책을 선택했다.
-     */
-    private Double normalizeHeading(Double heading) {
-        if (heading == null) {
-            return null;
-        }
-        double normalized = heading % 360.0;
-        if (normalized < 0) {
-            normalized += 360.0;
-        }
-        return normalized;
     }
 
     /** 네 값이 모두 null인 quaternion은 "없음"으로 취급해 null을 반환한다(prompt24.md 5장). */

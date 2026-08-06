@@ -11,12 +11,14 @@ import com.fast.backend.vehicle.domain.VehicleStatus;
 import com.fast.backend.vehicle.dto.VehicleResponse;
 import com.fast.backend.vehicle.dto.VehicleStatusResponse;
 import com.fast.backend.vehicle.location.LatestVehicleLocationProvider;
+import com.fast.backend.vehicle.location.VehicleLocationSnapshot;
 import com.fast.backend.vehicle.service.VehicleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.time.OffsetDateTime;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -118,6 +120,23 @@ class MonitoringServiceCargoTest {
         assertThat(view.cargoHeight()).isNull();
         // 조회할 화물이 없으면 쿼리 자체를 실행하지 않는다(빈 IN 절 방지).
         verify(stationMeasurementMapper, never()).findLatestCargoHeights(any());
+    }
+
+    /** Isaac의 10 Hz 위치 telemetry가 상태 이벤트보다 먼저 와도 적재 여부와 전체 높이를 보여준다. */
+    @Test
+    void isaacLocationTelemetry_fillsLoadedAndReportedHeight() {
+        when(vehicleService.findActiveVehicles()).thenReturn(List.of(vehicle("SIM-F02", null, null)));
+        OffsetDateTime now = OffsetDateTime.parse("2026-08-06T13:00:00+09:00");
+        when(locationProvider.findAllLatest()).thenReturn(List.of(new VehicleLocationSnapshot(
+                "SIM-F02", 1.0, 2.0, 0.0, 0.0, "map", now, now,
+                0.5, 100.0, "C0007", "TASK-1", true, 1.11)));
+
+        DashboardResponse.VehicleView view = single(service.getDashboard());
+
+        assertThat(view.hasCargo()).isTrue();
+        assertThat(view.reportedCargoId()).isEqualTo("C0007");
+        assertThat(view.reportedCargoHeight()).isEqualTo(1.11);
+        assertThat(view.cargoHeight()).isNull();
     }
 
     /** 차량이 여러 대여도 높이 조회는 정확히 1회다. */

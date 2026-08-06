@@ -118,37 +118,37 @@ MQTT subscribed: bean=mqttInboundAdapter, message=Connected and subscribed to [.
 
 ### 2-C. 상태 메시지 수신 확인
 
-DB 에 등록된 차량 ID 만 씁니다(`src/main/resources/db/data-local.sql`: `REAL-F01`, `SIM-F01`, `SIM-F02`).
+DB 에 등록된 차량 ID 만 씁니다(`src/main/resources/db/data-local.sql`: `SIM-F01` 한 대).
 등록되지 않은 ID 로 보내면 백엔드가 `VEHICLE_NOT_FOUND` 로 폐기합니다.
 
 ```bash
-mosquitto_pub -h localhost -p 1883 -t 'forklift/REAL-F01/status' -q 1 \
-  -m '{"forkliftId":"REAL-F01","status":"MOVING","battery":87,"timestamp":"2026-07-24T15:40:24+09:00"}'
+mosquitto_pub -h localhost -p 1883 -t 'forklift/SIM-F01/status' -q 1 \
+  -m '{"forkliftId":"SIM-F01","status":"MOVING","battery":87,"timestamp":"2026-07-24T15:40:24+09:00"}'
 ```
 
 > **따옴표 주의**: PowerShell 에서 `-m` 에 JSON 을 직접 넘기면 큰따옴표가 제거돼 브로커에는
 > 깨진 JSON 이 전달됩니다. PowerShell 을 쓴다면 파일로 발행하세요.
 > ```powershell
-> '{"forkliftId":"REAL-F01","status":"MOVING","battery":87,"timestamp":"2026-07-24T15:40:24+09:00"}' |
+> '{"forkliftId":"SIM-F01","status":"MOVING","battery":87,"timestamp":"2026-07-24T15:40:24+09:00"}' |
 >   Set-Content -Encoding utf8 status.json
 > & 'C:\Program Files\mosquitto\mosquitto_pub.exe' -h localhost -p 1883 `
->   -t 'forklift/REAL-F01/status' -q 1 -f status.json
+>   -t 'forklift/SIM-F01/status' -q 1 -f status.json
 > ```
 
 백엔드 로그에서 순서대로 확인합니다.
 
 ```
-MqttMessageReceiver  - MQTT message received: topic=forklift/REAL-F01/status, qos=1, retained=false, payloadBytes=...
-ForkliftStatusService - Forklift status updated: forkliftId=REAL-F01, status=MOVING, battery=87
-VehicleStatusService  - Vehicle current status updated: vehicleId=REAL-F01, status=MOVING
+MqttMessageReceiver  - MQTT message received: topic=forklift/SIM-F01/status, qos=1, retained=false, payloadBytes=...
+ForkliftStatusService - Forklift status updated: forkliftId=SIM-F01, status=MOVING, battery=87
+VehicleStatusService  - Vehicle current status updated: vehicleId=SIM-F01, status=MOVING
 VehicleWebSocketBroadcaster - Vehicle WebSocket event broadcast sent: ... eventType=VEHICLE_STATUS_UPDATED
 ```
 
 DB 반영은 REST 로 확인합니다.
 
 ```bash
-curl -s http://localhost:8080/api/vehicles/REAL-F01
-curl -s "http://localhost:8080/api/vehicles/REAL-F01/status-history?limit=5"
+curl -s http://localhost:8080/api/vehicles/SIM-F01
+curl -s "http://localhost:8080/api/vehicles/SIM-F01/status-history?limit=5"
 ```
 
 ### 2-D. 명령 발행 확인
@@ -165,7 +165,7 @@ mosquitto_sub -h localhost -p 1883 -t 'forklift/+/command' -q 1 -v
 REST 로 명령을 발행합니다.
 
 ```bash
-curl -X POST http://localhost:8080/api/vehicles/REAL-F01/commands \
+curl -X POST http://localhost:8080/api/vehicles/SIM-F01/commands \
   -H "Content-Type: application/json" \
   -d '{"command":"FORK_UP","reason":"broker verification"}'
 ```
@@ -173,7 +173,7 @@ curl -X POST http://localhost:8080/api/vehicles/REAL-F01/commands \
 Subscriber 에 통합 envelope 가 그대로 도착해야 합니다.
 
 ```
-forklift/REAL-F01/command {"commandId":"...","vehicleId":"REAL-F01","targetSystem":"EMBEDDED",
+forklift/SIM-F01/command {"commandId":"...","vehicleId":"SIM-F01","targetSystem":"EMBEDDED",
 "commandCategory":"FORK","command":"FORK_UP","payload":{},"reason":"...","timestamp":"...+09:00"}
 ```
 
@@ -221,7 +221,12 @@ docker compose start mosquitto
 | Backend | `MQTT_DEFAULT_QOS` | `1` |
 | ROS2 Bridge | `MQTT_BROKER_HOST` / `MQTT_BROKER_PORT` | `localhost` / `1883` |
 | ROS2 Bridge | `MQTT_CLIENT_ID` | `fast-mqtt-bridge` |
-| ROS2 Bridge | `VEHICLE_ID` | `REAL-F01` |
+| ROS2 Bridge | `VEHICLE_ID` | `REAL-F01` (실물 지게차 전용 — 아래 주의 참고) |
+
+> **ROS2 브리지의 `VEHICLE_ID` 를 `SIM-F01` 로 바꾸지 마세요.** Isaac Sim `twin_bridge.py` 가
+> 이미 `SIM-F01` 로 상태·위치를 발행하고 있어, 두 송신자가 같은 ID 를 쓰면 서로의 상태를
+> 덮어씁니다. `REAL-F01` 은 현재 관제 DB 에 등록돼 있지 않으므로 백엔드가 그 메시지를 폐기하며,
+> 이는 의도된 동작입니다(관제 대상은 `SIM-F01` 한 대).
 
 > **clientId 중복 금지**: 같은 clientId 로 두 클라이언트가 접속하면 먼저 붙어 있던 쪽이 브로커에서
 > 끊깁니다. 백엔드 inbound/outbound/브리지가 서로 다른 값을 쓰도록 되어 있으니 새 클라이언트를

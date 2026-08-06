@@ -15,6 +15,10 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // *.test.ts 는 Node 내장 테스트 러너(node --test)로 돌린다. Node 의 ESM 해석기는 상대 import 에
+    // 확장자를 요구하므로 테스트 파일이 "./x.ts" 형태로 import 한다. noEmit 프로젝트라 이 옵션을 켜도
+    // 번들 결과에는 영향이 없다(Next 는 자기 해석기를 쓴다).
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "incremental": true,
     "plugins": [

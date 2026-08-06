@@ -21,8 +21,9 @@ import { IsaacSimStream, IsaacSimVideoSurface } from "./IsaacSimStream"
  * 그래서 좌측 하단 표식이 상태에 따라 "실시간 영상 / 대기 영상 / 대기 이미지"로 바뀐다 —
  * connected 가 아닌 동안에는 지금 보이는 게 실영상이 아니라는 사실을 항상 남긴다.
  *
- * <video> 는 상태와 무관하게 **항상 렌더한다** — SDK 가 id 로 요소를 찾기 때문에
- * connect() 시점에 DOM 에 없으면 연결 자체가 실패한다. 보이기만 opacity 로 제어한다.
+ * iframe(Isaac Sim MediaMTX 스트림, IsaacSimStream.tsx 참고)은 상태와 무관하게 **항상
+ * 렌더한다** — useIsaacSimStream 의 effect 가 마운트 시점에 ref 로 src 를 대입하므로,
+ * connect 시점에 DOM 에 없으면 연결 자체가 실패한다. 보이기만 opacity 로 제어한다.
  */
 export function DigitalTwinVideoLayer({
   status,
@@ -33,7 +34,7 @@ export function DigitalTwinVideoLayer({
   status: WebRtcStatus
   error?: string | null
   containerRef: React.RefObject<HTMLDivElement | null>
-  videoRef: React.RefObject<HTMLVideoElement | null>
+  videoRef: React.RefObject<HTMLIFrameElement | null>
 }) {
   const live = status === "connected"
   // connecting/reconnecting 은 로딩 오버레이가, failed 는 실패 오버레이가 상위

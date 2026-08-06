@@ -7,7 +7,10 @@ import { normalizeLocationEvent, normalizeStatusEvent } from "@/lib/realtimeEven
 import { isAbortError } from "@/types/api"
 import type { DashboardResponse, DashboardTask, DashboardVehicle } from "@/types/monitoring"
 import type { RealtimeEvent, TransportTaskEvent } from "@/types/websocket"
-import { TRANSPORT_TASK_FAILED_EVENT_TYPE } from "@/types/websocket"
+import {
+  TRANSPORT_TASK_FAILED_EVENT_TYPE,
+  TRANSPORT_TASK_MEASURED_EVENT_TYPE,
+} from "@/types/websocket"
 
 export type DashboardLoadState = "loading" | "loaded" | "error"
 
@@ -18,6 +21,14 @@ interface MonitoringState {
 }
 
 const EMPTY_STATE: MonitoringState = { vehiclesById: {}, vehicleOrder: [], tasksById: {} }
+
+/**
+ * 대시보드에 없는 차량의 위치 이벤트를 봤을 때 재조회를 다시 시도하기까지의 최소 간격(ms).
+ *
+ * 위치 이벤트는 차량당 초당 5~10건씩 들어온다. 간격 없이 재조회하면 대시보드가 그 차량을 끝내
+ * 포함하지 않는 경우(미등록·비활성) 초당 수십 번 왕복하는 폭주가 된다.
+ */
+const UNKNOWN_VEHICLE_REFRESH_INTERVAL_MS = 30_000
 
 function toMonitoringState(dashboard: DashboardResponse): MonitoringState {
   const vehiclesById: Record<string, DashboardVehicle> = {}
@@ -134,7 +145,8 @@ export function useMonitoringDashboard() {
               status: update.status,
               // 이벤트가 값을 실어 보냈을 때만 덮는다. null 은 "모름"이라 기존 값을 지우면 안 된다.
               hasCargo: update.hasCargo ?? current.hasCargo,
-              cargoId: update.cargoId ?? current.cargoId,
+              cargoId:
+                update.hasCargo === false ? null : (update.cargoId ?? current.cargoId),
               lastUpdatedAt: update.updatedAt ?? current.lastUpdatedAt,
             },
           },
@@ -150,33 +162,103 @@ export function useMonitoringDashboard() {
   /**
    * 운반 작업 이벤트 처리.
    *
-   * 실패 상세(원인 코드·전복 등급·돌출률)는 dashboard 응답에만 있으므로 **실패 이벤트에서만**
-   * 재조회한다 — 모든 작업 이벤트마다 부르면 정상 흐름에서 왕복이 늘기만 한다.
-   * 이 재조회가 있어야 TTL 만료처럼 사용자가 아무 조작도 하지 않은 실패가 화면에 즉시 뜬다.
+   * 실패 상세와 AI 측정 높이는 dashboard 응답에만 있으므로 실패/측정 완료 이벤트에서 재조회한다.
+   * 모든 작업 이벤트마다 부르지 않아 정상 주행 중 불필요한 왕복은 만들지 않는다.
    */
   const applyTaskEvent = useCallback(
     (event: TransportTaskEvent) => {
-      if (event.eventType !== TRANSPORT_TASK_FAILED_EVENT_TYPE) return
+      if (
+        event.eventType !== TRANSPORT_TASK_FAILED_EVENT_TYPE &&
+        event.eventType !== TRANSPORT_TASK_MEASURED_EVENT_TYPE
+      ) {
+        return
+      }
       void loadDashboard()
     },
     [loadDashboard],
   )
 
-  const applyLocationEvent = useCallback((event: RealtimeEvent<unknown>) => {
-    const location = normalizeLocationEvent(event)
-    if (!location) return
-    setState((previous) => {
-      const current = previous.vehiclesById[event.vehicleId]
-      if (!current || isOlder(location.messageAt, current.location?.messageAt)) return previous
-      return {
-        ...previous,
-        vehiclesById: {
-          ...previous.vehiclesById,
-          [event.vehicleId]: { ...current, location },
-        },
+  /**
+   * 대시보드가 모르는 차량의 위치 이벤트를 받았을 때의 처리.
+   *
+   * 예전에는 조용히 버렸다. 그런데 이 경로로 빠지는 상황은 대부분 **화면에 값이 안 나오는 장애**다 —
+   * 차량이 방금 활성화됐는데 대시보드 스냅샷이 낡았거나, 백엔드는 위치를 잘 받고 있는데 대시보드
+   * 목록에서 빠져 있는 경우다. 흔적이 없으면 "백엔드가 안 보내는 건지 프론트가 버리는 건지"를
+   * 구분할 수 없어 추적이 오래 걸린다.
+   *
+   * 그래서 재조회를 한 번 걸어 스냅샷을 맞춘다. 다만 대시보드가 끝내 그 차량을 포함하지 않는
+   * 경우(미등록·비활성 차량)에도 이벤트는 계속 오므로, 차량별로 최소 간격을 두어 폭주를 막는다.
+   */
+  const unknownVehicleRefreshedAtRef = useRef<Record<string, number>>({})
+  const requestUnknownVehicleRefresh = useCallback(
+    (vehicleId: string) => {
+      const now = Date.now()
+      const lastRequestedAt = unknownVehicleRefreshedAtRef.current[vehicleId] ?? 0
+      if (now - lastRequestedAt < UNKNOWN_VEHICLE_REFRESH_INTERVAL_MS) return
+      unknownVehicleRefreshedAtRef.current[vehicleId] = now
+      if (process.env.NODE_ENV === "development") {
+        console.debug(
+          "[monitoring] 대시보드에 없는 차량의 위치 이벤트를 받아 재조회합니다:",
+          vehicleId,
+        )
       }
-    })
-  }, [])
+      void loadDashboard()
+    },
+    [loadDashboard],
+  )
+
+  const applyLocationEvent = useCallback(
+    (event: RealtimeEvent<unknown>) => {
+      const update = normalizeLocationEvent(event)
+      if (!update) return
+      const { location, reportedStatus, telemetry } = update
+      // 재조회는 부수효과라 setState 갱신 함수 안에서 부르면 안 된다(같은 갱신이 두 번 실행될 수
+      // 있다). 최신 차량 맵 거울로 먼저 판정한다.
+      if (!vehiclesRef.current[event.vehicleId]) {
+        requestUnknownVehicleRefresh(event.vehicleId)
+        return
+      }
+      setState((previous) => {
+        const current = previous.vehiclesById[event.vehicleId]
+        if (!current || isOlder(location.messageAt, current.location?.messageAt)) return previous
+        const reportedCargoChanged =
+          telemetry.reportedCargoId != null &&
+          telemetry.reportedCargoId !== current.reportedCargoId
+        return {
+          ...previous,
+          vehiclesById: {
+            ...previous.vehiclesById,
+            [event.vehicleId]: {
+              ...current,
+              location,
+              // Isaac telemetry 는 위치와 state 를 한 메시지에 싣는다. 이 값을 버리면 좌표는
+              // 움직이는데 화면 상태는 최초 REST 의 ERROR/UNKNOWN 에 영구 고정된다.
+              status: reportedStatus ?? current.status,
+              actualForkHeight: telemetry.forkHeight ?? current.actualForkHeight,
+              battery: telemetry.battery ?? current.battery,
+              hasCargo: telemetry.loaded ?? current.hasCargo,
+              reportedCargoId:
+                telemetry.loaded === false
+                  ? null
+                  : (telemetry.reportedCargoId ?? current.reportedCargoId),
+              reportedCargoHeight:
+                telemetry.loaded === false
+                  ? null
+                  : reportedCargoChanged
+                    ? telemetry.reportedCargoHeight
+                    : (telemetry.reportedCargoHeight ?? current.reportedCargoHeight),
+              reportedTaskId: telemetry.reportedTaskId ?? current.reportedTaskId,
+              lastUpdatedAt:
+                reportedStatus == null
+                  ? current.lastUpdatedAt
+                  : (location.receivedAt ?? location.messageAt ?? current.lastUpdatedAt),
+            },
+          },
+        }
+      })
+    },
+    [requestUnknownVehicleRefresh],
+  )
 
   const vehicles = useMemo(
     () => state.vehicleOrder.map((id) => state.vehiclesById[id]).filter(Boolean),

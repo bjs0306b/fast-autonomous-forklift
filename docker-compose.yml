@@ -43,12 +43,29 @@ services:
         NEXT_PUBLIC_ISAAC_WEBRTC_SERVER: ${NEXT_PUBLIC_ISAAC_WEBRTC_SERVER}
         NEXT_PUBLIC_ISAAC_WEBRTC_SIGNAL_PORT: ${NEXT_PUBLIC_ISAAC_WEBRTC_SIGNAL_PORT:-49100}
         NEXT_PUBLIC_ISAAC_WEBRTC_MEDIA_PORT: ${NEXT_PUBLIC_ISAAC_WEBRTC_MEDIA_PORT:-47998}
+        NEXT_PUBLIC_AI_MEASUREMENT_STREAM_URL: ${NEXT_PUBLIC_AI_MEASUREMENT_STREAM_URL:-}
     container_name: fast-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
     depends_on:
       - backend
+
+  # Isaac Sim 화면 스트리밍(docs/sim-streaming.md). 다른 서비스와 의존 관계가 없다 —
+  # RTSP 입력은 로컬 Isaac Sim 워크스테이션의 ffmpeg 가, 재생은 브라우저가 직접 붙는다.
+  # 백엔드/프론트 컨테이너는 이 서비스를 프록시하지 않는다.
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: fast-mediamtx
+    restart: unless-stopped
+    environment:
+      # WebRTC ICE candidate 에 실을 공인 IP. 없으면 브라우저가 컨테이너 내부 IP로 접속을
+      # 시도해 협상이 실패한다.
+      MTX_WEBRTCADDITIONALHOSTS: "3.38.178.143"
+    ports:
+      - "8554:8554"     # RTSP 입력 (Isaac Sim 워크스테이션 → 여기)
+      - "8889:8889"     # WebRTC HTTP 재생 페이지 (브라우저 → 여기)
+      - "8189:8189/udp" # WebRTC ICE
 
 volumes:
   mysql-data:

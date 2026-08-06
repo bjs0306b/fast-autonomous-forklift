@@ -11,6 +11,42 @@ public record VehicleLocationSnapshot(
         Double speed,
         String frameId,
         OffsetDateTime messageAt,
-        OffsetDateTime receivedAt
+        OffsetDateTime receivedAt,
+        Double forkHeight,
+        Double battery,
+        String reportedCargoId,
+        String reportedTaskId,
+        Boolean reportedLoaded,
+        Double reportedCargoHeight
 ) {
+
+    public VehicleLocationSnapshot(
+            String vehicleId,
+            Double x,
+            Double y,
+            Double heading,
+            Double speed,
+            String frameId,
+            OffsetDateTime messageAt,
+            OffsetDateTime receivedAt,
+            Double forkHeight,
+            Double battery,
+            String reportedCargoId,
+            String reportedTaskId) {
+        this(vehicleId, x, y, heading, speed, frameId, messageAt, receivedAt,
+                forkHeight, battery, reportedCargoId, reportedTaskId, null, null);
+    }
+
+    public VehicleLocationSnapshot(
+            String vehicleId,
+            Double x,
+            Double y,
+            Double heading,
+            Double speed,
+            String frameId,
+            OffsetDateTime messageAt,
+            OffsetDateTime receivedAt) {
+        this(vehicleId, x, y, heading, speed, frameId, messageAt, receivedAt,
+                null, null, null, null, null, null);
+    }
 }

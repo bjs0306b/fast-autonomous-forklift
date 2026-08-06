@@ -47,12 +47,12 @@ class VehicleStatusTest {
     }
 
     /**
-     * 확정 enum 10종(prompt32.md 1장 3번)이 전부 자기 자신으로 정확히 매핑되는지 확인한다 —
+     * 현재 enum 전부가 자기 자신으로 정확히 매핑되는지 확인한다 —
      * 어떤 값도 다른 값으로 흡수되지 않는다는 것이 이번 확정의 핵심이다.
      */
     @Test
     void fromRaw_allConfirmedStatuses_mapToThemselves() {
-        assertThat(VehicleStatus.values()).hasSize(10);
+        assertThat(VehicleStatus.values()).hasSize(11);
         for (VehicleStatus status : VehicleStatus.values()) {
             assertThat(VehicleStatus.fromRaw(status.name())).isEqualTo(status);
             assertThat(VehicleStatus.fromRaw(status.name().toLowerCase())).isEqualTo(status);
@@ -65,7 +65,8 @@ class VehicleStatusTest {
         // VehicleService#countByStatus가 values() 순서를 그대로 응답 항목 순서로 쓴다.
         assertThat(VehicleStatus.values()).containsExactly(
                 VehicleStatus.UNKNOWN, VehicleStatus.IDLE, VehicleStatus.ACTIVE, VehicleStatus.MOVING,
-                VehicleStatus.LIFTING, VehicleStatus.LOADING, VehicleStatus.UNLOADING, VehicleStatus.ESTOP,
+                VehicleStatus.LIFTING, VehicleStatus.LOADING, VehicleStatus.UNLOADING, VehicleStatus.HOLDING,
+                VehicleStatus.ESTOP,
                 VehicleStatus.ERROR, VehicleStatus.OFFLINE);
     }
 }

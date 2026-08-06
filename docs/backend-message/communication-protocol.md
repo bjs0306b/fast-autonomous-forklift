@@ -25,7 +25,7 @@
 
 | 토픽 | 방향 | 주요 payload |
 |---|---|---|
-| `forklift/{vehicleId}/status` | ROS2 → 백엔드 | `forkliftId`, `status`, `battery`, `timestamp` |
+| `forklift/{vehicleId}/status` | ROS2 → 백엔드 | `forkliftId`, `status`, `timestamp` (송신자가 보내는 `battery`는 백엔드가 사용하지 않고 무시한다) |
 | `forklift/{vehicleId}/location` | ROS2/Isaac → 백엔드 | ROS2 표준 위치 또는 Isaac 기존 평면 위치 |
 | `forklift/{vehicleId}/path` | ROS2/Isaac → 백엔드 | `forkliftId`, `waypoints[]`, `goal{x,y,heading}`, `timestamp` |
 | `forklift/{vehicleId}/command` | 백엔드 → ROS2 | 명령 envelope |
@@ -128,6 +128,7 @@ MOVE 명령 발행 후 최종 `command-result` 대기 시간은 기본 300초다
 - 측정 AI가 죽어 결과가 오지 않으면 60초 세션 TTL과 주기 정리 작업으로 자동 회수한다.
 - REST 재시도나 MQTT QoS 1 재전송으로 같은 결과가 다시 와도 `measurementId` unique 제약으로 중복 저장하지 않는다.
 - 위치 메시지는 `messageAt`이 현재 저장값보다 새로울 때만 반영한다.
+- 상태 메시지는 차량당 현재 상태 1행(`vehicle_current_status`)만 갱신한다. 과거 이력 테이블은 두지 않는다.
 - DB를 새로 만드는 MVP 단계이므로 별도 마이그레이션 파일은 두지 않는다.
 
 외부 파트별 구현 책임과 예시는 `docs/backend-message/cargo-measurement-workflow-contract.md`를 따른다.

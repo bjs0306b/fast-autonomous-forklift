@@ -46,7 +46,15 @@ public class VehicleStatusService {
         LocalDateTime receivedAt = CommunicationTime.nowLocal();
         VehicleCurrentStatus update = new VehicleCurrentStatus();
         update.setVehicleId(vehicleId);
-        update.setStatus(VehicleStatus.fromRaw(command.status()));
+        VehicleStatus currentStatus = command.status() == null
+                ? statusMapper.findByVehicleId(vehicleId)
+                        .map(VehicleCurrentStatus::getStatus)
+                        .orElse(VehicleStatus.UNKNOWN)
+                : VehicleStatus.fromRaw(command.status());
+        update.setStatus(currentStatus == null ? VehicleStatus.UNKNOWN : currentStatus);
+        update.setHasCargo(command.hasCargo());
+        // hasCargo=false는 센서가 "비어 있음"을 확정한 값이므로 이전 cargoId를 반드시 지운다.
+        update.setCargoId(Boolean.FALSE.equals(command.hasCargo()) ? null : command.cargoId());
         update.setReceivedAt(receivedAt);
         statusMapper.upsert(update);
 

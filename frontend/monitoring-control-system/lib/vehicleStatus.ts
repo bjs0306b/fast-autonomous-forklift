@@ -1,7 +1,7 @@
 import type { VehicleStatus } from "@/types/monitoring"
 
 /**
- * 백엔드 VehicleStatus enum 10종.
+ * 백엔드 VehicleStatus enum과 동일한 목록.
  * 배열 순서는 백엔드 enum 선언 순서와 동일하다.
  */
 export const VEHICLE_STATUS_VALUES = [
@@ -12,6 +12,7 @@ export const VEHICLE_STATUS_VALUES = [
   "LIFTING",
   "LOADING",
   "UNLOADING",
+  "HOLDING",
   "ESTOP",
   "ERROR",
   "OFFLINE",
@@ -35,6 +36,16 @@ export function normalizeVehicleStatus(value: unknown): VehicleStatus {
   }
   const normalized = value.trim().toUpperCase()
   return VEHICLE_STATUS_SET.has(normalized) ? (normalized as VehicleStatus) : "UNKNOWN"
+}
+
+/**
+ * 위치/telemetry 이벤트가 보고한 상태를 기존 화면 상태에 병합할 수 있는 값으로 바꾼다.
+ * 계약 밖 문자열과 UNKNOWN 은 "갱신 정보 없음"인 null 로 반환해, REST 로 이미 알고 있던
+ * ERROR/IDLE 같은 상태를 불완전한 위치 이벤트가 지우지 않게 한다.
+ */
+export function normalizeReportedVehicleStatus(value: unknown): VehicleStatus | null {
+  const normalized = normalizeVehicleStatus(value)
+  return normalized === "UNKNOWN" ? null : normalized
 }
 
 /** 차량 ID에서 미니맵 마커용 짧은 라벨을 만든다. 예: "SIM-F01" → "F01" */

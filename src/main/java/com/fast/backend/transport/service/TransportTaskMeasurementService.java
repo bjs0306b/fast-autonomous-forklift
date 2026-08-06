@@ -32,18 +32,21 @@ public class TransportTaskMeasurementService {
     private final PlacementService placementService;
     private final StationMeasurementPlacementEligibility eligibility;
     private final TransportTaskBroadcaster broadcaster;
+    private final TransportMaterialTaskPublisher materialTaskPublisher;
 
     public TransportTaskMeasurementService(
             TransportTaskMapper taskMapper,
             StorageSlotMapper slotMapper,
             PlacementService placementService,
             StationMeasurementPlacementEligibility eligibility,
-            TransportTaskBroadcaster broadcaster) {
+            TransportTaskBroadcaster broadcaster,
+            TransportMaterialTaskPublisher materialTaskPublisher) {
         this.taskMapper = taskMapper;
         this.slotMapper = slotMapper;
         this.placementService = placementService;
         this.eligibility = eligibility;
         this.broadcaster = broadcaster;
+        this.materialTaskPublisher = materialTaskPublisher;
     }
 
     /**
@@ -92,6 +95,9 @@ public class TransportTaskMeasurementService {
         }
         broadcaster.broadcastAfterCommit(
                 "TRANSPORT_TASK_MEASURED", task.getTaskCode(), TaskStatus.PICKING_UP.name(), task.getVehicleId());
+        materialTaskPublisher.publishAfterCommit(
+                task.getTaskCode(), task.getVehicleId(), task.getCargoId(),
+                measurement.getCargoHeight(), recommendation);
         log.info("Transport task measurement completed: taskId={}, measurementId={}, slotCode={}",
                 task.getTaskCode(), measurement.getMeasurementId(), recommendation.slotCode());
         return true;

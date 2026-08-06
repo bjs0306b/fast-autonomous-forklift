@@ -3,6 +3,7 @@ package com.fast.backend.forklift.service;
 import com.fast.backend.common.exception.BusinessException;
 import com.fast.backend.forklift.dto.ForkliftStatusMessage;
 import com.fast.backend.vehicle.dto.VehicleStatusUpdateCommand;
+import com.fast.backend.vehicle.service.VehicleAutoRegistrar;
 import com.fast.backend.vehicle.service.VehicleStatusService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +18,8 @@ import org.springframework.stereotype.Service;
  * 직접 처리하지 않도록 하는 경계, prompt20.md 18장).
  *
  * <p>{@link ForkliftStatusMessage}는 위치·속도·방향 필드가 없다 — 그래서 상태 메시지는 위치를 갱신하지
- * 않는다. 송신자가 보내는 {@code battery}는 백엔드가 사용하지 않으며 DTO 단계에서 무시된다. 위치는 별도 토픽(location)이자 별도 처리
+ * 않는다. 대신 송신자가 제공하면 {@code hasCargo}/{@code cargoId}를 함께 갱신한다. {@code battery}는
+ * 백엔드가 사용하지 않으며 DTO 단계에서 무시된다. 위치는 별도 토픽(location)이자 별도 처리
  * 경로({@link ForkliftLocationService})이며, 같은 vehicle_current_status upsert를 공유하지 않는다
  * (이유는 {@link com.fast.backend.vehicle.websocket.VehicleLocationEventData} Javadoc 참고).
  *
@@ -30,9 +32,12 @@ public class ForkliftStatusService {
     private static final Logger log = LoggerFactory.getLogger(ForkliftStatusService.class);
 
     private final VehicleStatusService vehicleStatusService;
+    private final VehicleAutoRegistrar autoRegistrar;
 
-    public ForkliftStatusService(VehicleStatusService vehicleStatusService) {
+    public ForkliftStatusService(
+            VehicleStatusService vehicleStatusService, VehicleAutoRegistrar autoRegistrar) {
         this.vehicleStatusService = vehicleStatusService;
+        this.autoRegistrar = autoRegistrar;
     }
 
     public void handleStatus(ForkliftStatusMessage message) {
@@ -40,7 +45,11 @@ public class ForkliftStatusService {
                 message.forkliftId(), message.status(), message.timestamp());
 
         VehicleStatusUpdateCommand command = new VehicleStatusUpdateCommand(
-                message.status(), message.timestamp());
+                message.status(), message.timestamp(), message.hasCargo(), message.cargoId());
+
+        // 상태 메시지만 오고 위치는 아직 안 오는 차량도 있다. 등록 지점을 위치 경로에만 두면 그런
+        // 차량은 계속 미등록으로 버려진다.
+        autoRegistrar.ensureRegistered(message.forkliftId(), "mqtt-status");
 
         try {
             vehicleStatusService.updateCurrentStatus(message.forkliftId(), command);

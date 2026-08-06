@@ -6,6 +6,7 @@ export type VehicleStatus =
   | "LIFTING"
   | "LOADING"
   | "UNLOADING"
+  | "HOLDING"
   | "ESTOP"
   | "ERROR"
   | "OFFLINE"
@@ -83,6 +84,14 @@ export interface DashboardVehicle {
   cargoId: number | null
   /** 팔레트를 제외한 화물 높이(m). 측정 결과가 없으면 null. */
   cargoHeight: number | null
+  /** 선택된 적재 위치에 맞춘 목표 포크 높이(m). */
+  targetForkHeight: number | null
+  actualForkHeight: number | null
+  battery: number | null
+  reportedCargoId: string | null
+  /** Isaac Sim cargo.h 보고값(m). 팔레트를 포함한 전체 높이. */
+  reportedCargoHeight: number | null
+  reportedTaskId: string | null
   /**
    * 이 차량의 가장 최근 실패. 실패가 없거나 그 뒤로 새 작업이 시작됐으면 null 이다
    * (지나간 경고를 화면에 남기면 현재 상태를 오해한다).

@@ -45,4 +45,16 @@ public class InMemoryLatestVehicleLocationProvider implements LatestVehicleLocat
             return snapshot;
         });
     }
+
+    /**
+     * 보관 중인 최신 위치를 모두 비운다.
+     *
+     * <p>이 저장소는 스프링 컨텍스트 수명 동안 살아 있고 <b>트랜잭션 롤백으로 되돌아가지 않는다.</b>
+     * 그래서 통합 테스트가 같은 차량 ID 로 위치를 흘리면 앞 테스트가 남긴 값이 뒤 테스트의 판정을
+     * 바꾼다(더 최신 messageAt 이 남아 있으면 새 위치가 아예 반영되지 않는다). 테스트가 실행 순서에
+     * 의존하지 않도록 초기화 지점을 열어 둔다. 운영 코드에서는 호출하지 않는다.
+     */
+    public void clear() {
+        latestByVehicleId.clear();
+    }
 }

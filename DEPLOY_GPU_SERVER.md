@@ -302,11 +302,14 @@ ALLOW_TEST_ENDPOINT_CHECK=true ./scripts/smoke-test-api.sh
 영상           : 디지털 트윈 스트림 미연결 (샘플 이미지 · 실시간 영상 아님)
 ```
 
-**이것이 올바른 상태다.** 이전에는 `data-local.sql`이 더미 차량 3대(`REAL-F01`/`SIM-F01`/`SIM-F02`)와
-가짜 상태(배터리 82, 좌표 1.2/3.4)를 자동으로 넣어, 실제 차량이 하나도 없어도 화면에 차량이 떴다.
+**이것이 올바른 상태다.** 이전에는 `data-local.sql`이 차량과 가짜 상태(배터리 82, 좌표 1.2/3.4)를
+자동으로 넣어, 실제 차량이 하나도 없어도 화면에 차량이 떴다.
 운영에서 이는 **"연동됐다"는 착시**를 만들기 때문에 자동 삽입을 차단했다.
 
-> **화면에 차량 3대가 보이면 `SQL_INIT_MODE`가 `always`로 되살아난 것이다.** 즉시 확인할 것.
+> **등록하지 않은 차량이 보이면 `SQL_INIT_MODE`가 `always`로 되살아난 것이다.** 즉시 확인할 것.
+> 현재 시드는 `SIM-F01` **1대뿐**이다(`REAL-F01`, 더미 `FORKLIFT-01/02`는 제거됨). 기존 DB 에 남은
+> `FORKLIFT-*` 행은 `src/main/resources/db/cleanup-dummy-vehicles.sql` 로,
+> `REAL-F01` 행은 `src/main/resources/db/migrate-real-f01-to-sim-f01.sql` 로 정리한다.
 
 ---
 
@@ -317,14 +320,22 @@ ALLOW_TEST_ENDPOINT_CHECK=true ./scripts/smoke-test-api.sh
 ```bash
 curl -X POST http://localhost:8080/api/vehicles \
   -H 'Content-Type: application/json' \
-  -d '{"vehicleId":"REAL-F01","name":"실물 지게차 1호","source":"REAL"}'
+  -d '{"vehicleId":"SIM-F01","name":"시뮬레이션 지게차 1호"}'
 
 curl http://localhost:8080/api/vehicles
 ```
 
-> 정확한 요청 필드는 `VehicleController`를 확인해 맞춘다.
+> **관제 대상은 `SIM-F01` 한 대다.** 실물 지게차(`REAL-F01`)는 등록하지 않는다 — ROS2 브리지는
+> 여전히 `forklift/REAL-F01/*` 로 발행하지만 미등록 차량이라 백엔드가 폐기한다(의도된 동작).
+>
+> `VehicleCreateRequest` 는 `vehicleId` + `name` **두 필드뿐**이다. 예전 예시에 있던
+> `"source":"SIM"` 은 DTO 에 없는 필드라 Jackson 이 조용히 버린다 — 넣어도 저장되지 않으니
+> "source 를 등록했다"고 오해하지 말 것. 실물/시뮬 구분은 **ID 접두어**(`REAL-` / `SIM-`)로 한다.
+>
+> `name` 은 화면 표시용이며 `data-local.sql` · `migration-local-fast-backend.sql` 과 같은 값을
+> 써야 한다. 다르면 어느 쪽을 먼저 실행했느냐에 따라 화면 문구가 달라진다.
 
-**차량 ID 규칙**: 백엔드·DB·ROS2 브리지·테스트가 모두 **하이픈**(`REAL-F01`, `SIM-F01`)을 쓴다.
+**차량 ID 규칙**: 백엔드·DB·ROS2 브리지·테스트가 모두 **하이픈**(`SIM-F01`)을 쓴다.
 등록 ID와 MQTT 토픽·payload의 `vehicleId`가 **정확히 일치해야** 메시지가 처리된다.
 불일치하면 `Vehicle ID mismatch` 또는 `vehicle not registered` 경고와 함께 조용히 폐기된다.
 
@@ -337,7 +348,7 @@ curl http://localhost:8080/api/vehicles
 | 항목 | 값 |
 |---|---|
 | 브로커 | `tcp://<GPU_SERVER_IP>:1883` (Isaac은 같은 서버면 `localhost`) |
-| vehicleId | **하이픈** — `SIM-F01`, `REAL-F01` |
+| vehicleId | **하이픈** — `SIM-F01` (관제 대상은 이 한 대) |
 | timestamp | ISO-8601 **`+09:00`** |
 | clientId | 각자 **유일**해야 함 (중복 시 서로 끊김) |
 

@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import type { DashboardVehicle } from "@/types/monitoring"
-import { resolveVehicleSource } from "./MiniMapVehicleMarker"
+import { resolveVehicleSource } from "@/lib/monitoring/vehicleSource"
 import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
 
 /**
@@ -69,13 +69,22 @@ function SelectedVehicleFields({ vehicle }: { vehicle: DashboardVehicle }) {
   const color = VEHICLE_STATUS_COLOR[vehicle.status] ?? VEHICLE_STATUS_COLOR.UNKNOWN
   const statusLabel = VEHICLE_STATUS_LABEL[vehicle.status] ?? "확인 불가"
   const source = resolveVehicleSource(vehicle.vehicleId)
+  const displayedCargoHeight = vehicle.cargoHeight ?? vehicle.reportedCargoHeight
+  const cargoHeightSource = vehicle.cargoHeight != null ? "AI 측정" : "Isaac 전체 높이"
 
   return (
     <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 xl:grid-cols-4">
       {/* 1. 차량 ID */}
       <InfoField label="차량 ID">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate font-mono text-xs font-semibold text-white">{vehicle.vehicleId}</span>
+          {/* 말줄임표는 유지하되 hover 로 전체 ID 를 읽을 수 있게 한다 — 차량 ID 는 정지 명령이
+              어느 차량으로 나가는지 확인하는 값이라 "보이는 만큼"으로 판단하면 안 된다. */}
+          <span
+            className="truncate font-mono text-xs font-semibold text-white"
+            title={vehicle.vehicleId}
+          >
+            {vehicle.vehicleId}
+          </span>
           {source !== "unknown" ? (
             <span className="rounded bg-white/5 px-1 py-px text-[9px] font-semibold tracking-wide text-slate-300 uppercase">
               {source === "real" ? "REAL" : "SIM"}
@@ -105,16 +114,33 @@ function SelectedVehicleFields({ vehicle }: { vehicle: DashboardVehicle }) {
           />
           {statusLabel}
         </span>
+        {vehicle.battery != null ? (
+          <span className="mt-1 block font-mono text-[10px] text-emerald-300">
+            배터리 {vehicle.battery.toFixed(0)}%
+          </span>
+        ) : null}
       </InfoField>
 
-      {/* 3. 물건 높이 — 측정 파이프라인의 실측값(m)이며 없으면 만들어 내지 않는다.
-             0 도 정상값일 수 있으므로 truthy 가 아니라 != null 로 판정한다. */}
+      {/* 3. 물건 높이 — AI 실측값을 우선하고, 없으면 Isaac cargo.h(팔레트 포함)를 표시한다. */}
       <InfoField label="물건 높이">
-        {vehicle.cargoHeight != null ? (
-          <span className="font-mono text-base leading-none font-semibold text-slate-100">
-            {vehicle.cargoHeight.toFixed(2)}
-            <span className="ml-1 text-[10px] font-normal text-slate-400">m</span>
-          </span>
+        {displayedCargoHeight != null ? (
+          <>
+            <span className="font-mono text-base leading-none font-semibold text-slate-100">
+              {displayedCargoHeight.toFixed(2)}
+              <span className="ml-1 text-[10px] font-normal text-slate-400">m</span>
+            </span>
+            <span className="mt-1 block text-[9px] text-slate-500">{cargoHeightSource}</span>
+            {vehicle.targetForkHeight != null ? (
+              <span className="mt-1 block font-mono text-[10px] text-sky-300">
+                목표 포크 {vehicle.targetForkHeight.toFixed(2)} m
+              </span>
+            ) : null}
+            {vehicle.actualForkHeight != null ? (
+              <span className="mt-0.5 block font-mono text-[10px] text-emerald-300">
+                현재 포크 {vehicle.actualForkHeight.toFixed(2)} m
+              </span>
+            ) : null}
+          </>
         ) : (
           <span className="text-xs text-slate-400">측정 정보 없음</span>
         )}
@@ -123,9 +149,9 @@ function SelectedVehicleFields({ vehicle }: { vehicle: DashboardVehicle }) {
       {/* 4. 적재 여부 — null 은 "미적재"가 아니라 "확인 불가"다. */}
       <InfoField label="적재 여부">
         <CargoBadge hasCargo={vehicle.hasCargo} />
-        {vehicle.cargoId ? (
+        {vehicle.hasCargo !== false && (vehicle.reportedCargoId || vehicle.cargoId) ? (
           <span className="mt-1 block truncate font-mono text-[10px] text-slate-400">
-            {vehicle.cargoId}
+            {vehicle.reportedCargoId ?? vehicle.cargoId}
           </span>
         ) : null}
       </InfoField>

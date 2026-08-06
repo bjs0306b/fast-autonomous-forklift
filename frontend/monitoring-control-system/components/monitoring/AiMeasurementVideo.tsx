@@ -141,13 +141,25 @@ export function AiMeasurementVideo({
         )}
       >
         {showStream ? (
-          // 카메라 서버가 제공하는 실제 MJPEG/이미지 URL만 사용한다. URL이 없으면 img 자체를 만들지 않는다.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          /*
+           * MediaMTX 의 WebRTC 재생 페이지를 그대로 띄운다(Orin 카메라 → ffmpeg H.264 → RTSP →
+           * MediaMTX → WebRTC/UDP). URL 이 없으면 요소 자체를 만들지 않는다.
+           *
+           * ⚠️ **예전에는 `<img>` + MJPEG 이었다.** 바꾼 이유는 지연이다 — MJPEG 은 TCP 라
+           *    패킷 유실 시 밀린 지연이 스스로 회복되지 않고, 프레임 간 압축이 없어 대역폭도
+           *    3배 이상 썼다(실측 6.8Mbps → 2Mbps).
+           *
+           * ⚠️ **`onLoad` 는 "페이지가 떴다"까지만 보장한다.** iframe 은 다른 오리진이라 부모가
+           *    그 안의 <video> 재생 상태를 볼 수 없다. 그래서 CONNECTED 가 곧 "영상이 나온다"는
+           *    뜻은 아니다 — 송출(ffmpeg)이 죽어도 MediaMTX 페이지 자체는 뜬다.
+           *    IsaacSimStream.tsx 상단 주석에 같은 한계와 그 대응(도달성 사전 확인)을 적어 두었다.
+           */
+          <iframe
             key={retryKey}
             src={streamUrl ?? undefined}
-            alt="화물·팔레트 AI 측정 카메라 실시간 영상"
-            className="absolute inset-0 size-full object-contain"
+            title="화물·팔레트 AI 측정 카메라 실시간 영상"
+            allow="autoplay; fullscreen"
+            className="absolute inset-0 size-full border-0"
             onLoad={() => {
               onConnectionStatusChange("CONNECTED")
               onFrameLoaded?.(new Date().toISOString())

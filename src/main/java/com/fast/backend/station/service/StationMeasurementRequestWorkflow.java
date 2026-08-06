@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -48,6 +49,28 @@ public class StationMeasurementRequestWorkflow {
             return;
         }
 
+        startMeasurement(task);
+    }
+
+    /** 시뮬레이터의 arrived 토픽으로 기존 명령 결과 없이도 측정을 시작한다. */
+    @Transactional
+    public void handleArrival(String vehicleId, String taskCode) {
+        TransportTask task = taskMapper.findActiveTasksWithVehicle().stream()
+                .filter(candidate -> vehicleId.equals(candidate.getVehicleId()))
+                .filter(candidate -> candidate.getStatus() == TaskStatus.MOVING_TO_PICKUP)
+                .filter(candidate -> taskCode == null || taskCode.isBlank()
+                        || taskCode.equals(candidate.getTaskCode()))
+                .findFirst()
+                .orElse(null);
+        if (task == null) {
+            log.warn("Station arrival ignored: no MOVING_TO_PICKUP task, vehicleId={}, taskId={}",
+                    vehicleId, taskCode);
+            return;
+        }
+        startMeasurement(task);
+    }
+
+    private void startMeasurement(TransportTask task) {
         if (taskMapper.updateStatusIfCurrent(
                 task.getId(), TaskStatus.MOVING_TO_PICKUP, TaskStatus.MEASURING,
                 null, null) != 1) {
