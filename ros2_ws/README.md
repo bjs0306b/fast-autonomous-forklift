@@ -161,10 +161,22 @@ ros2 topic echo /cmd_vel
 
 - `NavigateToPose -> /cmd_vel -> UART bridge -> ESP32`를 동시에 연결한
   저속 자동 주행
-- 🔴 **`/cmd_vel` 인계 규칙**(S15P11A304-**199**) — Nav2와 포크 정렬 루프
-  (`ai/scripts/onboard_fork_align_node.py`)가 **같은 토픽을 동시에 잡을 수 있다.**
-  누가 언제 놓고 받는지 정해져 있지 않다. 지금은 포크 정렬 전에 **사람이 Nav2를
-  내린다**(`docs/ai/onboard-fork-align-runbook.md` §1).
+- 🔴 **`/cmd_vel` 인계 규칙**(S15P11A304-**199**) — **셋이 얽혀 있다**(2026-08-06 갱신):
+
+  | 주체 | 하는 일 |
+  |---|---|
+  | Nav2 | `/cmd_vel` 에 주행 명령 발행 |
+  | `obstacle_avoidance`(109) | `/cmd_vel` 을 받아 감속·정지시켜 **`/cmd_vel_safe`** 로 중계 |
+  | 포크 정렬(`onboard_fork_align_node.py`) | `/cmd_vel` 에 직접 발행 |
+
+  ⚠️ **guard 를 띄우면 브리지가 `/cmd_vel_safe` 만 듣는다**(`obstacle_avoidance.launch.py`가
+  `cmd_vel_topic` 을 덮어쓴다). 그 상태에서 포크 정렬은 guard 를 통과하게 되는데,
+  guard 는 **0.45m 에서 정지 · 1.00m 부터 감속**한다. 정렬은 0.70m 에서 시작해 **0.21m 까지**
+  들어가야 하므로 **파렛트를 장애물로 보고 막는다.** guard 가 틀린 게 아니라 역할이 겹친 것이다.
+
+  지금 운용: 정렬 시간에는 Nav2 와 guard 를 내리고 `teleop_uart.launch.py` 로 브리지만 띄운다
+  (`docs/ai/onboard-fork-align-runbook.md` §1·§1-2). 정렬 노드를 guard 뒤에 붙이려면
+  `--cmd-topic /cmd_vel_safe`.
 - ~~서보 명령각과 실제 후륜 바퀴각 캘리브레이션~~ → **완료**(위 2026-08-05 절)
 - 지면에서 직선·곡선 경로 추종 오차 측정
 - 후륜 조향 후미 스윙과 obstacle footprint 검증

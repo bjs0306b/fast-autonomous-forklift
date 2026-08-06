@@ -30,11 +30,45 @@ ros2 node list | grep -E "behavior_server|controller_server|bt_navigator"
 
 나오면 내린다. 인계 규칙 자체는 아직 없다 — **S15P11A304-199**.
 
+### ①-2 🔴 장애물 회피 guard 도 같이 확인한다 (2026-08-06 추가)
+
+109(장애물 회피)가 들어오면서 **`/cmd_vel` 을 거쳐 가는 노드가 하나 더 생겼다.**
+
+```
+obstacle_avoidance:  /cmd_vel  ──guard──>  /cmd_vel_safe  ──>  uart_teleop_bridge
+```
+
+`obstacle_avoidance.launch.py` 로 띄우면 브리지가 **`/cmd_vel_safe` 만 듣는다**(런치가
+`cmd_vel_topic` 을 덮어쓴다). 포크 정렬 노드는 기본이 `/cmd_vel` 이므로 **guard 를 통과**하게
+되는데, guard 의 임계가 정렬 구간과 정면으로 겹친다:
+
+| | 거리 |
+|---|---|
+| guard 감속 시작 (`slowdown_distance_m`) | **1.00 m** |
+| guard 정지 (`stop_distance_m`) | **0.45 m** |
+| ALIGN 시작 (`ALIGN_ENTER_MM`) | 0.70 m |
+| INSERT 진입 (`INSERT_ENTER_MM`) | **0.21 m** |
+
+**정렬 구간 전체가 감속 영역이고, 진입 직전에 정지 영역에 들어간다.** guard 입장에서는
+파렛트가 그냥 코앞의 장애물이라 **맞게 동작하는 것**이고, 그래서 포크가 안 들어간다.
+
+**두 가지 중 하나를 택한다:**
+
+1. **정렬 시간 동안 guard 를 내린다** — `teleop_uart.launch.py` 로 브리지만 띄우면
+   `/cmd_vel` 을 직접 듣는다(이 런북의 기본 절차). 지금 시연은 이쪽이다.
+2. **정렬 노드를 guard 뒤에 붙인다** — `--cmd-topic /cmd_vel_safe` 로 guard 를 우회해
+   브리지에 직접 쏜다. guard 를 켠 채 주행하다 정렬만 통과시키고 싶을 때 쓴다.
+
+⚠️ **①과 ①-2 는 같은 문제의 두 얼굴이다**(S15P11A304-**199**). 인계 규칙이 정해지면
+"누가 `/cmd_vel` 을 쥐는가" 를 Nav2·guard·정렬 셋 사이에서 한 번에 정해야 한다.
+
 ### ② 모터 브리지를 띄운다
 
 ```bash
 ros2 launch forklift_teleop teleop_uart.launch.py
 ```
+
+⚠️ 이 런치는 브리지만 띄우고 **guard 는 안 띄운다** — 위 ①-2 의 1번 선택지다.
 
 ### ③ 포크 높이를 손으로 맞춘다
 
