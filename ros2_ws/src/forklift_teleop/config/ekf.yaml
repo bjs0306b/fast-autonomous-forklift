@@ -38,6 +38,29 @@ ekf_filter_node:
     imu0_differential: false
     imu0_relative: false
 
+    # ⚠️ **휠 엔코더는 여기 없다** (2026-08-06 확인).
+    #
+    # `sensor_bridge` 가 `/wheel/twist` 를 발행하고 있는데(펌웨어 `@ENC` 50Hz →
+    # `wheel_diameter_m` · `encoder_counts_per_wheel_rev` 로 환산) **구독자가 하나도
+    # 없다.** EKF 도 안 받고 Nav2 도 안 받는다. 즉 지금 병진 속도는 전적으로
+    # rf2o(라이다 오도메트리)에서 나온다.
+    #
+    # 이게 의도인지 미완인지 기록이 없어 **일단 건드리지 않는다** — 여기에 twist0 을
+    # 넣는 것은 거동을 바꾸는 변경이고, 라이다와 엔코더가 서로 다른 속도를 주장하면
+    # 융합이 오히려 나빠질 수 있다(위 odom0 주석의 "여러 소스에서 위치를 받으면
+    # 싸운다" 와 같은 이유).
+    #
+    # 붙이려면 이렇게 된다. **넣기 전에 정지 상태에서 두 소스의 vx 를 비교할 것** —
+    # 바퀴가 헛돌면 엔코더가 실제보다 빠르게 읽힌다(미니어처는 바닥 마찰이 약하다):
+    #
+    #   twist0: /wheel/twist
+    #   twist0_config: [false, false, false,
+    #                   false, false, false,
+    #                   true,  false, false,
+    #                   false, false, false,
+    #                   false, false, false]
+    #   twist0_queue_size: 10
+
 # Field order of the config arrays:
 #   [ x,     y,      z,
 #     roll,  pitch,  yaw,

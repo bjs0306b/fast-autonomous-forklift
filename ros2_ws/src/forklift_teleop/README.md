@@ -5,7 +5,7 @@
 | 노드 | 링크 | 역할 |
 |---|---|---|
 | `uart_teleop_bridge` | UART1 `/dev/ttyTHS1` | `/cmd_vel` → `@CMD` 명령 (하행) |
-| `sensor_bridge` | USB CDC `/dev/ttyACM0` | `@IMU`/`@IMS` → `/imu/data`, `@TOF` → `/tof/{left,right}/points` (상행) |
+| `sensor_bridge` | USB CDC `/dev/ttyACM0` | `@IMU`/`@IMS` → `/imu/data`, `@TOF` → `/tof/{left,right}/points`, `@ENC` → `/wheel/twist` (상행) |
 
 `uart_teleop_bridge`는 전륜 고정축·후륜 조향 차량의 전진/후진 조향 부호와
 통신 안전 정지를 검증하기 위한 개방루프 텔레옵입니다.
@@ -85,6 +85,20 @@ ros2 launch forklift_teleop sensor_usb.launch.py
 
 **covariance를 0으로 두면 안 됩니다.** EKF가 "오차 없는 완벽한 센서"로
 착각하고 라이다 오도메트리를 완전히 무시합니다.
+
+### ⚠️ `/wheel/twist` 는 발행만 되고 아무도 안 받는다 (2026-08-06 확인)
+
+`@ENC`(50Hz)를 `wheel_diameter_m`·`encoder_counts_per_wheel_rev` 로 환산해
+`/wheel/twist` 로 냅니다. 그런데 **구독자가 하나도 없습니다** — `ekf.yaml` 에
+`twist0` 항목이 없고 Nav2 도 받지 않습니다. 지금 병진 속도는 전적으로
+rf2o(라이다 오도메트리)에서 나옵니다.
+
+의도인지 미완인지 기록이 없어 **건드리지 않았습니다.** EKF 에 붙이는 방법은
+`config/ekf.yaml` 주석에 적어뒀습니다.
+
+⚠️ 붙이기 전에 **정지 상태에서 두 소스의 `vx` 를 비교**하세요. 미니어처는 바닥
+마찰이 약해 바퀴가 헛돌면 엔코더가 실제보다 빠르게 읽힙니다 — 그 상태로 융합하면
+라이다가 맞는데도 EKF 가 "가고 있다" 고 믿습니다.
 
 ### 시각 보정
 
