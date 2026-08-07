@@ -66,6 +66,17 @@
  * 스텝을 실을 수 있으므로, 다시 맞출 때는 하한(HOME 직후 DOWN)에서 "UP <스텝>" 으로
  * 찾은 뒤 그 숫자를 여기 적는다.
  */
+/*
+ * ⚠️ 2026-08-07: 1600 -> 7500 으로 다시 올렸다.
+ *
+ * 앞서 7500 -> 1600 으로 내린 이유는 부팅할 때마다 포크가 15초간 파렛트
+ * 높이까지 올라가는 게 불필요해 보여서였다. 실주행에서 그게 뒤집혔다:
+ * **1600 은 포크가 바닥 요철에 걸릴 만큼 낮다.** 포크가 작은 턱에 걸려
+ * 차가 아예 못 나갔고, 구동 계통 고장으로 오진할 뻔했다.
+ *
+ * 부팅 15초는 걸려서 못 움직이는 것보다 싸다. 낮추고 싶으면 먼저 실제
+ * 주행 바닥의 요철 높이를 재고, 그보다 위인지 확인할 것.
+ */
 #define STEPPER_MOTOR_HOME_BACKOFF_STEPS  7500U
 #define STEPPER_MOTOR_HOME_BACKOFF_RATE_SPS 500U
 #define STEPPER_MOTOR_HOME_BACKOFF_ACCEL_SPS2 300U
@@ -391,8 +402,37 @@
 #define TOF_ADDRESS_SETTLE_MS           50
 
 /*
+ * vl53l8cx_init() 은 84 KB 펌웨어를 I2C 로 올린다 — 400 kHz 에서 센서당 약
+ * 2초다. 접촉이 조금만 불안해도 그 긴 전송에서 깨지는데, 주소 스캔 같은 짧은
+ * 트랜잭션은 멀쩡히 통과하므로 **배선 문제가 센서 고장처럼 보인다.**
+ *
+ * 2026-08-07: 우측 센서가 부팅마다 갈렸다(한 번은 성공, 다음엔 init failed: 3).
+ * 실패가 간헐적이므로 한 번에 포기하지 않는다. 액추에이터도 같은 패턴이다
+ * (MOTOR_INIT_RETRY_COUNT).
+ *
+ * ⚠️ 재시도는 증상 완화지 원인 해결이 아니다. 재시도가 실제로 쓰이면
+ * 그 센서의 배선을 점검할 것 — 로그에 몇 번째에 성공했는지 남긴다.
+ */
+#define TOF_INIT_RETRY_COUNT            3U
+#define TOF_INIT_RETRY_DELAY_MS         200U
+
+/*
  * 100 kHz cannot carry two 8x8 readouts at 15 Hz. The part is rated to 1 MHz;
  * 400 kHz leaves margin for the external pull-ups actually fitted.
+ */
+/*
+ * The part is rated to 1 MHz; 100 kHz cannot carry two 8x8 readouts at
+ * 15 Hz.
+ *
+ * ⚠️ This speed only works with **external pull-ups**. On 2026-08-07 the
+ * bus ran on the ESP32's internal pull-ups alone (about 45 kOhm), some
+ * twenty times too weak here, and one of the two sensors failed its
+ * 84 KB firmware upload on every boot -- alternating sides, so it read
+ * as flaky hardware rather than as a bus problem. Short transactions
+ * always passed; only the long transfer accumulated enough error to
+ * fail. Dropping to 100 kHz made it disappear (3 boots, both sensors,
+ * no retries), which is what identified rise time rather than supply as
+ * the cause. 2 kOhm to 3V3 on SDA and SCL, one pair for the whole bus.
  */
 #define TOF_I2C_CLOCK_HZ                400000
 

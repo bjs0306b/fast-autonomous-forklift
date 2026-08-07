@@ -1,3 +1,5 @@
+#include "driver/gpio.h"
+
 #include "task_comm.h"
 #include "task_imu.h"
 #include "task_motor.h"
@@ -39,6 +41,20 @@ static esp_err_t run_guarded_homing_sequence(void)
 {
     stepper_motor_status_t status;
 
+    /*
+     * 리밋의 원시 레벨을 먼저 찍는다. 이 핀은 내부 풀업이라 **선이 빠지면
+     * 1 로 읽히고, 활성 레벨도 1 이라 "이미 하한" 으로 판정된다.** 그러면
+     * 하강이 통째로 건너뛰어지고 backoff 만 돌아 포크가 위로만 간다 —
+     * 2026-08-07 에 중간 높이에서 실제로 그렇게 됐다.
+     *
+     * 증상이 "호밍이 반대로 돈다" 로만 보여서 배선을 의심하기 어렵다.
+     * 포크를 손으로 중간에 두고 부팅했을 때 active=1 이면 배선 문제다.
+     */
+    ESP_LOGW(TAG,
+             "Lower limit before homing: raw=%d active=%d "
+             "(raw 1 with the switch open means the wire is loose)",
+             gpio_get_level(STEPPER_MOTOR_LOWER_LIMIT_GPIO),
+             stepper_motor_is_lower_limit_active() ? 1 : 0);
     ESP_LOGW(TAG, "Starting guarded lower-limit homing");
     esp_err_t result = stepper_motor_home();
 
