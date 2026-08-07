@@ -5,8 +5,13 @@ import { Client, type IMessage, type StompSubscription } from "@stomp/stompjs"
 import SockJS from "sockjs-client"
 import { API_BASE_URL } from "@/lib/api/httpClient"
 import { parseRealtimeEvent, parseTransportTaskEvent } from "@/lib/realtimeEvent"
-import type { RealtimeEvent, TransportTaskEvent } from "@/types/websocket"
+import type {
+  RealtimeEvent,
+  StationMeasurementData,
+  TransportTaskEvent,
+} from "@/types/websocket"
 import {
+  TOPIC_STATION_MEASUREMENTS,
   TOPIC_TRANSPORT_TASKS,
   TOPIC_VEHICLE_LOCATION,
   TOPIC_VEHICLE_PATH,
@@ -20,6 +25,8 @@ export interface UseMonitoringSocketOptions {
   onLocationEvent: (event: RealtimeEvent<unknown>) => void
   /** 운반 작업 이벤트(실패 포함). 백엔드가 이미 발행하던 토픽을 구독만 추가한다. */
   onTaskEvent?: (event: TransportTaskEvent) => void
+  /** 측정 완료. 검출 상자 좌표가 여기로 온다 — 관제 화면이 영상 위에 사각형을 그린다. */
+  onMeasurementEvent?: (data: StationMeasurementData) => void
   onPathEvent?: (event: RealtimeEvent<unknown>) => void
   onCommandResultEvent?: (event: RealtimeEvent<unknown>) => void
   onConnected?: () => void | Promise<void>
@@ -39,6 +46,7 @@ export function useMonitoringSocket({
   onStatusEvent,
   onLocationEvent,
   onTaskEvent,
+  onMeasurementEvent,
   onPathEvent,
   onCommandResultEvent,
   onConnected,
@@ -54,6 +62,7 @@ export function useMonitoringSocket({
     onStatusEvent,
     onLocationEvent,
     onTaskEvent,
+    onMeasurementEvent,
     onPathEvent,
     onCommandResultEvent,
     onConnected,
@@ -66,13 +75,14 @@ export function useMonitoringSocket({
       onStatusEvent,
       onLocationEvent,
       onTaskEvent,
+      onMeasurementEvent,
       onPathEvent,
       onCommandResultEvent,
       onConnected,
       onDisconnected,
       onError,
     }
-  }, [onStatusEvent, onLocationEvent, onTaskEvent, onPathEvent, onCommandResultEvent, onConnected, onDisconnected, onError])
+  }, [onStatusEvent, onLocationEvent, onTaskEvent, onMeasurementEvent, onPathEvent, onCommandResultEvent, onConnected, onDisconnected, onError])
 
   const handleMessage = useCallback((message: IMessage, kind: "status" | "location") => {
     const event = parseRealtimeEvent(message.body)
@@ -85,6 +95,17 @@ export function useMonitoringSocket({
     const event = parseTransportTaskEvent(message.body)
     if (!event) return
     handlersRef.current.onTaskEvent?.(event)
+  }, [])
+
+  const handleMeasurementMessage = useCallback((message: IMessage) => {
+    // 측정 이벤트는 공통 envelope 의 vehicleId 가 null 이라(측정 설비는 차량과 독립)
+    // parseRealtimeEvent 를 쓰지 않고 data 만 꺼낸다.
+    try {
+      const parsed = JSON.parse(message.body) as { data?: StationMeasurementData }
+      if (parsed?.data) handlersRef.current.onMeasurementEvent?.(parsed.data)
+    } catch {
+      // 깨진 메시지 하나로 구독이 끊기면 이후 측정도 못 받는다. 조용히 넘긴다.
+    }
   }, [])
 
   const handleAdditionalVehicleMessage = useCallback(
@@ -117,6 +138,7 @@ export function useMonitoringSocket({
         client.subscribe(TOPIC_VEHICLE_STATUS, (message) => handleMessage(message, "status")),
         client.subscribe(TOPIC_VEHICLE_LOCATION, (message) => handleMessage(message, "location")),
         client.subscribe(TOPIC_TRANSPORT_TASKS, handleTaskMessage),
+        client.subscribe(TOPIC_STATION_MEASUREMENTS, handleMeasurementMessage),
       ]
       if (handlersRef.current.onPathEvent) {
         subscriptionsRef.current.push(
@@ -158,7 +180,8 @@ export function useMonitoringSocket({
       clientRef.current = null
       void client.deactivate()
     }
-  }, [enabled, handleMessage, handleTaskMessage, handleAdditionalVehicleMessage])
+  }, [enabled, handleMessage, handleTaskMessage, handleMeasurementMessage,
+      handleAdditionalVehicleMessage])
 
   const disconnect = useCallback(async () => {
     subscriptionsRef.current.forEach((subscription) => subscription.unsubscribe())

@@ -15,6 +15,7 @@ import { emergencyStopAll, emergencyStopVehicle, stopVehicle } from "@/lib/api/c
 import { AI_MEASUREMENT_STREAM_URL } from "@/lib/config/aiMeasurement"
 import { useIsaacSimStream } from "@/components/monitoring/IsaacSimStream"
 import type { RealtimeConnectionStatus, SelectedVehicleSummary } from "@/types/monitoring"
+import type { StationMeasurementData } from "@/types/websocket"
 
 export default function MonitoringPage() {
   const {
@@ -56,6 +57,13 @@ export default function MonitoringPage() {
   )
   const [aiVideoRetryKey, setAiVideoRetryKey] = useState(0)
   const [lastAiFrameReceivedAt, setLastAiFrameReceivedAt] = useState<string | null>(null)
+  /**
+   * 최근 측정 결과. 검출 상자를 영상 위에 그리는 데 쓴다.
+   *
+   * 측정은 트리거 시점에 한 번만 오므로 다음 측정까지 그대로 남는다 — 상자가 화면에
+   * 계속 떠 있는 것은 의도한 동작이다(마지막으로 잰 결과를 보여준다).
+   */
+  const [lastMeasurement, setLastMeasurement] = useState<StationMeasurementData | null>(null)
 
   // unmount 후 setState 방어
   const mountedRef = useRef(true)
@@ -104,6 +112,7 @@ export default function MonitoringPage() {
     onStatusEvent: applyStatusEvent,
     onLocationEvent: applyLocationEvent,
     onTaskEvent: applyTaskEvent,
+    onMeasurementEvent: setLastMeasurement,
     onConnected: handleSocketConnected,
   })
 
@@ -340,6 +349,9 @@ export default function MonitoringPage() {
                     active={activeSlide === 0}
                     pip
                     retryKey={aiVideoRetryKey}
+                    boxes={lastMeasurement?.boxes}
+                    frameWidth={lastMeasurement?.frameWidth}
+                    frameHeight={lastMeasurement?.frameHeight}
                     onConnectionStatusChange={setAiVideoStatus}
                     onFrameLoaded={setLastAiFrameReceivedAt}
                     onOpenFullscreen={() => setActiveSlide(1)}
@@ -372,6 +384,9 @@ export default function MonitoringPage() {
             fullscreen
             retryKey={aiVideoRetryKey}
             lastFrameReceivedAt={lastAiFrameReceivedAt}
+            boxes={lastMeasurement?.boxes}
+            frameWidth={lastMeasurement?.frameWidth}
+            frameHeight={lastMeasurement?.frameHeight}
             onConnectionStatusChange={setAiVideoStatus}
             onFrameLoaded={setLastAiFrameReceivedAt}
             onCloseFullscreen={() => setActiveSlide(0)}
