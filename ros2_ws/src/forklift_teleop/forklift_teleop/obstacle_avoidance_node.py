@@ -23,7 +23,7 @@ from forklift_teleop.obstacle_fusion import (
     VisionDetection,
     apply_decision,
     decide_avoidance,
-    front_tof_distance_from_points,
+    front_tof_corridors_from_points,
     lidar_corridors_from_points,
 )
 
@@ -51,10 +51,12 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter("lidar_front_half_angle_deg", 70.0)
         self.declare_parameter("lidar_center_half_angle_deg", 18.0)
         self.declare_parameter("tof_front_half_angle_deg", 35.0)
+        self.declare_parameter("tof_center_half_angle_deg", 12.0)
         self.declare_parameter("tof_min_height_m", 0.02)
         self.declare_parameter("tof_max_height_m", 0.80)
         self.declare_parameter("minimum_sector_hits", 2)
         self.declare_parameter("stop_distance_m", 0.25)
+        self.declare_parameter("avoidance_engage_distance_m", 0.45)
         self.declare_parameter("slowdown_distance_m", 1.00)
         self.declare_parameter("minimum_speed_scale", 0.80)
         self.declare_parameter("avoidance_yaw_rate_rps", 0.02)
@@ -108,6 +110,14 @@ class ObstacleAvoidanceNode(Node):
         ))
         if not 0.0 < self._lidar_center_angle < self._lidar_front_angle:
             raise ValueError("LiDAR center angle must be inside front angle")
+        self._tof_center_angle = math.radians(float(
+            self.get_parameter("tof_center_half_angle_deg").value
+        ))
+        if not 0.0 < self._tof_center_angle < self._tof_front_angle:
+            raise ValueError(
+                "tof_center_half_angle_deg must be between 0 and "
+                "tof_front_half_angle_deg"
+            )
         self._tof_min_height = float(
             self.get_parameter("tof_min_height_m").value
         )
@@ -128,6 +138,9 @@ class ObstacleAvoidanceNode(Node):
             ),
             slowdown_distance_m=float(
                 self.get_parameter("slowdown_distance_m").value
+            ),
+            avoidance_engage_distance_m=float(
+                self.get_parameter("avoidance_engage_distance_m").value
             ),
             minimum_speed_scale=float(
                 self.get_parameter("minimum_speed_scale").value
@@ -166,7 +179,7 @@ class ObstacleAvoidanceNode(Node):
         self._command_time = -math.inf
         self._lidar = LidarCorridors()
         self._lidar_time = -math.inf
-        self._tof_distance = [math.inf, math.inf]
+        self._tof_corridors = [FrontTofClearance(), FrontTofClearance()]
         self._tof_time = [-math.inf, -math.inf]
         self._vision = []
         self._vision_time = -math.inf
@@ -304,9 +317,10 @@ class ObstacleAvoidanceNode(Node):
                 self._transform_xyz(point, transform)
                 for point in self._pointcloud_xyz(message)
             )
-            self._tof_distance[index] = front_tof_distance_from_points(
+            self._tof_corridors[index] = front_tof_corridors_from_points(
                 points,
                 self._tof_front_angle,
+                self._tof_center_angle,
                 self._tof_min_height,
                 self._tof_max_height,
                 self._minimum_hits,
@@ -365,7 +379,15 @@ class ObstacleAvoidanceNode(Node):
             if now - self._vision_time <= self._vision_timeout
             else []
         )
-        tof = FrontTofClearance(*self._tof_distance)
+        # Both sensors cover the same forward cone, so a sector is as close as
+        # the nearer sensor says it is. Merging by sector rather than keeping
+        # one number per sensor is the whole point -- see FrontTofClearance.
+        first, second = self._tof_corridors
+        tof = FrontTofClearance(
+            front_left_m=min(first.front_left_m, second.front_left_m),
+            front_right_m=min(first.front_right_m, second.front_right_m),
+            front_center_m=min(first.front_center_m, second.front_center_m),
+        )
         decision = decide_avoidance(
             self._lidar,
             tof,
@@ -416,8 +438,11 @@ class ObstacleAvoidanceNode(Node):
                 "right": finite_or_none(self._lidar.right_m),
                 "rear": finite_or_none(self._lidar.rear_m),
             },
+            # Bearing sectors, not sensors -- the two used to read almost
+            # identically because each was one sensor's nearest hit.
             "frontTof": {
                 "left": finite_or_none(tof.front_left_m),
+                "center": finite_or_none(tof.front_center_m),
                 "right": finite_or_none(tof.front_right_m),
             },
             "visionLabels": [item.label for item in vision],

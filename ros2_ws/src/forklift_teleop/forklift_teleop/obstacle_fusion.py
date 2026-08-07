@@ -27,10 +27,20 @@ class LidarCorridors:
 
 @dataclass(frozen=True)
 class FrontTofClearance:
-    """Clearance along each fork-side forward blind spot."""
+    """Clearance in each forward bearing sector at fork height.
+
+    These are bearing sectors, not sensors. Reducing each sensor to one
+    number made the two nearly equal -- both face forward over overlapping
+    cones, so they see the same nearest object -- and the imbalance test in
+    _choose_turn could never fire. Every turn decision then fell through to
+    the roof LiDAR, which is blind at fork height. The ToF grid carries an
+    azimuth per zone; splitting on it is what makes a left/right choice at
+    fork height possible at all.
+    """
 
     front_left_m: float = math.inf
     front_right_m: float = math.inf
+    front_center_m: float = math.inf
 
 
 @dataclass(frozen=True)
@@ -46,6 +56,17 @@ class AvoidanceConfig:
     # Field override approved at 0.25 m, leaving 0.06 m body clearance.
     stop_distance_m: float = 0.25
     slowdown_distance_m: float = 1.00
+    # Below this the guard may bias steering; between here and
+    # slowdown_distance_m it only slows down.
+    #
+    # The bias is added to the incoming command, and at 0.15 rad/s it is
+    # larger than the 0.03-0.12 rad/s nav2 actually asks for -- so adding it
+    # inverts the steering rather than nudging it. With the engage distance
+    # equal to slowdown_distance_m that happened through the whole operating
+    # band: on 2026-08-07 the guard reversed nav2's steering in 9 of 15
+    # commands, the rear steering swung side to side, and the vehicle never
+    # committed to a direction long enough to overcome static friction.
+    avoidance_engage_distance_m: float = 0.45
     # The measured drive cannot overcome static friction after a 0.25 scale,
     # and a fixed 0.18 rad/s bias saturates rear steering at that low speed.
     minimum_speed_scale: float = 0.80
@@ -82,6 +103,12 @@ class AvoidanceConfig:
         if self.minimum_turn_clearance_m <= self.stop_distance_m:
             raise ValueError(
                 "minimum_turn_clearance_m must exceed stop_distance_m"
+            )
+        if not (self.stop_distance_m < self.avoidance_engage_distance_m
+                <= self.slowdown_distance_m):
+            raise ValueError(
+                "avoidance_engage_distance_m must be between "
+                "stop_distance_m and slowdown_distance_m"
             )
         if not 0.0 <= self.vision_confidence_threshold <= 1.0:
             raise ValueError("vision_confidence_threshold must be in [0, 1]")
@@ -143,6 +170,44 @@ def lidar_corridors_from_points(
         center_m=robust_nearest(center, minimum_hits),
         right_m=robust_nearest(right, minimum_hits),
         rear_m=robust_nearest(rear, minimum_hits),
+    )
+
+
+def front_tof_corridors_from_points(
+    points_xyz: Iterable[tuple],
+    front_half_angle_rad: float,
+    center_half_angle_rad: float,
+    minimum_height_m: float,
+    maximum_height_m: float,
+    minimum_hits: int = 2,
+) -> FrontTofClearance:
+    """Split one ToF cloud into left/centre/right clearances by bearing.
+
+    Mirrors lidar_corridors_from_points so the two channels can be compared
+    on the same terms. Points arrive already in ``base_link``.
+    """
+    left = []
+    center = []
+    right = []
+    for x, y, z in points_xyz:
+        if not all(math.isfinite(value) for value in (x, y, z)):
+            continue
+        if x <= 0.0 or not minimum_height_m <= z <= maximum_height_m:
+            continue
+        angle = math.atan2(y, x)
+        if abs(angle) > front_half_angle_rad:
+            continue
+        distance = math.hypot(x, y)
+        if abs(angle) <= center_half_angle_rad:
+            center.append(distance)
+        elif angle > 0.0:
+            left.append(distance)
+        else:
+            right.append(distance)
+    return FrontTofClearance(
+        front_left_m=robust_nearest(left, minimum_hits),
+        front_right_m=robust_nearest(right, minimum_hits),
+        front_center_m=robust_nearest(center, minimum_hits),
     )
 
 
@@ -263,9 +328,14 @@ def decide_avoidance(
 
     # LiDAR covers tall/side structure.  ToFs cover the low frontal area that
     # the roof scan passes over because the fork sits below its scan plane.
+    # ⚠️ **세 구간 전부 넣어야 한다.** 좌/우만 넣으면 정중앙에 있는 것이 어느
+    #    검사에도 안 걸린다 -- 구간을 가르기 전에는 좌/우 값이 각각 원뿔
+    #    전체를 덮어서 정면이 딸려 들어왔지만, 가른 뒤에는 아니다.
+    #    2026-08-07 에 실제로 이 상태로 벽을 들이받았다.
     nearest_front = min(
         lidar.center_m,
         tof.front_left_m,
+        tof.front_center_m,
         tof.front_right_m,
     )
     if nearest_front <= config.stop_distance_m:
@@ -286,6 +356,15 @@ def decide_avoidance(
     span = config.slowdown_distance_m - config.stop_distance_m
     scale = (nearest_front - config.stop_distance_m) / span
     scale = max(config.minimum_speed_scale, min(1.0, scale))
+    if nearest_front > config.avoidance_engage_distance_m:
+        # Slow down and leave the steering alone. There is still room for the
+        # planner to work, and it can see around corners the guard cannot.
+        return AvoidanceDecision(
+            AvoidanceAction.SLOW,
+            scale,
+            0.0,
+            f"front obstacle at {nearest_front:.2f}m, planner still steering",
+        )
     action, yaw_bias, reason = _choose_turn(lidar, tof, config)
     return AvoidanceDecision(action, scale, yaw_bias, reason)
 
