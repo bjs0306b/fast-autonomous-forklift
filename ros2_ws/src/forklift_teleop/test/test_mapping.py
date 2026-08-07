@@ -7,8 +7,11 @@ import yaml
 from forklift_teleop.mapping import (
     ActuatorCommand,
     StartupKick,
+    SpeedController,
+    TurnSpeedBoost,
     TeleopLimits,
     map_twist,
+    steering_turn_ratio,
     select_command,
 )
 
@@ -49,8 +52,8 @@ class MappingTest(unittest.TestCase):
         이 관계가 성립한다. 둘이 어긋나면 여기서 깨진다 — 그게 이 테스트의 목적이다.
         """
         expected = round(math.degrees(
-            math.atan(self.limits.wheelbase_m * 0.35 / 0.2)) * 100)
-        left = map_twist(0.2, 0.35, self.limits)
+            math.atan(self.limits.wheelbase_m * 0.35 / 0.1)) * 100)
+        left = map_twist(0.1, 0.35, self.limits)
         right = map_twist(0.2, -0.35, self.limits)
         self.assertEqual(left.drive_percent, 60)
         self.assertEqual(left.steering_cdeg, self.CENTER + expected)
@@ -125,15 +128,15 @@ class MappingTest(unittest.TestCase):
         return loaded["uart_teleop_bridge"]["ros__parameters"]
 
     def test_slower_speed_increases_steering_for_same_yaw_rate(self):
-        fast = map_twist(0.2, 0.2, self.limits)
-        slow = map_twist(0.1, 0.2, self.limits)
+        fast = map_twist(0.10, 0.2, self.limits)
+        slow = map_twist(0.05, 0.2, self.limits)
         fast_offset = abs(fast.steering_cdeg - self.CENTER)
         slow_offset = abs(slow.steering_cdeg - self.CENTER)
         self.assertGreater(slow_offset, fast_offset)
 
     def test_equal_curvature_produces_equal_steering(self):
-        first = map_twist(0.2, 0.2, self.limits)
-        second = map_twist(0.1, 0.1, self.limits)
+        first = map_twist(0.10, 0.2, self.limits)
+        second = map_twist(0.05, 0.1, self.limits)
         self.assertEqual(first.steering_cdeg, second.steering_cdeg)
 
     def test_steering_is_limited_at_low_speed(self):
@@ -153,8 +156,8 @@ class MappingTest(unittest.TestCase):
         하한이 50 이던 동안 0.05 와 0.20 이 52% 와 60% 로 8%p 차이였고, 그
         폭 안에서는 실제 속도가 사실상 구분되지 않았다.
         """
-        slow = map_twist(0.05, 0.0, self.limits).drive_percent
-        fast = map_twist(0.20, 0.0, self.limits).drive_percent
+        slow = map_twist(0.025, 0.0, self.limits).drive_percent
+        fast = map_twist(0.10, 0.0, self.limits).drive_percent
         self.assertGreaterEqual(fast - slow, 15)
 
     def test_stale_command_stops_and_centers(self):
@@ -205,6 +208,355 @@ class MappingTest(unittest.TestCase):
         self.assertEqual(
             60, kick.apply(ActuatorCommand(60, self.CENTER), 10.0).drive_percent
         )
+
+
+class StraightReverseKickTest(unittest.TestCase):
+    """Straight back is ordinary rolling resistance; steered back is not.
+
+    The 100% figure comes from a 45-degree re-approach where the steered
+    wheels plough sideways. nav2's BackUp recovery commands no steering at
+    all, so applying that figure there overrode the requested speed outright
+    and made the vehicle lurch.
+    """
+
+    def kick(self):
+        return StartupKick(
+            forward_percent=50,
+            reverse_percent=100,
+            duration_sec=0.3,
+            reverse_straight_percent=60,
+            steering_center_cdeg=9600,
+        )
+
+    def test_straight_reverse_uses_the_lower_figure(self):
+        command = ActuatorCommand(drive_percent=-20, steering_cdeg=9600)
+        self.assertEqual(self.kick().apply(command, 0.0).drive_percent, -60)
+
+    def test_steered_reverse_still_uses_the_full_figure(self):
+        command = ActuatorCommand(drive_percent=-20, steering_cdeg=13200)
+        self.assertEqual(self.kick().apply(command, 0.0).drive_percent, -100)
+
+    def test_kick_expires_and_leaves_the_command_alone(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=-20, steering_cdeg=9600)
+        kick.apply(command, 0.0)
+        self.assertEqual(kick.apply(command, 1.0).drive_percent, -20)
+
+
+class StallKickTest(unittest.TestCase):
+    """A kick that expires on a timer gives up while the vehicle is still still.
+
+    nav2 regulates down to about 0.037 m/s in a tight avoidance, below the
+    duty that can start the vehicle. The fixed 0.3 s then ran out against a
+    vehicle that had not moved at all, and nothing ever started it.
+    """
+
+    def kick(self):
+        return StartupKick(
+            forward_percent=50,
+            reverse_percent=100,
+            duration_sec=0.3,
+            steering_center_cdeg=9600,
+            stall_speed_mps=0.01,
+            max_stall_kick_sec=2.0,
+        )
+
+    def test_kick_is_held_while_the_wheels_are_not_turning(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=9600)
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.0).drive_percent, 50)
+
+    def test_kick_releases_once_the_vehicle_rolls(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=9600)
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.08).drive_percent, 35)
+
+    def test_kick_gives_up_so_a_blocked_motor_is_not_cooked(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=9600)
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 5.0, 0.0).drive_percent, 35)
+
+    def test_without_an_encoder_the_kick_stays_time_based(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=9600)
+        kick.apply(command, 0.0)
+        self.assertEqual(kick.apply(command, 1.0).drive_percent, 35)
+
+
+class SteeredStallKickTest(unittest.TestCase):
+    """Starting with the wheels turned costs what reversing costs.
+
+    The 50% figure was measured driving straight. With the rear wheel at lock
+    it ploughs sideways instead of rolling, which is the same resistance that
+    made 60% move the vehicle exactly nothing backwards.
+    """
+
+    def kick(self):
+        return StartupKick(
+            forward_percent=50,
+            reverse_percent=100,
+            duration_sec=0.3,
+            reverse_straight_percent=60,
+            steering_center_cdeg=9600,
+            stall_speed_mps=0.01,
+            max_stall_kick_sec=2.0,
+        )
+
+    def test_stalled_and_steered_borrows_the_steered_figure(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=13200)
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.0).drive_percent, 100)
+
+    def test_stalled_but_straight_keeps_the_ordinary_figure(self):
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=9600)
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.0).drive_percent, 50)
+
+
+class SteeredSpeedBoostTest(unittest.TestCase):
+    """Turning hard needs more than the straight-line speed can deliver.
+
+    Raising the controller's floor instead carried the higher speed out of
+    the turn into the straight that followed, and the vehicle hit a wall.
+    Tying the boost to the steering angle makes it release itself.
+    """
+
+    def limits(self):
+        return TeleopLimits(steered_speed_boost=2.0)
+
+    def test_straight_running_is_not_boosted(self):
+        limits = self.limits()
+        plain = map_twist(0.05, 0.0, limits)
+        self.assertEqual(
+            plain.drive_percent,
+            map_twist(0.05, 0.0, TeleopLimits(steered_speed_boost=1.0)
+                      ).drive_percent,
+        )
+
+    def test_turning_raises_duty_at_the_same_commanded_speed(self):
+        limits = self.limits()
+        straight = map_twist(0.05, 0.0, limits)
+        turning = map_twist(0.05, 0.35, limits)
+        self.assertGreater(turning.drive_percent, straight.drive_percent)
+
+    def test_boost_releases_as_the_wheel_straightens(self):
+        limits = self.limits()
+        hard = map_twist(0.05, 0.35, limits)
+        gentle = map_twist(0.05, 0.05, limits)
+        self.assertGreater(hard.drive_percent, gentle.drive_percent)
+
+    def test_steering_angle_is_unchanged_by_the_boost(self):
+        boosted = map_twist(0.05, 0.35, TeleopLimits(steered_speed_boost=2.0))
+        plain = map_twist(0.05, 0.35, TeleopLimits(steered_speed_boost=1.0))
+        self.assertEqual(boosted.steering_cdeg, plain.steering_cdeg)
+
+
+class SpeedControllerTest(unittest.TestCase):
+    """Duty has to be found, not predicted.
+
+    One straight line from speed to duty cannot be right at both ends: below
+    roughly 0.08 m/s the commanded duty will not break static friction, and
+    the duty that does break it carries the vehicle far too fast once it is
+    rolling.
+    """
+
+    def controller(self):
+        return SpeedController(
+            percent_per_mps_second=500.0, max_bias_percent=40
+        )
+
+    def test_a_stalled_vehicle_gets_more_duty_every_tick(self):
+        c = self.controller()
+        c.bias(0.08, 0.0, 0.0)
+        first = c.bias(0.08, 0.0, 0.1)
+        second = c.bias(0.08, 0.0, 0.2)
+        self.assertGreater(first, 0)
+        self.assertGreater(second, first)
+
+    def test_overspeed_pulls_duty_back(self):
+        c = self.controller()
+        c.bias(0.08, 0.0, 0.0)
+        self.assertLess(c.bias(0.08, 0.20, 0.1), 0)
+
+    def test_bias_is_capped_so_the_envelope_still_rules(self):
+        c = self.controller()
+        c.bias(0.08, 0.0, 0.0)
+        for step in range(1, 200):
+            bias = c.bias(0.08, 0.0, step * 0.1)
+        self.assertEqual(bias, 40)
+
+    def test_stopping_does_not_leave_wound_up_duty_for_the_next_start(self):
+        c = self.controller()
+        c.bias(0.08, 0.0, 0.0)
+        c.bias(0.08, 0.0, 1.0)
+        self.assertEqual(c.bias(0.0, 0.0, 1.1), 0)
+        self.assertEqual(c.bias(0.08, 0.0, 1.2), 0)
+
+    def test_direction_change_starts_from_scratch(self):
+        c = self.controller()
+        c.bias(0.08, 0.0, 0.0)
+        c.bias(0.08, 0.0, 1.0)
+        self.assertEqual(c.bias(-0.08, 0.0, 1.1), 0)
+
+    def test_reverse_is_tracked_by_magnitude_not_sign(self):
+        """The encoder's direction is unverified; this must not rely on it."""
+        c = self.controller()
+        c.bias(-0.08, 0.0, 0.0)
+        self.assertGreater(c.bias(-0.08, 0.02, 0.1), 0)
+
+    def test_without_an_encoder_it_stays_out_of_the_way(self):
+        c = self.controller()
+        self.assertEqual(c.bias(0.08, None, 0.0), 0)
+        self.assertEqual(c.bias(0.08, None, 1.0), 0)
+
+
+class SustainFloorTest(unittest.TestCase):
+    """Starting and keeping going are different jobs with different floors."""
+
+    def test_the_two_floors_are_separate_and_ordered(self):
+        limits = TeleopLimits()
+        self.assertLess(limits.min_sustain_drive_percent,
+                        limits.min_drive_percent)
+
+    def test_a_sustain_floor_above_the_start_floor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            TeleopLimits(min_drive_percent=35,
+                         min_sustain_drive_percent=40).validate()
+
+
+class TurnSpeedBoostTest(unittest.TestCase):
+    """Extra speed to break out of a turn, gone the moment the turn happens."""
+
+    TURNING = 0.5      # turn_ratio, well past engage
+    TARGET = 0.05
+
+    def boost(self):
+        return TurnSpeedBoost(
+            gain_per_second=0.8, max_multiplier=2.5, engage_turn_ratio=0.25
+        )
+
+    def test_it_accumulates_while_the_turn_is_not_happening(self):
+        b = self.boost()
+        b.update(self.TARGET, 0.0, self.TURNING, 0.0)
+        first = b.update(self.TARGET, 0.0, self.TURNING, 0.2)
+        second = b.update(self.TARGET, 0.0, self.TURNING, 0.4)
+        self.assertGreater(first, 1.0)
+        self.assertGreater(second, first)
+
+    def test_it_drops_at_once_when_the_vehicle_keeps_up(self):
+        """Not a decay: leftover speed is what carries past the heading."""
+        b = self.boost()
+        b.update(self.TARGET, 0.0, self.TURNING, 0.0)
+        for step in range(1, 10):
+            b.update(self.TARGET, 0.0, self.TURNING, step * 0.2)
+        self.assertGreater(b.multiplier, 1.5)
+        self.assertEqual(
+            b.update(self.TARGET, self.TARGET, self.TURNING, 2.0), 1.0
+        )
+
+    def test_going_straight_never_boosts(self):
+        b = self.boost()
+        b.update(self.TARGET, 0.0, 0.0, 0.0)
+        self.assertEqual(b.update(self.TARGET, 0.0, 0.0, 0.5), 1.0)
+
+    def test_a_gentle_bend_is_not_a_turn(self):
+        b = self.boost()
+        b.update(self.TARGET, 0.0, 0.1, 0.0)
+        self.assertEqual(b.update(self.TARGET, 0.0, 0.1, 0.5), 1.0)
+
+    def test_it_is_capped(self):
+        b = self.boost()
+        b.update(self.TARGET, 0.0, self.TURNING, 0.0)
+        for step in range(1, 100):
+            value = b.update(self.TARGET, 0.0, self.TURNING, step * 0.2)
+        self.assertEqual(value, 2.5)
+
+    def test_curvature_survives_the_boost(self):
+        """Clipping one of the pair and not the other would re-steer it."""
+        limits = TeleopLimits()
+        b = self.boost()
+        linear, angular = 0.05, 0.30
+        capped = b.limited(2.5, linear, angular, limits)
+        plain = map_twist(linear, angular, limits)
+        boosted = map_twist(linear * capped, angular * capped, limits)
+        self.assertGreater(capped, 1.0)
+        self.assertEqual(boosted.steering_cdeg, plain.steering_cdeg)
+        self.assertGreater(boosted.drive_percent, plain.drive_percent)
+
+    def test_the_cap_respects_both_limits(self):
+        limits = TeleopLimits()
+        b = self.boost()
+        capped = b.limited(2.5, 0.05, 0.30, limits)
+        self.assertLessEqual(0.05 * capped, limits.max_linear_mps + 1e-9)
+        self.assertLessEqual(0.30 * capped, limits.max_angular_rps + 1e-9)
+
+
+class StartCeilingTest(unittest.TestCase):
+    """Breaking away from a standstill is not cruising and is not bounded by it.
+
+    60% is the cruising ceiling and cannot move -- the insert speed, the entry
+    depth and the steering centre were all calibrated against it. None of that
+    was measured at a standstill with the rear wheels at full lock, where the
+    steered wheels plough sideways and 60% cannot start the vehicle at all.
+    """
+
+    def test_the_two_ceilings_are_separate_and_ordered(self):
+        limits = TeleopLimits()
+        self.assertGreater(limits.max_start_drive_percent,
+                           limits.max_drive_percent)
+
+    def test_a_start_ceiling_below_the_cruise_ceiling_is_rejected(self):
+        with self.assertRaises(ValueError):
+            TeleopLimits(max_drive_percent=60,
+                         max_start_drive_percent=50).validate()
+
+    def test_the_start_ceiling_cannot_exceed_full_duty(self):
+        with self.assertRaises(ValueError):
+            TeleopLimits(max_start_drive_percent=120).validate()
+
+
+class StallKickBurstTest(unittest.TestCase):
+    """One attempt is not enough when the threshold moves with the floor.
+
+    A full-lock start broke away at about two seconds on one attempt and not
+    at all on the next, in the same room. A single window either catches that
+    or the vehicle sits commanded but still for as long as the goal lasts.
+    """
+
+    def kick(self):
+        return StartupKick(
+            forward_percent=50,
+            reverse_percent=100,
+            duration_sec=0.3,
+            steering_center_cdeg=9600,
+            stall_speed_mps=0.01,
+            max_stall_kick_sec=2.0,
+            stall_kick_rest_sec=1.0,
+        )
+
+    def command(self):
+        return ActuatorCommand(drive_percent=35, steering_cdeg=9600)
+
+    def test_it_pushes_again_after_resting(self):
+        kick = self.kick()
+        command = self.command()
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.0).drive_percent, 50)
+        # 2.0 ~ 3.0 s is the rest: the plain command goes through.
+        self.assertEqual(kick.apply(command, 2.5, 0.0).drive_percent, 35)
+        # and then it tries again rather than giving up.
+        self.assertEqual(kick.apply(command, 3.5, 0.0).drive_percent, 50)
+
+    def test_rolling_still_ends_it_immediately(self):
+        kick = self.kick()
+        command = self.command()
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.08).drive_percent, 35)
 
 
 if __name__ == "__main__":

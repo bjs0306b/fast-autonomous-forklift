@@ -14,12 +14,34 @@ ekf_filter_node:
     # This filter owns odom -> base_link. AMCL owns map -> odom.
     world_frame: odom
 
-    # Laser odometry: translational velocity only. Absolute pose is not fused,
-    # because taking position from several sources makes them fight.
+    # Wheel encoder: forward velocity. This is the translation source.
+    #
+    # It was published but fused by nothing until 2026-08-07, and that hid a
+    # real drive failure behind an unusable measurement: during a nav2 run the
+    # vehicle visibly reversed while the filter reported 0.020 m of travel in
+    # 42 seconds. Judging "did it move" against laser odometry alone is not a
+    # measurement, and every drive conclusion drawn that way has to be redone.
+    twist0: /wheel/twist
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  false, false,
+                    false, false, false,
+                    false, false, false]
+    twist0_queue_size: 10
+    twist0_differential: false
+    twist0_relative: false
+
+    # Laser odometry: kept running for comparison but no longer fused.
+    #
+    # It is not merely noisy here, it is wrong -- it read near zero through
+    # real motion, and a wrong velocity with a confident covariance drags the
+    # estimate toward zero however good the encoder is. To put it back, set
+    # the vx entry (7th) true; leave vy false either way, because an Ackermann
+    # vehicle cannot translate sideways.
     odom0: /odom_rf2o
     odom0_config: [false, false, false,
                    false, false, false,
-                   true,  true,  false,
+                   false, false, false,
                    false, false, false,
                    false, false, false]
     odom0_queue_size: 10
@@ -45,9 +67,8 @@ ekf_filter_node:
 #     vroll, vpitch, vyaw,
 #     ax,    ay,     az ]
 #
-# rf2o contributes vx/vy, the IMU contributes vyaw, and the filter integrates
-# them into a pose. If vy turns out to be noise, set it false: an Ackermann
-# vehicle cannot move sideways.
+# The encoder contributes vx, the IMU contributes vyaw, and the filter
+# integrates them into a pose. rf2o is present but contributes nothing.
 #
 # With /imu/data absent the filter still runs, degrading to rf2o alone. That is
 # the right mode while the IMU is on a bench rather than bolted to the vehicle:

@@ -5,16 +5,22 @@ import json
 import time
 from typing import Optional
 
+from dataclasses import replace
+
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TwistWithCovarianceStamped
 from rclpy.node import Node
 import serial
 from std_msgs.msg import String
 
 from forklift_teleop.mapping import (
+    ActuatorCommand,
+    SpeedController,
     StartupKick,
+    TurnSpeedBoost,
     TeleopLimits,
     map_twist,
+    steering_turn_ratio,
     select_command,
 )
 from forklift_teleop.protocol import (
@@ -39,6 +45,21 @@ class UartTeleopBridge(Node):
         self.declare_parameter("command_timeout_sec", 0.5)
         self.declare_parameter("forward_startup_kick_percent", 50)
         self.declare_parameter("reverse_startup_kick_percent", 100)
+        self.declare_parameter(
+            "reverse_startup_kick_straight_percent", 60
+        )
+        self.declare_parameter("wheel_twist_topic", "/wheel/twist")
+        self.declare_parameter("stall_speed_mps", 0.01)
+        self.declare_parameter("max_stall_kick_sec", 2.0)
+        self.declare_parameter("stall_kick_rest_sec", 1.0)
+        self.declare_parameter("speed_control_enabled", True)
+        self.declare_parameter("speed_percent_per_mps_second", 500.0)
+        self.declare_parameter("speed_max_bias_percent", 40)
+        self.declare_parameter("turn_boost_gain_per_second", 0.8)
+        self.declare_parameter("turn_boost_decay_per_second", 2.0)
+        self.declare_parameter("turn_boost_max_multiplier", 2.5)
+        self.declare_parameter("turn_boost_engage_ratio", 0.25)
+
         self.declare_parameter("forward_startup_kick_sec", 0.3)
         # ⚠️ **기본값을 여기 다시 적지 않는다.** `TeleopLimits` 하나만 본다.
         #
@@ -55,9 +76,14 @@ class UartTeleopBridge(Node):
         self.declare_parameter("rear_steering_limit_deg",
                                _d.rear_steering_limit_deg)
         self.declare_parameter("min_drive_percent", _d.min_drive_percent)
+        self.declare_parameter("min_sustain_drive_percent",
+                               _d.min_sustain_drive_percent)
         self.declare_parameter("max_drive_percent", _d.max_drive_percent)
+        self.declare_parameter("max_start_drive_percent",
+                               _d.max_start_drive_percent)
         self.declare_parameter("max_drive_percent_reverse",
                                _d.max_drive_percent_reverse)
+        self.declare_parameter("steered_speed_boost", _d.steered_speed_boost)
         self.declare_parameter("steering_center_cdeg", _d.steering_center_cdeg)
         self.declare_parameter("steering_min_cdeg", _d.steering_min_cdeg)
         self.declare_parameter("steering_max_cdeg", _d.steering_max_cdeg)
@@ -86,6 +112,15 @@ class UartTeleopBridge(Node):
             min_drive_percent=int(
                 self.get_parameter("min_drive_percent").value
             ),
+            steered_speed_boost=float(
+                self.get_parameter("steered_speed_boost").value
+            ),
+            max_start_drive_percent=int(
+                self.get_parameter("max_start_drive_percent").value
+            ),
+            min_sustain_drive_percent=int(
+                self.get_parameter("min_sustain_drive_percent").value
+            ),
             max_drive_percent_reverse=int(
                 self.get_parameter("max_drive_percent_reverse").value
             ),
@@ -113,6 +148,9 @@ class UartTeleopBridge(Node):
         reverse_kick = int(
             self.get_parameter("reverse_startup_kick_percent").value
         )
+        reverse_straight_kick = int(
+            self.get_parameter("reverse_startup_kick_straight_percent").value
+        )
         kick_duration = float(
             self.get_parameter("forward_startup_kick_sec").value
         )
@@ -136,10 +174,65 @@ class UartTeleopBridge(Node):
                 f"[{self._limits.min_drive_percent}, "
                 f"{self._limits.max_drive_percent_reverse}]"
             )
+        if not (
+            self._limits.min_drive_percent
+            <= reverse_straight_kick
+            <= reverse_kick
+        ):
+            raise ValueError(
+                f"straight reverse startup kick {reverse_straight_kick} is "
+                f"outside [{self._limits.min_drive_percent}, {reverse_kick}]"
+            )
         if kick_duration < 0.0:
             raise ValueError("startup kick duration must not be negative")
         self._startup_kick = StartupKick(
-            forward_kick, reverse_kick, kick_duration
+            forward_kick,
+            reverse_kick,
+            kick_duration,
+            reverse_straight_percent=reverse_straight_kick,
+            steering_center_cdeg=self._limits.steering_center_cdeg,
+            stall_speed_mps=float(
+                self.get_parameter("stall_speed_mps").value
+            ),
+            max_stall_kick_sec=float(
+                self.get_parameter("max_stall_kick_sec").value
+            ),
+            stall_kick_rest_sec=float(
+                self.get_parameter("stall_kick_rest_sec").value
+            ),
+        )
+        # The encoder tells the kick whether the wheels actually turned. With
+        # no publisher this stays None and the kick falls back to its timer.
+        self._measured_speed: Optional[float] = None
+        self._speed_control = SpeedController(
+            percent_per_mps_second=float(
+                self.get_parameter("speed_percent_per_mps_second").value
+            ),
+            max_bias_percent=int(
+                self.get_parameter("speed_max_bias_percent").value
+            ),
+        ) if bool(
+            self.get_parameter("speed_control_enabled").value
+        ) else None
+        self._turn_boost = TurnSpeedBoost(
+            gain_per_second=float(
+                self.get_parameter("turn_boost_gain_per_second").value
+            ),
+            decay_per_second=float(
+                self.get_parameter("turn_boost_decay_per_second").value
+            ),
+            max_multiplier=float(
+                self.get_parameter("turn_boost_max_multiplier").value
+            ),
+            engage_turn_ratio=float(
+                self.get_parameter("turn_boost_engage_ratio").value
+            ),
+        )
+        self.create_subscription(
+            TwistWithCovarianceStamped,
+            str(self.get_parameter("wheel_twist_topic").value),
+            self._on_wheel_twist,
+            10,
         )
 
         self._serial: Optional[serial.Serial] = None
@@ -276,9 +369,27 @@ class UartTeleopBridge(Node):
             or self._last_twist_time is None
         ):
             return map_twist(0.0, 0.0, self._limits)
+        linear_x = self._last_twist.linear.x
+        angular_z = self._last_twist.angular.z
+
+        # Both together, so the curvature -- their ratio -- is untouched and
+        # the planner's steering angle survives. map_twist clamps the result
+        # to max_linear_mps, which is the speed the stopping distance was
+        # derived from, so this cannot outrun the braking margin.
+        multiplier = self._turn_boost.limited(
+            self._turn_boost.update(
+                linear_x,
+                self._measured_speed,
+                steering_turn_ratio(linear_x, angular_z, self._limits),
+                now,
+            ),
+            linear_x,
+            angular_z,
+            self._limits,
+        )
         return select_command(
-            self._last_twist.linear.x,
-            self._last_twist.angular.z,
+            linear_x * multiplier,
+            angular_z * multiplier,
             now - self._last_twist_time,
             self._command_timeout_sec,
             self._limits,
@@ -339,14 +450,58 @@ class UartTeleopBridge(Node):
             except ValueError as error:
                 self.get_logger().warning(f"Invalid UART frame: {error}")
 
+
+
+    def _apply_speed_control(
+        self, command: ActuatorCommand, now: float
+    ) -> ActuatorCommand:
+        """Trim duty toward the commanded speed using the encoder."""
+        if self._speed_control is None or self._last_twist is None:
+            return command
+        bias = self._speed_control.bias(
+            self._last_twist.linear.x, self._measured_speed, now
+        )
+        if bias == 0 or command.drive_percent == 0:
+            return command
+
+        # The bias helps or holds back along the direction already chosen; it
+        # never reverses one. Clamping to the configured envelope keeps the
+        # measured limits (teleop.yaml) authoritative over the controller.
+        # Once the wheels are turning the floor is the one that keeps them
+        # turning, not the higher one it took to start them. Holding the
+        # starting floor while rolling is what made 0.08 m/s come out as 0.17.
+        rolling = (self._measured_speed is not None
+                   and abs(self._measured_speed)
+                   > self._startup_kick.stall_speed_mps)
+        floor = (self._limits.min_sustain_drive_percent if rolling
+                 else self._limits.min_drive_percent)
+        # Both bounds move together: while stalled the vehicle may go below
+        # the cruising floor's reason for existing and above the cruising
+        # ceiling's, because neither was measured for a standstill.
+        ceiling = (self._limits.max_drive_percent if rolling
+                   else self._limits.max_start_drive_percent)
+        if command.drive_percent > 0:
+            percent = min(
+                max(command.drive_percent + bias, floor),
+                ceiling,
+            )
+        else:
+            percent = max(
+                min(command.drive_percent - bias, -floor),
+                -self._limits.max_drive_percent_reverse,
+            )
+        return replace(command, drive_percent=percent)
+    def _on_wheel_twist(self, message: TwistWithCovarianceStamped) -> None:
+        self._measured_speed = float(message.twist.twist.linear.x)
     def _on_timer(self) -> None:
         now = time.monotonic()
         if not self._ensure_serial(now):
             return
 
         command = self._startup_kick.apply(
-            self._current_command(now), now
+            self._current_command(now), now, self._measured_speed
         )
+        command = self._apply_speed_control(command, now)
 
         try:
             assert self._serial is not None

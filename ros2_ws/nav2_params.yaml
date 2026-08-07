@@ -158,7 +158,9 @@ controller_server:
     # Rear-steered forklift path controller
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.10
+      # 0.10 -> 0.08. teleop.yaml 의 max_linear_mps 0.10 아래에 두어야
+      # 조향 보정이나 가속이 상한에 부딪히지 않는다.
+      desired_linear_vel: 0.08
       lookahead_dist: 0.25
       min_lookahead_dist: 0.15
       max_lookahead_dist: 0.35
@@ -166,7 +168,19 @@ controller_server:
       rotate_to_heading_angular_vel: 0.30
       transform_tolerance: 0.2
       use_velocity_scaled_lookahead_dist: true
-      min_approach_linear_velocity: 0.03
+      # ⚠️ **이 값을 올려 "회전이 안 된다" 를 해결하지 말 것.**
+      #
+      # 한 번 0.08 로 올렸는데, 회전을 빠져나온 직선 구간에도 그 속도가 그대로
+      # 남아 과속해서 벽을 받았다. 크게 꺾을 때 힘이 모자라는 것은 토크 문제
+      # 이고, teleop.yaml 의 steered_speed_boost 가 **조향각에 비례해** 실시간
+      # 으로 올린다 -- 핸들이 펴지면 그 순간 원래대로 돌아온다.
+      # 0.08 -- 이 차의 **안정 최저 속도가 0.078 m/s** 다 (2026-08-07 실측,
+      # 유지 듀티 12% 에서 100% 연속). 그보다 낮게 명령해도 차는 0.078 로 가고,
+      # 목표가 그 근처면 컨트롤러가 하한 주위에서 헌팅해 가다 서다를 반복한다.
+      #
+      # ⚠️ 반대로 올리지도 말 것. max_linear_mps 가 0.10 이고 정지거리를 그
+      #    값으로 유도했다. 쓸 수 있는 범위는 0.078~0.10 로 좁다.
+      min_approach_linear_velocity: 0.08
       approach_velocity_scaling_dist: 0.30
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
@@ -176,7 +190,9 @@ controller_server:
       # 값이어야 한다 — 크게 두면 계획된 모든 곡선에서 감속이 걸리고, 그
       # 속도는 실측 스톨 구간이라 차가 아예 멎는다.
       regulated_linear_scaling_min_radius: 0.25
-      regulated_linear_scaling_min_speed: 0.04
+      # 위 min_approach_linear_velocity 주석 참고 -- 여기도 올리지 말 것.
+      # 위와 같은 이유. 곡률 규제도 0.078 아래로는 의미가 없다.
+      regulated_linear_scaling_min_speed: 0.08
       use_rotate_to_heading: false
       # No rear obstacle sensor is installed.  Reeds-Shepp + reversing made
       # Nav2 choose a negative-velocity path even for the first forward lap
@@ -247,11 +263,26 @@ local_costmap:
         publish_voxel_map: False
         origin_z: 0.0
         z_resolution: 0.05
-        # 0.03~0.30 m 만 쓰므로 8겹(0.40 m)이면 충분하다.
-        z_voxels: 8
-        max_obstacle_height: 0.40
+        # 이 두 값은 **마킹 높이가 아니라 광선이 지나갈 부피**다. 마킹 범위는
+        # 소스별 min/max_obstacle_height(0.03~0.30)가 이미 쥐고 있고, 이 소스
+        # 들은 그 위를 절대 안 찍는다.
+        #
+        # 0.40 이었을 때 클리어 광선이 1.2 m 앞 장애물에 못 닿았다. VoxelLayer
+        # 는 광선이 격자를 벗어나는 지점에서 자르는데, 높이 0.74 m 로 올라가는
+        # 광선은 천장 0.40 을 **0.94 m 에서** 뚫고 나가 거기서 끊겼다.
+        # (2026-08-07 실측: clearing_endpoints 가 전부 0.93~0.95 m)
+        #
+        # nav2 의 VoxelGrid 는 32비트 워드에 2비트씩 채우므로 **z 는 최대 16겹**
+        # 이다. 그 이상을 주면 "can only support up to 16 z values" 를 매 갱신마다
+        # 찍으면서 레이어가 통째로 갱신을 멈춘다 -- 파라미터가 조용히 무시되는
+        # 게 아니라 레이어가 죽는다.
+        #
+        # 16겹 x 0.05 = 0.80 m. 높이 0.74 m 로 올라가는 가장 가파른 행도 2.2 m
+        # 까지 천장에 안 닿는다.
+        z_voxels: 16
+        max_obstacle_height: 0.80
         mark_threshold: 0
-        observation_sources: tof_left tof_right
+        observation_sources: tof_left tof_right tof_left_clear tof_right_clear
         tof_left:
           topic: /tof/left/points
           data_type: "PointCloud2"
@@ -272,6 +303,44 @@ local_costmap:
           max_obstacle_height: 0.30
           obstacle_max_range: 2.0
           obstacle_min_range: 0.02
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.0
+        tof_left_clear:
+          # "측정했는데 아무것도 없다" 광선. **marking: false** 라서 이 소스는
+          # 절대 장애물을 찍지 않는다. 그래서 높이 창을 넓게 열어도 안전하고,
+          # 넓게 열어야만 한다 -- nav2 의 observation buffer 는 창 밖 점을
+          # raytrace 대상에서도 통째로 버리기 때문에, 창이 좁으면 광선이
+          # costmap 에 **도달조차 못 한다.** (2026-08-07 실측: 광선 높이가
+          # 0.53~1.06 m 였는데 창이 0.30 이라 전부 버려지고 있었다.)
+          #
+          # 광선이 격자를 벗어나는 지점은 VoxelLayer 가 알아서 자른다 --
+          # 아래로 가는 행은 바닥에서, 위로 가는 행은 천장에서. 그래서 여기서
+          # 미리 걸러낼 이유가 없고, 걸러내면 지울 수 있는 것만 줄어든다.
+          topic: /tof/left/points_clear
+          data_type: "PointCloud2"
+          marking: False
+          clearing: True
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.0
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.0
+        tof_right_clear:
+          # "측정했는데 아무것도 없다" 광선. **marking: false** 라서 이 소스는
+          # 절대 장애물을 찍지 않는다. 그래서 높이 창을 넓게 열어도 안전하고,
+          # 넓게 열어야만 한다 -- nav2 의 observation buffer 는 창 밖 점을
+          # raytrace 대상에서도 통째로 버리기 때문에, 창이 좁으면 광선이
+          # costmap 에 **도달조차 못 한다.** (2026-08-07 실측: 광선 높이가
+          # 0.53~1.06 m 였는데 창이 0.30 이라 전부 버려지고 있었다.)
+          #
+          # 광선이 격자를 벗어나는 지점은 VoxelLayer 가 알아서 자른다 --
+          # 아래로 가는 행은 바닥에서, 위로 가는 행은 천장에서. 그래서 여기서
+          # 미리 걸러낼 이유가 없고, 걸러내면 지울 수 있는 것만 줄어든다.
+          topic: /tof/right/points_clear
+          data_type: "PointCloud2"
+          marking: False
+          clearing: True
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.0
           raytrace_max_range: 2.5
           raytrace_min_range: 0.0
       static_layer:
@@ -319,10 +388,12 @@ global_costmap:
         publish_voxel_map: False
         origin_z: 0.0
         z_resolution: 0.05
-        z_voxels: 8
-        max_obstacle_height: 0.40
+        # 위 로컬 설명 참고 -- 마킹 높이가 아니라 광선 통과 부피이고, 16겹이
+        # VoxelGrid 의 상한이다.
+        z_voxels: 16
+        max_obstacle_height: 0.80
         mark_threshold: 0
-        observation_sources: tof_left tof_right
+        observation_sources: tof_left tof_right tof_left_clear tof_right_clear
         tof_left:
           topic: /tof/left/points
           data_type: "PointCloud2"
@@ -343,6 +414,44 @@ global_costmap:
           max_obstacle_height: 0.30
           obstacle_max_range: 2.0
           obstacle_min_range: 0.02
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.0
+        tof_left_clear:
+          # "측정했는데 아무것도 없다" 광선. **marking: false** 라서 이 소스는
+          # 절대 장애물을 찍지 않는다. 그래서 높이 창을 넓게 열어도 안전하고,
+          # 넓게 열어야만 한다 -- nav2 의 observation buffer 는 창 밖 점을
+          # raytrace 대상에서도 통째로 버리기 때문에, 창이 좁으면 광선이
+          # costmap 에 **도달조차 못 한다.** (2026-08-07 실측: 광선 높이가
+          # 0.53~1.06 m 였는데 창이 0.30 이라 전부 버려지고 있었다.)
+          #
+          # 광선이 격자를 벗어나는 지점은 VoxelLayer 가 알아서 자른다 --
+          # 아래로 가는 행은 바닥에서, 위로 가는 행은 천장에서. 그래서 여기서
+          # 미리 걸러낼 이유가 없고, 걸러내면 지울 수 있는 것만 줄어든다.
+          topic: /tof/left/points_clear
+          data_type: "PointCloud2"
+          marking: False
+          clearing: True
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.0
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.0
+        tof_right_clear:
+          # "측정했는데 아무것도 없다" 광선. **marking: false** 라서 이 소스는
+          # 절대 장애물을 찍지 않는다. 그래서 높이 창을 넓게 열어도 안전하고,
+          # 넓게 열어야만 한다 -- nav2 의 observation buffer 는 창 밖 점을
+          # raytrace 대상에서도 통째로 버리기 때문에, 창이 좁으면 광선이
+          # costmap 에 **도달조차 못 한다.** (2026-08-07 실측: 광선 높이가
+          # 0.53~1.06 m 였는데 창이 0.30 이라 전부 버려지고 있었다.)
+          #
+          # 광선이 격자를 벗어나는 지점은 VoxelLayer 가 알아서 자른다 --
+          # 아래로 가는 행은 바닥에서, 위로 가는 행은 천장에서. 그래서 여기서
+          # 미리 걸러낼 이유가 없고, 걸러내면 지울 수 있는 것만 줄어든다.
+          topic: /tof/right/points_clear
+          data_type: "PointCloud2"
+          marking: False
+          clearing: True
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.0
           raytrace_max_range: 2.5
           raytrace_min_range: 0.0
       static_layer:
