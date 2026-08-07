@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Fast DDS with shared memory turned off, UDPv4 only.
+
+  Shared memory is the faster transport and it is the one that keeps breaking.
+  A node that is killed rather than shut down leaves its port lock and
+  semaphore behind in /dev/shm without the segment they refer to, and every
+  later participant that lands on that port logs
+
+      RTPS_TRANSPORT_SHM Error ... open_and_lock_file failed
+
+  and silently loses it. The damage is not cosmetic. Over one afternoon on
+  2026-08-07 it cost, in order: an action goal response (bt_navigator accepted
+  a NavigateToPose goal, could not deliver the reply, and the client reported
+  the goal rejected while the vehicle began to drive), then subscriptions that
+  never matched, and that read as "the obstacle guard is dead" when the guard
+  was publishing at 20 Hz the whole time and was diagnosed as such. Deleting
+  the stale files clears it until the next kill.
+
+  Everything here runs on one machine, so UDPv4 over loopback carries all of
+  it. It costs a copy per message, which at this scan and telemetry volume
+  does not show up, and it cannot leave anything behind in /dev/shm to be
+  tripped over later.
+
+  Applied to the whole stack by field_slam_nav2.launch.py. For tools started
+  by hand, export it first:
+
+      export FASTRTPS_DEFAULT_PROFILES_FILE=\
+        $(ros2 pkg prefix forklift_teleop)/share/forklift_teleop/config/fastdds_no_shm.xml
+
+  To go back to shared memory, drop the environment variable; nothing else
+  refers to this file.
+-->
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_only</transport_id>
+        <type>UDPv4</type>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="no_shared_memory" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_only</transport_id>
+        </userTransports>
+        <!-- Without this the built-in shared memory transport is added back
+             alongside the one declared above, which defeats the point. -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

@@ -9,7 +9,11 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -46,6 +50,16 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     arguments = [
+        # Shared memory off for everything this launch starts. A killed node
+        # leaves its /dev/shm port lock without the segment, and every later
+        # participant that lands on that port loses it silently -- on
+        # 2026-08-07 that swallowed an action goal response while the vehicle
+        # drove off, and made a live obstacle guard look dead. See
+        # config/fastdds_no_shm.xml.
+        SetEnvironmentVariable(
+            "FASTRTPS_DEFAULT_PROFILES_FILE",
+            os.path.join(teleop_share, "config", "fastdds_no_shm.xml"),
+        ),
         DeclareLaunchArgument(
             "nav2_params_file",
             description="Absolute path to the field-tuned nav2_params.yaml",

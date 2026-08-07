@@ -15,7 +15,7 @@ setup(
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         (
             "share/" + package_name + "/config",
-            glob("config/*.rviz"),
+            glob("config/*.rviz") + glob("config/*.xml"),
         ),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         (
