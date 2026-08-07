@@ -54,7 +54,19 @@
 #define STEPPER_MOTOR_HOMING_ACCEL_SPS2   600U
 #define STEPPER_MOTOR_HOMING_MAX_STEPS    300000U
 #define STEPPER_MOTOR_HOME_BACKOFF_DELAY_MS 500U
-#define STEPPER_MOTOR_HOME_BACKOFF_STEPS  1600U
+/*
+ * 호밍 뒤 하한에서 올라오는 양 = **포크의 기준 높이**다. 미니어처 파렛트는 총높이
+ * 14mm(상판 2 + 구멍 10 + 하판 2)라 여기서 몇 mm만 어긋나도 포크가 구멍이 아니라
+ * 상판이나 하판을 민다.
+ *
+ * 1600 -> 1200 -> **7500** (2026-08-07). 앞의 두 값은 눈대중이었고, 7500 은 하한에서
+ * 스텝을 실어 올려가며 **실물로 맞춘 값**이다(`/fork/command` 에 "UP 7500").
+ *
+ * ⚠️ 이 상수를 고치기 전까지는 몇 mm 를 옮기려고 매번 재플래시했다. 지금은 프레임에
+ * 스텝을 실을 수 있으므로, 다시 맞출 때는 하한(HOME 직후 DOWN)에서 "UP <스텝>" 으로
+ * 찾은 뒤 그 숫자를 여기 적는다.
+ */
+#define STEPPER_MOTOR_HOME_BACKOFF_STEPS  7500U
 #define STEPPER_MOTOR_HOME_BACKOFF_RATE_SPS 500U
 #define STEPPER_MOTOR_HOME_BACKOFF_ACCEL_SPS2 300U
 #define STEPPER_MOTOR_LIMIT_DEBOUNCE_MS   20U

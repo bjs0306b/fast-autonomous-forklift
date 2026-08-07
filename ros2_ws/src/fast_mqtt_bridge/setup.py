@@ -25,7 +25,7 @@ setup(
     entry_points={
         "console_scripts": [
             "mqtt_bridge = fast_mqtt_bridge.mqtt_bridge_node:main",
+            "orin_telemetry = fast_mqtt_bridge.orin_telemetry:main",
         ],
     },
 )
-

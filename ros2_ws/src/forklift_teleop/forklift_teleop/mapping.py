@@ -1,6 +1,6 @@
 """Convert cmd_vel into drive PWM and rear-steering servo commands."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 
@@ -8,6 +8,58 @@ import math
 class ActuatorCommand:
     drive_percent: int
     steering_cdeg: int
+
+
+@dataclass
+class StartupKick:
+    """Briefly raise duty when the vehicle starts from a standstill.
+
+    Static friction is higher than rolling friction here, and the gap is wide:
+    35% keeps a rolling vehicle rolling but cannot start it, 38% stalls with
+    the motor buzzing, and 40% is a coin flip. Only 50% starts reliably. The
+    measurement table is in config/teleop.yaml -- do not copy it here.
+
+    Reverse is worse and gets its own figure. A rear-steered chassis reversing
+    puts the steered wheels in the lead, ploughing sideways instead of
+    trailing, and the same 60% that drives it forward moved it exactly nothing
+    backwards over five seconds.
+
+    A zero command cancels the kick immediately, so the obstacle guard keeps
+    full authority to stop. Re-arming on a direction change matters for the
+    BackUp recovery behaviour, which reverses from a standstill.
+    """
+
+    forward_percent: int
+    reverse_percent: int
+    duration_sec: float
+    deadline: float = -math.inf
+    last_direction: int = 0
+
+    def apply(self, command: ActuatorCommand, now: float) -> ActuatorCommand:
+        direction = (
+            1 if command.drive_percent > 0
+            else -1 if command.drive_percent < 0
+            else 0
+        )
+        if direction == 0:
+            self.deadline = -math.inf
+            self.last_direction = 0
+            return command
+        if direction != self.last_direction:
+            self.deadline = now + self.duration_sec
+        self.last_direction = direction
+        if now >= self.deadline:
+            return command
+        if direction > 0:
+            return replace(
+                command,
+                drive_percent=max(command.drive_percent, self.forward_percent),
+            )
+        # Reverse duty is negative, so the stronger command is the smaller one.
+        return replace(
+            command,
+            drive_percent=min(command.drive_percent, -self.reverse_percent),
+        )
 
 
 @dataclass(frozen=True)

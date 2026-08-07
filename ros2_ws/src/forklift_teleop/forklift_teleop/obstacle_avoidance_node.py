@@ -17,6 +17,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from forklift_teleop.obstacle_fusion import (
     AvoidanceAction,
     AvoidanceConfig,
+    AvoidanceDecision,
     FrontTofClearance,
     LidarCorridors,
     VisionDetection,
@@ -53,14 +54,15 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter("tof_min_height_m", 0.02)
         self.declare_parameter("tof_max_height_m", 0.80)
         self.declare_parameter("minimum_sector_hits", 2)
-        self.declare_parameter("stop_distance_m", 0.45)
+        self.declare_parameter("stop_distance_m", 0.25)
         self.declare_parameter("slowdown_distance_m", 1.00)
-        self.declare_parameter("minimum_speed_scale", 0.25)
-        self.declare_parameter("avoidance_yaw_rate_rps", 0.18)
+        self.declare_parameter("minimum_speed_scale", 0.80)
+        self.declare_parameter("avoidance_yaw_rate_rps", 0.02)
         self.declare_parameter("max_abs_yaw_rate_rps", 0.35)
         self.declare_parameter("tof_imbalance_m", 0.10)
         self.declare_parameter("lidar_clearance_margin_m", 0.15)
         self.declare_parameter("minimum_turn_clearance_m", 0.55)
+        self.declare_parameter("rear_stop_distance_m", 0.30)
         self.declare_parameter("vision_confidence_threshold", 0.60)
         self.declare_parameter("dynamic_object_stop_distance_m", 1.50)
         self.declare_parameter("dynamic_labels", [
@@ -78,6 +80,11 @@ class ObstacleAvoidanceNode(Node):
         self._vision_timeout = float(
             self.get_parameter("vision_timeout_sec").value
         )
+        self._rear_stop_distance = float(
+            self.get_parameter("rear_stop_distance_m").value
+        )
+        if self._rear_stop_distance <= 0.0:
+            raise ValueError("rear stop distance must be positive")
         if min(rate_hz, self._command_timeout, self._sensor_timeout) <= 0.0:
             raise ValueError("rate and timeout parameters must be positive")
 
@@ -366,6 +373,26 @@ class ObstacleAvoidanceNode(Node):
             self._missing_required_sensors(now),
             self._policy,
         )
+        if self._command.linear.x < 0.0:
+            if self._lidar.rear_m <= self._rear_stop_distance:
+                decision = AvoidanceDecision(
+                    AvoidanceAction.STOP,
+                    0.0,
+                    0.0,
+                    f"rear obstacle at {self._lidar.rear_m:.2f}m",
+                )
+            elif (
+                decision.action != AvoidanceAction.SENSOR_TIMEOUT
+                and not decision.reason.startswith("dynamic object")
+            ):
+                # A close front wall is the reason for backing up and must not
+                # block the escape. Rear LiDAR owns collision stopping here.
+                decision = AvoidanceDecision(
+                    AvoidanceAction.CLEAR,
+                    1.0,
+                    0.0,
+                    f"rear corridor clear at {self._lidar.rear_m:.2f}m",
+                )
         linear, angular = apply_decision(
             self._command.linear.x,
             self._command.angular.z,
@@ -387,6 +414,7 @@ class ObstacleAvoidanceNode(Node):
                 "left": finite_or_none(self._lidar.left_m),
                 "center": finite_or_none(self._lidar.center_m),
                 "right": finite_or_none(self._lidar.right_m),
+                "rear": finite_or_none(self._lidar.rear_m),
             },
             "frontTof": {
                 "left": finite_or_none(tof.front_left_m),
@@ -398,15 +426,19 @@ class ObstacleAvoidanceNode(Node):
             data=json.dumps(status, separators=(",", ":"))
         ))
         if decision.action != self._last_action:
-            log = (
-                self.get_logger().warning
-                if decision.action in {
-                    AvoidanceAction.STOP,
-                    AvoidanceAction.SENSOR_TIMEOUT,
-                }
-                else self.get_logger().info
+            message = (
+                f"Avoidance {decision.action.value}: {decision.reason}"
             )
-            log(f"Avoidance {decision.action.value}: {decision.reason}")
+            # rclpy caches severity by call site. Calling a dynamically chosen
+            # bound method from one line raises "Logger severity cannot be
+            # changed between calls" when CLEAR/AVOID changes to STOP.
+            if decision.action in {
+                AvoidanceAction.STOP,
+                AvoidanceAction.SENSOR_TIMEOUT,
+            }:
+                self.get_logger().warning(message)
+            else:
+                self.get_logger().info(message)
             self._last_action = decision.action
 
 

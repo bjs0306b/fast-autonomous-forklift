@@ -1,0 +1,31 @@
+field_lap_mission:
+  ros__parameters:
+    # The launch file overrides both safety interlocks. Never arm this config
+    # globally: the vehicle starts moving when map, sensors and Nav2 are ready.
+    mission_armed: false
+    drive_enabled: false
+    origin_configured: false
+
+    map_frame: map
+    navigate_action: /navigate_to_pose
+    map_topic: /map
+    scan_topic: /scan
+    tof_left_topic: /tof/left/points
+    tof_right_topic: /tof/right/points
+    status_topic: /field_lap/status
+
+    start_delay_sec: 5.0
+    sensor_timeout_sec: 1.0
+    navigation_timeout_sec: 180.0
+    max_retries_per_waypoint: 1
+    # A fresh SLAM occupancy grid only covers the area already observed.
+    # Short goals let the map expand instead of asking Nav2 to plan beyond it.
+    max_segment_length_m: 0.25
+
+    # Warehouse lower-left coordinates in physical meters. These follow the
+    # two circulation lanes from orin-pose-spec.md. The measured startup pose
+    # is appended automatically as the final goal.
+    waypoint_x_m: [1.55, 1.55, 0.50, 0.50]
+    waypoint_y_m: [0.50, 2.50, 2.50, 0.50]
+    waypoint_yaw_rad: [0.0, 1.5708, 3.1416, -1.5708]
+    return_to_origin: true

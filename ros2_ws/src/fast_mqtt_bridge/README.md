@@ -3,6 +3,11 @@
 FAST 백엔드 통신 규격에 맞춘 ROS2 ↔ MQTT 브리지입니다. 기존 `forklift_teleop`의
 `/cmd_vel` → UART 경로는 수정하지 않습니다.
 
+`orin-pose-spec.md`의 별도 10 Hz telemetry 계약은 `orin_telemetry` 실행 파일로
+구현되어 있습니다. 기존 `forklift/{id}/...` 계약과 토픽/QoS/payload가 다르므로
+기존 `mqtt_bridge`와 설정을 섞지 않습니다. 통합 현장 실행은
+[`../../FIELD_SLAM_MQTT.md`](../../FIELD_SLAM_MQTT.md)를 따릅니다.
+
 ## 데이터 흐름
 
 ```text
@@ -165,4 +170,3 @@ Docker 가 있으면 `cd infra/mqtt && docker compose up -d`, 없으면 같은 �
 - Nav2 또는 다른 MOVE 제어 interface
 - 실제 모터, 비상정지 하드웨어, reset/fail-safe
 - 임베디드 포크·적재/하역 제어
-

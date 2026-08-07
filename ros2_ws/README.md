@@ -27,6 +27,9 @@ ros2 launch forklift_teleop sensor_usb.launch.py
 `fast_mqtt_bridge`의 상세 설정, MQTT 토픽, 미연결 ROS2 adapter 범위는
 [`src/fast_mqtt_bridge/README.md`](src/fast_mqtt_bridge/README.md)를 참고합니다.
 
+LiDAR·좌우 전면 ToF·SLAM·Nav2·장애물 회피·10 Hz Orin 좌표 전송을 한 번에
+기동하는 현장 절차는 [`FIELD_SLAM_MQTT.md`](FIELD_SLAM_MQTT.md)를 참고합니다.
+
 ## LiDAR AMCL 및 Nav2 통합 현황
 
 2026-07-30 기준 `S15P11A304-98`과 `S15P11A304-99`에서 확인한

@@ -40,6 +40,7 @@ setup(
             "obstacle_avoidance = "
             "forklift_teleop.obstacle_avoidance_node:main",
             "unmanned_mission = forklift_teleop.unmanned_mission:main",
+            "field_lap_mission = forklift_teleop.field_lap_mission:main",
         ],
     },
 )

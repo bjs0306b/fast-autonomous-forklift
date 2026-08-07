@@ -40,13 +40,13 @@ class ObstacleFusionTest(unittest.TestCase):
 
     def test_low_center_obstacle_seen_only_by_tof_stops(self):
         decision = self.decide(
-            tof=FrontTofClearance(0.30, 2.0)
+            tof=FrontTofClearance(0.20, 2.0)
         )
         self.assertEqual(decision.action, AvoidanceAction.STOP)
 
     def test_tall_center_obstacle_seen_by_roof_lidar_stops(self):
         decision = self.decide(
-            lidar=LidarCorridors(2.0, 0.30, 2.0)
+            lidar=LidarCorridors(2.0, 0.20, 2.0)
         )
         self.assertEqual(decision.action, AvoidanceAction.STOP)
 
@@ -65,6 +65,15 @@ class ObstacleFusionTest(unittest.TestCase):
             tof=FrontTofClearance(1.40, 0.70)
         )
         self.assertEqual(decision.action, AvoidanceAction.AVOID_LEFT)
+
+    def test_field_wall_at_43cm_avoids_left_instead_of_stopping(self):
+        decision = self.decide(
+            lidar=LidarCorridors(1.331, 0.468, 0.446),
+            tof=FrontTofClearance(0.463, 0.431),
+        )
+        self.assertEqual(decision.action, AvoidanceAction.AVOID_LEFT)
+        self.assertGreater(decision.yaw_bias_rps, 0.0)
+        self.assertGreater(decision.speed_scale, 0.0)
 
     def test_tof_nominated_turn_is_rejected_when_lidar_side_blocked(self):
         decision = self.decide(
@@ -99,6 +108,14 @@ class ObstacleFusionTest(unittest.TestCase):
         self.assertGreater(corridors.left_m, 1.0)
         self.assertEqual(corridors.center_m, 0.8)
         self.assertGreater(corridors.right_m, 1.0)
+
+    def test_roof_lidar_extracts_rear_corridor(self):
+        corridors = lidar_corridors_from_points(
+            [(-0.7, 0.0), (-0.8, 0.02), (1.5, 0.0), (1.6, 0.0)],
+            math.radians(18),
+            math.radians(70),
+        )
+        self.assertAlmostEqual(corridors.rear_m, math.hypot(0.8, 0.02))
 
     def test_front_tof_filters_floor_and_outside_fork_cone(self):
         distance = front_tof_distance_from_points(

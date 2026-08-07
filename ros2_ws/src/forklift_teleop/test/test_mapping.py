@@ -4,7 +4,13 @@ import unittest
 
 import yaml
 
-from forklift_teleop.mapping import TeleopLimits, map_twist, select_command
+from forklift_teleop.mapping import (
+    ActuatorCommand,
+    StartupKick,
+    TeleopLimits,
+    map_twist,
+    select_command,
+)
 
 
 class MappingTest(unittest.TestCase):
@@ -160,6 +166,45 @@ class MappingTest(unittest.TestCase):
         command = select_command(0.2, 0.35, 0.499, 0.5, self.limits)
         self.assertEqual(command.drive_percent, 60)
         self.assertEqual(command.steering_cdeg, map_twist(0.2, 0.35, self.limits).steering_cdeg)
+
+    def test_forward_startup_kick_overcomes_static_friction_then_expires(self):
+        kick = StartupKick(50, 100, 0.3)
+        slow = ActuatorCommand(41, self.CENTER)
+        self.assertEqual(50, kick.apply(slow, 10.0).drive_percent)
+        self.assertEqual(50, kick.apply(slow, 10.29).drive_percent)
+        self.assertEqual(41, kick.apply(slow, 10.30).drive_percent)
+
+    def test_stop_immediately_cancels_startup_kick(self):
+        kick = StartupKick(50, 100, 0.6)
+        slow = ActuatorCommand(41, self.CENTER)
+        kick.apply(slow, 10.0)
+        stop = ActuatorCommand(0, self.CENTER)
+        self.assertEqual(stop, kick.apply(stop, 10.1))
+        self.assertEqual(50, kick.apply(slow, 10.2).drive_percent)
+
+    def test_reverse_startup_kick_uses_its_own_stronger_figure(self):
+        # A rear-steered chassis reversing needs far more duty than forwards;
+        # Nav2's BackUp recovery starts from a standstill and would not move
+        # at all on the forward figure.
+        kick = StartupKick(50, 100, 0.3)
+        slow = ActuatorCommand(-41, self.CENTER)
+        self.assertEqual(-100, kick.apply(slow, 10.0).drive_percent)
+        self.assertEqual(-41, kick.apply(slow, 10.30).drive_percent)
+
+    def test_kick_rearms_when_direction_reverses(self):
+        kick = StartupKick(50, 100, 0.3)
+        forward = ActuatorCommand(41, self.CENTER)
+        reverse = ActuatorCommand(-41, self.CENTER)
+        self.assertEqual(50, kick.apply(forward, 10.0).drive_percent)
+        self.assertEqual(41, kick.apply(forward, 10.5).drive_percent)
+        # 방향이 바뀌면 다시 정지마찰을 이겨야 한다.
+        self.assertEqual(-100, kick.apply(reverse, 10.6).drive_percent)
+
+    def test_kick_never_weakens_a_stronger_command(self):
+        kick = StartupKick(50, 100, 0.3)
+        self.assertEqual(
+            60, kick.apply(ActuatorCommand(60, self.CENTER), 10.0).drive_percent
+        )
 
 
 if __name__ == "__main__":

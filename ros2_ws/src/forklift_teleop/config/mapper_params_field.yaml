@@ -1,0 +1,77 @@
+slam_toolbox:
+  ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    mode: mapping
+    use_map_saver: true
+    use_sim_time: false
+
+    # The field is only 2 x 3 m. The stock 0.50 m motion threshold drops too
+    # many scans in its narrow aisles, so retain a scan every 5 cm / 0.10 rad.
+    resolution: 0.02
+    throttle_scans: 1
+    minimum_time_interval: 0.10
+    minimum_travel_distance: 0.05
+    minimum_travel_heading: 0.10
+    map_update_interval: 1.0
+    transform_publish_period: 0.02
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    min_laser_range: 0.10
+    max_laser_range: 8.0
+    scan_buffer_size: 20
+    scan_buffer_maximum_scan_distance: 8.0
+
+    use_scan_matching: true
+    use_scan_barycenter: true
+    link_match_minimum_response_fine: 0.10
+    link_scan_maximum_distance: 1.0
+    loop_search_maximum_distance: 1.5
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 8
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    correlation_search_space_dimension: 0.30
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.05
+    loop_search_space_dimension: 3.0
+    loop_search_space_resolution: 0.03
+    loop_search_space_smear_deviation: 0.03
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    # 셀이 "막힘" 으로 남는 기준 — 세션 시작부터 누적된 hits/passes 비율이다.
+    # 시간이 지나서 잊는 게 아니라, 그 자리를 다시 지나가며 "비었다" 를 쌓아야
+    # 지워진다.
+    #
+    #   히트 1회를 지우는 데 필요한 통과 횟수 = 1 / threshold
+    #     0.1 -> 10회   0.4 -> 2.5회
+    #
+    # 0.1 이던 값을 0.4 로 올린다. 사람이 3초만 서 있어도 10 Hz 스캔에 수십 번
+    # 히트가 쌓이는데, 0.1 에서는 그 10배를 같은 2 cm 셀에 통과시켜야 지워졌다.
+    # 2x3 m 경기장을 0.1 m/s 로 도는 한 세션 안에 산술적으로 불가능해서, 동적
+    # 장애물이 지나간 자리가 영구 유령 벽으로 남았다.
+    #
+    # ⚠️ 올릴수록 약한 반사가 장애물로 안 찍힐 수 있다. 한 바퀴 돌려 벽이
+    #    제대로 그려지는지 확인하고 조정할 것.
+    occupancy_threshold: 0.4
+    stack_size_to_use: 40000000
+    enable_interactive_mode: true
+    debug_logging: false

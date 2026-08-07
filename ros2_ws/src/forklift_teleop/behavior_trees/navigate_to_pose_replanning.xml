@@ -1,0 +1,65 @@
+<!--
+  Forklift NavigateToPose tree — replanning + recovery, without Spin.
+
+  This replaces navigate_to_pose_no_spin.xml, which was a bare Sequence of
+  ComputePathToPose -> FollowPath. That tree computed the path exactly once and
+  aborted on any failure, so the vehicle stopped in front of an obstacle and
+  never replanned around it. Spin had been removed for a good reason (see
+  below) but the replanning loop and every recovery went out with it, and
+  replanning has nothing to do with Spin.
+
+  This is Nav2's standard navigate_to_pose_w_replanning_and_recovery.xml with
+  two changes:
+
+    1. No Spin. The motor bridge zeroes any command with no forward
+       component (mapping.py deadband), so Spin can never make progress and
+       always times out. That is why the previous tree existed.
+
+    2. BackUp is tuned for this vehicle: 0.15 m instead of 0.30 m, because
+       the arena is 2 x 3 m and the vehicle is 0.435 m long. The obstacle
+       guard watches the rear 18 deg lidar corridor during reverse
+       (obstacle_avoidance_node, rear_stop_distance_m), so this is sensed.
+
+  BackUp needs the reverse startup kick in mapping.py. A rear-steered vehicle
+  needs far more duty to break away backwards than forwards, and without the
+  kick this behaviour commands a speed the wheels cannot start from.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <!-- The whole point: the path is recomputed every second while it is
+             being followed, so an obstacle that appears mid-run produces a new
+             path instead of an abort. -->
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context"
+                                service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"
+                      goal_checker_id="general_goal_checker"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context"
+                              service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree"
+                                service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree"
+                                service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <!-- Waiting is a real recovery here: the obstacles this vehicle
+               cannot drive around are usually people, and they move. -->
+          <Wait wait_duration="3"/>
+          <BackUp backup_dist="0.15" backup_speed="0.08"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

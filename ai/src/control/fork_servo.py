@@ -112,8 +112,22 @@ STEER_DRAG_BOOST = 1.0
 INSERT_SPEED = 0.05
 """진입 시 `linear.x` 로 내보내는 값. ⚠️ **실제 속도가 아니다** — 아래 참조."""
 
-INSERT_SPEED_ACTUAL = 0.110
-"""진입 시 **실제로 나오는 속도**(m/s). 2026-08-04 실주행 로그에서 뽑았다.
+INSERT_SPEED_ACTUAL = 0.20
+"""진입 시 **실제로 나오는 속도**(m/s). 실주행 로그에서 뽑는다.
+
+## ⚠️ 0.110 → 0.20 (2026-08-06, 시연 바닥)
+
+**바닥이 바뀌면 이 값도 바뀐다.** 같은 날 같은 바닥에서 후진도 0.138 → 0.29 로
+2.1배였고, 진입은 0.110 → 0.20 으로 **1.8배** 였다 — 비율이 맞물린다.
+
+값이 실제보다 **작으면** 시간을 길게 잡아 **과하게 밀고 들어간다.** 08-06 실물에서
+그대로 나왔다 — *"물리긴 했는데 너무 세게 밀어서 파렛트가 밀리고 포크가 빠져나옴"*,
+*"꽂고 너무 멀리까지 감"*. 반대로 크면 일찍 멈춘다(아래 08-04 기록).
+
+⚠️ **진입 구간은 짧아 표본이 잘 안 잡힌다.** 코앞에서 검출이 끊기기 때문이다
+(그게 개루프 진입인 이유다). 08-06 값은 구간 1개(0.200)에 후진 비율(2.1배)이
+뒷받침한 것이다. 더 정확히 재려면 `--insert-margin` 을 크게 줘서 얕게 진입시키면
+검출이 살아 있는 구간이 길어진다.
 
 ⚠️ **재는 방법이 중요하다.** 이 값은 **실주행 로그의 `distance_mm` 시계열**에서
 뽑는다 — 재려는 동작 그 자체를 재는 것이라 가장 정확하다:
@@ -367,8 +381,31 @@ LOST_GRACE_S = 0.25
 
 # --- 재접근(S15P11A304-154) ---
 
-RETREAT_SPEED = -0.12
+RETREAT_SPEED = -0.14
 """후진 속도(m/s). **음수여야 뒤로 간다.**
+
+## ⚠️ -0.06 → -0.22 (2026-08-07) — 전진과 후진은 예산이 다르다
+
+후진은 **조향을 끝까지 꺾은 채** 물러나므로 저항이 전진보다 훨씬 크다. 전진이
+느긋하게 굴러가는 듀티로 후진하면 **아예 안 움직이는데 로그는 정상으로 찍힌다** —
+08-07 27회차에서 4.5초 동안 거리가 210mm 에 고정된 채 `retreat_timeout` 으로 죽었다.
+구동 하한을 18 로 내리면서 후진만 문턱 아래로 떨어진 것이다.
+
+그러므로 **전진 속도(밀기 방지)와 후진 속도(스톨 방지)를 같이 움직이면 안 된다.**
+
+## ⚠️ -0.12 → -0.06 (2026-08-06, 시연 바닥) — 위에서 되돌렸다
+
+아래 "정지 출발이라 구동 50% 가 필요하다" 는 **구동 하한이 50 이던 시절**의 계산이다.
+지금 `teleop.yaml` 의 `min_drive_percent` 는 20 이라 -0.06 도 27% 로 매핑되고, 이
+바닥에서는 그 값으로 정지 출발이 된다. **바닥·하한이 바뀌면 다시 봐야 한다.**
+
+바꾼 이유는 속도 자체가 아니라 **재판단 시간**이다. -0.12 에서는 한 걸음 후진이
+사람 눈에 "확 뒤로 가버리는" 정도라, VERIFY 가 다시 볼 기회 없이 파렛트가 화면
+가장자리로 밀려나고 그대로 소실됐다(08-06 17회차, `lost_while_retreating`).
+
+⚠️ 후진 시간은 `step / RETREAT_SPEED_ACTUAL` 로 계산되므로, 이 값만 내리면
+**실제 후진 거리도 같이 줄어든다**(명령은 절반인데 시간은 그대로). 그게 의도다.
+정확히 맞추려면 실주행 로그로 `RETREAT_SPEED_ACTUAL` 을 다시 재야 한다.
 
 ⚠️ **2026-08-05 저녁에 -0.20 으로 올렸다가 되돌렸다.** 올린 근거("후진이 전진의
 19% 밖에 안 나온다")가 **틀린 측정**이었다 — 조향 한계를 탐색하던 for 문이
@@ -424,6 +461,33 @@ LATERAL_RATIO_TO_MM = HOLE_SPACING_MM / 2.0
 구멍 간격(`HOLE_SPACING_MM`)의 절반이다. **거리와 무관하게** 이 환산이 성립한다 —
 화면 폭도 거리에 반비례해 같이 줄기 때문이다."""
 
+CONTACT_GUARD_MM = 320.0
+"""이 거리 안쪽에서 요각이 허용치를 넘으면 **닿기 전에 물러난다**(0 이면 끔).
+
+포크 끝이 카메라보다 90mm 앞이고, 파렛트가 비스듬하면 가까운 모서리는 그보다 더
+앞에 있다. 그래서 `INSERT_ENTER_MM`(210) 까지 굴러가면 **정렬이 끝나기 전에 포크가
+파렛트를 친다** — 2026-08-06 30° 시험에서 파렛트 각도가 그렇게 꺾였다.
+
+320 은 210 + 여유 110 이다. 이보다 크게 잡으면 정상 접근도 자꾸 물러나 수렴이
+느려지고, 작게 잡으면 접촉을 못 막는다."""
+
+MAX_PLAUSIBLE_YAW_DEG = 60.0
+"""이보다 큰 요각은 **검출 오류로 본다**(0 이면 끔).
+
+진입면이 보인다는 것 자체가 그 면을 어느 정도 정면에서 보고 있다는 뜻이라, 60° 를
+넘는 값은 구멍 짝을 잘못 묶었을 때 나온다.
+
+08-07 30회차에서 **정면 파렛트**인데 `폭 14px (-88.1° 139mm) lat +74.59` 같은 프레임이
+섞여 재접근을 6번 유발했다. 139mm 면 진입면 폭이 400px 대여야 하는데 14px 이니 거리와
+폭이 서로 모순이다 — 사람 눈에는 명백하지만 제어기는 그대로 믿고 물러났다."""
+
+SPAN_CONSISTENCY_RATIO = 0.35
+"""검출 폭이 **거리로 예측한 폭**의 이 배수보다 작으면 검출 오류로 본다(0 이면 끔).
+
+폭과 거리는 같은 기하에서 나오므로 서로 어긋날 수 없다 — 어긋났다면 둘 중 하나가
+다른 물체를 잡은 것이다. 0.35 는 넉넉한 값이다(위 사례는 0.03 이었다)."""
+
+
 RETREAT_MIN_STEP_MM = 80.0
 """한 번에 최소 이만큼은 물러난다.
 
@@ -444,25 +508,81 @@ RETREAT_MAX_STEP_MM = 120.0
 
 ⚠️ **바닥이 바뀌면 다시 재야 한다.** 오전 바닥에서는 후진이 0.138 m/s 였다."""
 
-RETREAT_SPEED_ACTUAL = 0.138
-"""후진 **실측** 속도(m/s). 2026-08-05 실주행 로그의 `distance_mm` 시계열에서 뽑았다.
+RETREAT_SPEED_ACTUAL = 0.46
+"""⚠️ **0.25 → 0.46 (2026-08-07, 하한 16% 로그).** 실주행에서 계획 150mm 를 낸
+걸음이 실제로 **275·235·177mm** 를 갔다 — 계획보다 1.2~1.8배다. 시간이 곧 거리이므로
+이 상수가 작으면 그만큼 더 물러나 **뒤 벽에 박는다.**
 
-명령값 0.12 와 다르고 **전진(0.178)보다 느리다.** 후진 시간 예산을 이 값으로 잡는다 —
-전진 속도로 계산했다가 26mm 를 남기고 상한에 끊긴 적이 있다."""
+⚠️ **0.11 → 0.25 (2026-08-07 저녁).** 후진 명령을 -0.06 에서 -0.14 로 올리면서
+같이 올렸다. 그리고 이제 이 상수는 **후진 거리를 직접 정한다**(시간 기반 완료가
+`step / RETREAT_SPEED_ACTUAL` 로 멈춘다). 그래서 **모자란 쪽이 아니라 넉넉한 쪽으로
+틀어 잡는다** — 크게 잡으면 시간이 짧아져 덜 물러나고, 작게 잡으면 더 물러나 **뒤 벽에
+박는다**(08-07 실제로 두 번 박았다). 뒤는 카메라도 ToF 도 안 본다.
 
-RETREAT_MAX_S = 5.0
+⚠️ **0.29 → 0.11 (2026-08-07).** 0.29 는 구동 하한이 35 이고 후진 명령이 -0.12
+이던 시절의 값이다. 그 뒤 하한을 18 로, 명령을 -0.06 으로 내렸으므로 **같은 바닥에서도
+실속도가 2.6배 느려졌다.**
+
+값이 실제보다 크면 후진 시간을 짧게 잡아 **목표까지 못 물러나고**, 거리 판정이
+확정을 못 해 `retreat_timeout` 으로 죽는다(08-07 26회차).
+
+⚠️ **이 상수는 `RETREAT_SPEED`·`min_drive_percent` 와 한 몸이다.** 셋 중 하나를
+바꾸면 여기도 다시 재야 한다.
+
+---
+
+후진 **실측** 속도(m/s). 실주행 로그의 `distance_mm` 시계열에서 뽑는다.
+
+후진 시간 예산을 이 값으로 잡는다 — 전진 속도로 계산했다가 26mm 를 남기고 상한에
+끊긴 적이 있다(2026-08-05).
+
+## ⚠️ 바닥마다 다르다 (2026-08-06 실측)
+
+같은 차·같은 명령인데 바닥이 바뀌면 **1.5배 넘게** 흔들린다:
+
+    바닥          정면 후진 실측     구간 수
+    옛 바닥        0.188 m/s          19
+    다른 바닥      0.240 m/s           6
+    **시연 바닥    0.290 m/s          13**   ← 지금 값
+
+**0.138 → 0.29 (2026-08-06).** 종전 값은 08-05 에 **후진 상한이 60% 이던 시절**
+다른 바닥에서 잰 것이라, 시연 바닥에서는 실제가 **2.1배 빨랐다.** 그 결과 한 걸음
+80~120mm 를 물러나려고 계산한 시간에 **실제로는 170~250mm** 를 가서, 45° 재접근이
+자세를 못 펴고 `retreat_timeout`·`lost_while_retreating` 으로 끝났다.
+
+## ⚠️ 45° 로그로 재면 안 된다
+
+꺾은 채 후진하면 차가 **회전도 같이 한다.** 이 측정은 파렛트까지의 거리 변화만 보므로
+회전 성분이 섞여 **과대평가된다** — 같은 시연 바닥에서 45° 로그는 0.630, 정면 로그는
+0.290 이 나왔다. **정면(또는 조향이 거의 없는) 후진 구간으로 재야 한다.**
+
+재는 법: 정면 파렛트 + `--lateral-tolerance 0.05` 로 돌리면 정상 정렬도 미정렬로
+판정돼 재접근이 확실히 발동하고, 정면이라 후진 내내 타깃이 보여 시계열이 안 끊긴다.
+
+⚠️ **바닥이 바뀌면 다시 잰다.** 이 값이 걸음 거리를 정하므로, 틀리면 자세를 못 펴거나
+검출 범위 밖까지 물러난다."""
+
+STALL_VERDICT_RETREATS = 2
+"""연속 이 횟수만큼 후진이 **거리를 못 늘리면** 멎은 것으로 본다.
+
+한 걸음(0.3~0.6초)은 관성 구간과 겹치고 코앞에서는 검출이 굳기도 해서, 하나만
+보고 판정하면 정상 주행을 끊는다(08-07 실제 사례)."""
+
+RETREAT_MAX_S = 1.0
 """후진 시간 상한(초). **목표가 아니라 안전 상한이다.**
 
-⚠️ **처음에 4.0 으로 뒀다가 실주행에서 26mm 차이로 끊겼다**(2026-08-05). 전진 속도
-0.178 로 계산한 것이 틀렸다 — 실측 **후진 속도는 0.138 m/s** 로 더 느리고, 명령 직후
-**0.3~0.4초는 관성으로 오히려 앞으로 간다**(198mm → 154mm, 두 번 재현). 지금 목표
-390mm 는 관성 44mm 를 더해 434mm/0.138 ≈ **3.1초**, 여기에 여유를 준 값이 5.0 이다.
+## ⚠️ 5.0 → 2.5 → 1.0 (2026-08-07)
 
-정상 종료는 거리 판정으로 끝난다. 여기에 걸렸다면 거리 판정이 죽은 것이므로 실패로
-본다(`retreat_timeout`).
+**뒤는 아무 센서도 안 본다.** 카메라는 앞만 보고, 전방 ToF 도 뒤를 못 본다.
+그래서 이 상한이 곧 "눈 감고 갈 수 있는 최대 거리" 다 — 실속도 0.25~0.3 m/s 에서
+5.0 초는 **1.2~1.5m**, 2.5 초도 **60~75cm** 다. 08-07 에 그 거리로 뒤 벽을 세 번
+들이받았다.
 
-⚠️ 08-04에 고정 횟수 루프로 후진시켰다가 **벽에 박았고** 검출 범위 밖까지 물러났다.
-그래서 거리를 매 프레임 보고(닫힌 루프), 시간 상한은 그 판정이 죽었을 때만 쓴다."""
+1.0 초면 최대 25~30cm 다. 한 걸음(80~150mm)을 채우는 데 0.3~0.6초면 충분하므로
+정상 동작에는 여유가 있고, 판정이 죽어도 25cm 안에서 멈춘다.
+
+⚠️ **후진 속도를 올리면 이 값도 같이 내려야 한다.** 상한은 시간인데 위험은
+거리다."""
 
 YAW_DEG_TOLERANCE = 10.0
 """진입을 허가할 **요각 상한(도)**. `yaw_deg` 를 아는 경우에만 쓴다.
@@ -736,6 +856,29 @@ def retreat_steering_for(error: AlignError, gain: float = RETREAT_STEER_GAIN,
     return _clamp(gain * max_angular * -yaw_term, -max_angular, max_angular)
 
 
+
+def _implausible(error: AlignError) -> bool:
+    """이 검출을 믿어도 되나 — **믿으면 안 되는 경우에 True**.
+
+    두 가지만 본다. 둘 다 "한 프레임 안에서 서로 모순" 이라 배경 지식이 필요 없다:
+
+    1. 요각이 물리적으로 나올 수 없게 크다(`MAX_PLAUSIBLE_YAW_DEG`)
+    2. 진입면 폭이 거리로 예측한 폭과 크게 어긋난다(`SPAN_CONSISTENCY_RATIO`)
+
+    ⚠️ **점수 임계로는 못 거른다.** 구멍 두 개를 각각 잘 검출해 놓고 **짝을 잘못
+    묶은** 경우라 개별 점수는 높다. 어긋나는 것은 짝의 기하다.
+    """
+    if (MAX_PLAUSIBLE_YAW_DEG > 0.0 and error.yaw_deg is not None
+            and abs(error.yaw_deg) > MAX_PLAUSIBLE_YAW_DEG):
+        return True
+    if (SPAN_CONSISTENCY_RATIO > 0.0 and error.distance_mm is not None
+            and error.distance_mm > 0.0):
+        expected_px = _SPAN_PX_AT_1MM / error.distance_mm
+        if error.approach_px < expected_px * SPAN_CONSISTENCY_RATIO:
+            return True
+    return False
+
+
 def retreat_step_for(lateral_ratio: float, yaw_deg: float | None,
                      min_step_mm: float = RETREAT_MIN_STEP_MM,
                      max_step_mm: float = RETREAT_MAX_STEP_MM) -> float:
@@ -795,7 +938,11 @@ class ForkServo:
                  verify_frames: int = VERIFY_FRAMES,
                  steer_drag_boost: float = STEER_DRAG_BOOST,
                  stall_window_s: float = STALL_WINDOW_S,
-                 stall_progress_mm: float = STALL_PROGRESS_MM) -> None:
+                 stall_progress_mm: float = STALL_PROGRESS_MM,
+                 contact_guard_mm: float = CONTACT_GUARD_MM,
+                 retreat_max_step_mm: float = RETREAT_MAX_STEP_MM) -> None:
+        self.contact_guard_mm = contact_guard_mm
+        self.retreat_max_step_mm = retreat_max_step_mm
         self.lateral_tolerance = lateral_tolerance
         self.yaw_tolerance = yaw_tolerance
         self.yaw_deg_tolerance = yaw_deg_tolerance
@@ -852,6 +999,13 @@ class ForkServo:
         self._insert_elapsed = 0.0
         self._insert_target_s = insert_duration_s
         self._retreat_elapsed = 0.0
+        self._retreat_time_target: float | None = None
+        self._no_progress_retreats = 0
+        self._travel_m: float | None = None
+        self._insert_travel0: float | None = None
+        self._insert_travel_mm = 0.0
+        self._retreat_step_mm = 0.0
+        self._retreat_travel0: float | None = None
         self.retries = 0
         # 후진 한 번의 (시작 요각, 시작 거리). 끝날 때 **실효 회전반경**을 낸다.
         self._retreat_start: tuple[float | None, float | None] = (None, None)
@@ -868,6 +1022,13 @@ class ForkServo:
         self.episode = Episode()
         self._t = self._lost_for = self._insert_elapsed = 0.0
         self._retreat_elapsed = 0.0
+        self._retreat_time_target: float | None = None
+        self._no_progress_retreats = 0
+        self._travel_m: float | None = None
+        self._insert_travel0: float | None = None
+        self._insert_travel_mm = 0.0
+        self._retreat_step_mm = 0.0
+        self._retreat_travel0: float | None = None
         self.retries = 0
         self._insert_target_s = self.insert_duration_s
         self._last = DriveCommand()
@@ -964,6 +1125,12 @@ class ForkServo:
         travel_mm = max(0.0, error.distance_mm - self.insert_margin_mm)
         return travel_mm / 1000.0 / INSERT_SPEED_ACTUAL
 
+    def _insert_travel_for(self, error: AlignError) -> float:
+        """개루프로 갈 거리(mm). `_insert_seconds_for` 와 같은 근거, 단위만 다르다."""
+        if error.distance_mm is None:
+            return self.insert_duration_s * 1000.0 * INSERT_SPEED_ACTUAL
+        return max(0.0, error.distance_mm - self.insert_margin_mm)
+
     def _reached(self, error: AlignError, px_threshold: float,
                  mm_threshold: float) -> bool:
         """이 단계에 들어갈 만큼 가까워졌나 — **거리 비교는 전부 여기 한 곳에서** 한다.
@@ -1020,6 +1187,8 @@ class ForkServo:
             # 진입 시간은 **가장 최근 거리**로 잡는다. 판단은 중앙값으로 하되 남은
             # 거리는 지금 값이라야 맞다 — 확인하는 동안에도 굴러왔기 때문이다.
             self._insert_target_s = self._insert_seconds_for(error)
+            self._insert_travel_mm = self._insert_travel_for(error)
+            self._insert_travel0 = self._travel_m
             return DriveCommand(INSERT_SPEED, 0.0, Phase.INSERT,
                                 f"자세 확인됨(lat {lat:+.2f}) — 직선 진입")
 
@@ -1030,7 +1199,8 @@ class ForkServo:
                                 reason=f"미정렬(lat {lat:+.2f}) — 재시도 {self.retries}회 소진")
 
         # **틀어진 만큼만** 물러난다.
-        step = retreat_step_for(lat, yaw_deg)
+        step = retreat_step_for(lat, yaw_deg,
+                                max_step_mm=self.retreat_max_step_mm)
         # 거리를 모르면(px 모드) 계산할 근거가 없다 — 고정 목표로 떨어진다.
         self._retreat_target = (error.distance_mm + step
                                 if error.distance_mm is not None
@@ -1040,6 +1210,9 @@ class ForkServo:
         self._retreat_elapsed = 0.0
         self._last_lateral = None
         self._retreat_start = (yaw_deg, error.distance_mm)
+        self._retreat_time_target = step / 1000.0 / RETREAT_SPEED_ACTUAL
+        self._retreat_step_mm = step
+        self._retreat_travel0 = self._travel_m
         return DriveCommand(
             self.retreat_speed,
             retreat_steering_for(error, self.retreat_steer_gain),
@@ -1098,7 +1271,66 @@ class ForkServo:
             self.episode.outcome = "retreat_timeout"
             return DriveCommand(phase=Phase.ABORT, reason="후진 시간 상한 — 정지")
 
+        # **계획한 걸음 시간이 차면 무조건 끝낸다.**
+        #
+        # ⚠️ 뒤는 카메라도 ToF 도 안 본다. 거리 판정을 기다리며 계속 물러나면 벽에
+        # 박는다 — 08-07 에 세 번 박았다. 그래서 "충분히 물러났나" 보다 **시간이
+        # 먼저** 결정한다.
+        #
+        # ⚠️ **거리를 아는 mm 모드에서, 타깃이 보일 때만** 여기서 끝낸다.
+        # 캘리브레이션 전(px 모드)에는 걸음 거리를 mm 로 못 잡으므로 종전 동작을 쓴다.
+        # ⚠️ 타깃이 보일 때만 끝내는 이유: 놓친 채로는 복구 동작(마지막 방향으로
+        # 되찾기)이 돌아야 하고, 그쪽은 `RETREAT_MAX_S` 가 막는다.
+        #
+        # 다만 거리가 보이는데 **안 늘었으면 물러난 게 아니라 멎은 것**이다. 그건
+        # 정렬 실패가 아니라 하드웨어 문제라 따로 표시한다(구동 하한을 18 로 내렸을
+        # 때 실제로 멎었다).
+        # **엔코더가 있으면 걸음을 거리로 끝낸다** — 타깃이 보이든 말든.
+        if (self._retreat_travel0 is not None and self._travel_m is not None
+                and (self._travel_m - self._retreat_travel0) * 1000.0
+                >= self._retreat_step_mm):
+            self._retreat_travel0 = None
+            self._retreat_time_target = None
+            self.phase = Phase.APPROACH
+            self._retreat_elapsed = 0.0
+            self._no_progress_retreats = 0
+            if error is not None:
+                self._report_retreat(error)
+            return None
+
+        if (error is not None and error.distance_mm is not None
+                and self._retreat_time_target is not None
+                and self._retreat_elapsed >= self._retreat_time_target):
+            self._retreat_time_target = None
+            start_mm = self._retreat_start[1]
+            # ⚠️ **한 걸음만 보고 멎음을 판정하지 않는다.** 명령 뒤 0.3초는 관성으로
+            # 오히려 앞으로 가고(약 44mm), 코앞에서는 검출이 한동안 같은 값으로 굳는다.
+            # 08-07 에 0.4초짜리 걸음 하나를 보고 정상 주행을 멎음으로 끊었다.
+            # 그래서 **연속 두 걸음**이 다 안 늘었을 때만 멎음으로 본다.
+            no_progress = (error is not None and error.distance_mm is not None
+                           and start_mm is not None
+                           and error.distance_mm <= start_mm + 5.0)
+            if no_progress:
+                self._no_progress_retreats += 1
+            else:
+                self._no_progress_retreats = 0
+            # ⚠️ **단계를 여기서 되돌린다.** RETREAT 로 남겨두면 다음 프레임에 다시
+            # 이 함수로 들어와 시간이 계속 쌓이고, 결국 상한에 걸려 ABORT 한다
+            # (08-07 3회차). 시간 완료는 "물러나기 끝" 이지 "후진 단계 유지" 가 아니다.
+            self.phase = Phase.APPROACH
+            self._retreat_elapsed = 0.0
+            if self._no_progress_retreats >= STALL_VERDICT_RETREATS:
+                self.phase = Phase.ABORT
+                self.episode.outcome = "stalled"
+                return DriveCommand(phase=Phase.ABORT,
+                                    reason="후진을 두 번 냈는데 거리가 안 늘었다 — 멎었다")
+            if error is not None:
+                self._report_retreat(error)
+            return None
+
         if error is None:
+            # (여기는 계획 시간이 차기 전에 타깃을 놓친 경우다. 거리로도 시간으로도
+            #  확정할 수 없으므로 복구 동작에 맡기고, `RETREAT_MAX_S` 가 상한이다.)
             self._lost_for += dt
             if self._lost_for <= self.lost_grace_s:
                 return DriveCommand(self.retreat_speed, 0.0, Phase.RETREAT,
@@ -1138,11 +1370,21 @@ class ForkServo:
                             Phase.RETREAT,
                             f"후진 재접근 {self.retries}/{self.max_retries}")
 
-    def step(self, error: AlignError | None, dt: float) -> DriveCommand:
+    def step(self, error: AlignError | None, dt: float,
+             travel_m: float | None = None) -> DriveCommand:
         """한 프레임 진행한다. `error=None`이면 타깃을 못 본 프레임이다.
 
         `dt`는 실제 프레임 간격을 넣는다 — **22fps(45ms) 전제**이고 고정 주기가 아니다.
+
+        `travel_m` 은 **엔코더가 잰 누적 주행거리**(m, 단조증가)다. 주면 개루프 진입과
+        후진이 **시간이 아니라 실제 거리**로 끝난다.
+
+        ⚠️ 이게 없으면 거리를 `시간 × 속도상수` 로 추정하는데, 그 상수는 바닥·구동
+        하한·배터리에 따라 **2배 넘게 흔들린다**. 08-06~07 에 그 상수를 다섯 번 다시
+        재고도 파렛트를 밀거나 뒤 벽을 들이받았다. 엔코더는 그 추정을 통째로 없앤다.
         """
+        if travel_m is not None:
+            self._travel_m = travel_m
         self._t += dt
         cmd = self._advance(error, dt)
         if self._stalled(error, cmd):
@@ -1167,6 +1409,14 @@ class ForkServo:
         # INSERT는 개루프다 — 검출이 끊겨도(정상이다) 계속 간다.
         if self.phase is Phase.INSERT:
             self._insert_elapsed += dt
+            # **엔코더가 있으면 거리로 끝낸다.** 시간은 그 다음이다.
+            if (self._insert_travel0 is not None and self._travel_m is not None
+                    and (self._travel_m - self._insert_travel0) * 1000.0
+                    >= self._insert_travel_mm):
+                self.phase = Phase.DONE
+                self.episode.outcome = "inserted"
+                return DriveCommand(phase=Phase.DONE,
+                                    reason=f"진입 완료 — 엔코더 {self._insert_travel_mm:.0f}mm")
             if self._insert_elapsed >= self._insert_target_s:
                 self.phase = Phase.DONE
                 self.episode.outcome = "inserted"
@@ -1176,6 +1426,12 @@ class ForkServo:
 
         if self.is_finished():
             return DriveCommand(phase=self.phase, reason="종료됨")
+
+        # ── 검출 위생 게이트 ─────────────────────────────────────────────
+        # **말이 안 되는 프레임은 못 본 것으로 취급한다.** 버리는 게 아니라 소실
+        # 유예로 넘겨, 다음 정상 프레임이 오면 그대로 이어간다.
+        if error is not None and _implausible(error):
+            error = None
 
         # 재접근 중 — 끝나면 None 이 와서 아래 평소 흐름으로 이어진다.
         if self.phase is Phase.RETREAT:
@@ -1194,6 +1450,40 @@ class ForkServo:
             return DriveCommand(phase=Phase.SEARCH, reason="타깃 없음 — 정지")
 
         self._lost_for = 0.0
+
+        # ── 접촉 전 이탈 가드 ────────────────────────────────────────────
+        # 요각이 크게 남은 채로 진입 거리(210mm)까지 가면 **포크가 먼저 닿는다.**
+        # 포크 끝은 카메라보다 90mm 앞이고, 파렛트가 비스듬하면 가까운 모서리가 그보다
+        # 더 앞에 있다. 2026-08-06 30° 시험에서 포크가 파렛트를 쳐서 각이 확 꺾였다.
+        #
+        # 뒷바퀴 조향이라 **제자리 회전이 안 되므로** "안 맞으면 멈춘다" 는 답이 없다.
+        # 닿기 전에 물러나 다시 접근하는 것이 유일한 교정 경로다.
+        if (self.contact_guard_mm > 0.0
+                and error.distance_mm is not None
+                and error.distance_mm <= self.contact_guard_mm
+                and error.yaw_deg is not None
+                and abs(error.yaw_deg) > self.yaw_deg_tolerance
+                and self.phase not in (Phase.RETREAT, Phase.INSERT)
+                and self._ever_beyond_insert
+                and self.retries < self.max_retries):
+            step = retreat_step_for(error.lateral_ratio, error.yaw_deg,
+                                    max_step_mm=self.retreat_max_step_mm)
+            self._retreat_target = error.distance_mm + step
+            self.retries += 1
+            self.phase = Phase.RETREAT
+            self._retreat_elapsed = 0.0
+            self._last_lateral = None
+            self._retreat_start = (error.yaw_deg, error.distance_mm)
+            self._retreat_time_target = step / 1000.0 / RETREAT_SPEED_ACTUAL
+            self._retreat_step_mm = step
+            self._retreat_travel0 = self._travel_m
+            self._verify = []
+            return DriveCommand(
+                self.retreat_speed,
+                retreat_steering_for(error, self.retreat_steer_gain),
+                Phase.RETREAT,
+                f"접촉 전 이탈(요 {error.yaw_deg:+.0f}° @{error.distance_mm:.0f}mm)"
+                f" — {step:.0f}mm 물러난다 {self.retries}/{self.max_retries}")
 
         # 진입 거리에 왔다 — 여기서 결판이 난다. 단, **한 프레임으로 정하지 않는다**:
         # VERIFY 로 넘어가 몇 프레임을 모아 중앙값으로 판단한다.

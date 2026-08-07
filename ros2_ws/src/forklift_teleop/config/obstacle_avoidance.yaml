@@ -31,14 +31,32 @@ obstacle_avoidance:
     tof_max_height_m: 0.80
     minimum_sector_hits: 2
 
-    stop_distance_m: 0.45
+    # base_link 기준이다. 사용자 현장 충돌 방지 조치와 명시적 승인 하에 0.25m.
+    # footprint 전면 x=0.190m 대비 차체 여유는 0.06m다.
+    stop_distance_m: 0.25
     slowdown_distance_m: 1.00
-    minimum_speed_scale: 0.25
-    avoidance_yaw_rate_rps: 0.18
+    # 0.25배 + 0.18rad/s는 실측 Nav2 저속에서 PWM 유지 토크가 부족하고
+    # 뒷바퀴가 36도 한계에 포화됐다. 전진 토크를 유지하면서 Nav2 조향에 작은
+    # 좌/우 보정만 더한다. stop_distance_m 정지는 이 값과 무관하게 즉시 0이다.
+    minimum_speed_scale: 0.80
+    # ⚠️ 0.02 는 회피가 아니라 미세 보정이었다. 0.08 m/s 에서 곡률 0.25 →
+    #    후륜 2.06° → 반경 4.0 m 다. 0.25~1.00 m 구간을 9.4초에 지나며 얻는
+    #    헤딩 변화가 10.8° 뿐이라 장애물을 못 비켜났다.
+    #
+    #    0.15 는 0.08 m/s 에서 곡률 1.875 → 후륜 15.1° → 반경 0.53 m 다.
+    #    기계 한계 36° 의 42% 라 포화 여유가 있다. Nav2 조향에 더해지는
+    #    편향이고 max_abs_yaw_rate_rps 로 잘린다.
+    avoidance_yaw_rate_rps: 0.15
     max_abs_yaw_rate_rps: 0.35
     tof_imbalance_m: 0.10
     lidar_clearance_margin_m: 0.15
-    minimum_turn_clearance_m: 0.55
+    # 이 값 이상 비어 있어야 그쪽으로 틀 수 있다. 0.55 는 폭 2 m 경기장에서
+    # **어느 지점에서도 통과할 수 없었다** — 주행 레인 x=0.50 의 벽 여유가
+    # 0.426 m, x=1.55 는 0.376 m 다. 그래서 _choose_turn 이 항상 SLOW 를
+    # 돌려주었고 가드는 애초에 조향할 수 없는 상태였다.
+    minimum_turn_clearance_m: 0.30
+    # 360도 상부 LiDAR의 후방 ±18도 통로. 자동 후진 복구 중 이 거리에서 정지.
+    rear_stop_distance_m: 0.30
 
     vision_confidence_threshold: 0.60
     dynamic_object_stop_distance_m: 1.50

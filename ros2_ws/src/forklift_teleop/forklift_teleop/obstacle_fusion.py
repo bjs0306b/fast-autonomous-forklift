@@ -22,6 +22,7 @@ class LidarCorridors:
     left_m: float = math.inf
     center_m: float = math.inf
     right_m: float = math.inf
+    rear_m: float = math.inf
 
 
 @dataclass(frozen=True)
@@ -41,10 +42,14 @@ class VisionDetection:
 
 @dataclass(frozen=True)
 class AvoidanceConfig:
-    stop_distance_m: float = 0.45
+    # Distances are in base_link, while the footprint reaches x=0.190 m.
+    # Field override approved at 0.25 m, leaving 0.06 m body clearance.
+    stop_distance_m: float = 0.25
     slowdown_distance_m: float = 1.00
-    minimum_speed_scale: float = 0.25
-    avoidance_yaw_rate_rps: float = 0.18
+    # The measured drive cannot overcome static friction after a 0.25 scale,
+    # and a fixed 0.18 rad/s bias saturates rear steering at that low speed.
+    minimum_speed_scale: float = 0.80
+    avoidance_yaw_rate_rps: float = 0.02
     tof_imbalance_m: float = 0.10
     lidar_clearance_margin_m: float = 0.15
     minimum_turn_clearance_m: float = 0.55
@@ -115,6 +120,7 @@ def lidar_corridors_from_points(
     left = []
     center = []
     right = []
+    rear = []
     for x, y in points_xy:
         if not (math.isfinite(x) and math.isfinite(y)):
             continue
@@ -122,6 +128,8 @@ def lidar_corridors_from_points(
         if distance <= 0.0:
             continue
         angle = math.atan2(y, x)
+        if abs(abs(angle) - math.pi) <= center_half_angle_rad:
+            rear.append(distance)
         if abs(angle) > front_half_angle_rad:
             continue
         if abs(angle) <= center_half_angle_rad:
@@ -134,6 +142,7 @@ def lidar_corridors_from_points(
         left_m=robust_nearest(left, minimum_hits),
         center_m=robust_nearest(center, minimum_hits),
         right_m=robust_nearest(right, minimum_hits),
+        rear_m=robust_nearest(rear, minimum_hits),
     )
 
 
