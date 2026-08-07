@@ -116,6 +116,11 @@ def build_payload(
         "measurement_id": f"{cfg.station_id}-{now:%Y%m%d-%H%M%S}-{next(_counter):04d}",
         "station_id": cfg.station_id,
         "measured_at": now.isoformat(timespec="seconds"),
+        # bbox_px 가 어느 해상도 기준인지 함께 남긴다. 이게 없으면 받는 쪽(관제 화면)이
+        # 픽셀 좌표를 표시 크기에 맞게 환산할 수 없다 — 카메라를 바꾸거나 해상도를
+        # 조정하면 상자가 엉뚱한 자리에 그려진다.
+        "frame_width": cfg.frame_width,
+        "frame_height": cfg.frame_height,
     }
 
     boxes = [d.box for d in detections

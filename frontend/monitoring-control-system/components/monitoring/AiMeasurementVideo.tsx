@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { ArrowLeft, Expand, Loader2, RefreshCw, Video, VideoOff } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { toBoxRects, type MeasurementBox } from "@/lib/monitoring/measurementBox"
 
 export type AiVideoConnectionStatus = "CONNECTING" | "CONNECTED" | "DISCONNECTED" | "ERROR"
 
@@ -21,6 +22,9 @@ export function AiMeasurementVideo({
   pip = false,
   retryKey = 0,
   lastFrameReceivedAt,
+  boxes,
+  frameWidth,
+  frameHeight,
   onConnectionStatusChange,
   onFrameLoaded,
   onOpenFullscreen,
@@ -40,6 +44,16 @@ export function AiMeasurementVideo({
   pip?: boolean
   retryKey?: number
   lastFrameReceivedAt?: string | null
+  /**
+   * AI 가 검출한 상자의 이미지 픽셀 좌표. 영상 위에 사각형으로 그린다.
+   *
+   * ⚠️ 이 좌표는 **측정 카메라 화면 기준**이다. 패널이 다른 카메라를 보여주고 있으면
+   *    사각형이 엉뚱한 자리에 찍힌다 — 같은 카메라인지 확인하고 넘길 것.
+   */
+  boxes?: MeasurementBox[] | null
+  /** 위 픽셀 좌표의 기준 해상도. 없으면 환산할 수 없어 아무것도 그리지 않는다. */
+  frameWidth?: number | null
+  frameHeight?: number | null
   onConnectionStatusChange: (status: AiVideoConnectionStatus) => void
   onFrameLoaded?: (receivedAt: string) => void
   onOpenFullscreen?: () => void
@@ -52,6 +66,7 @@ export function AiMeasurementVideo({
     onConnectionStatusChange(streamUrl ? "CONNECTING" : "DISCONNECTED")
   }, [active, onConnectionStatusChange, retryKey, streamUrl])
 
+  const boxRects = toBoxRects(boxes, frameWidth, frameHeight)
   const status = STATUS_STYLE[connectionStatus]
   const showStream = active && Boolean(streamUrl)
 
@@ -166,6 +181,36 @@ export function AiMeasurementVideo({
             }}
             onError={() => onConnectionStatusChange("ERROR")}
           />
+        ) : null}
+
+        {/*
+          검출 상자 오버레이.
+
+          iframe 위에 절대배치로 얹는다 — iframe 안(다른 오리진)에는 그릴 수 없기 때문이다.
+          좌표는 %라 창 크기가 바뀌어도 따라간다(measurementBox.ts 주석 참고).
+          pointer-events-none 이라 영상 조작을 가리지 않는다.
+        */}
+        {showStream && boxRects.length > 0 ? (
+          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+            {boxRects.map((rect, index) => (
+              <div
+                key={`${rect.leftPct}-${rect.topPct}-${index}`}
+                className="absolute border-2 border-emerald-400 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
+                style={{
+                  left: `${rect.leftPct}%`,
+                  top: `${rect.topPct}%`,
+                  width: `${rect.widthPct}%`,
+                  height: `${rect.heightPct}%`,
+                }}
+              >
+                {rect.score != null ? (
+                  <span className="absolute -top-5 left-0 rounded bg-emerald-500/90 px-1 text-[10px] font-semibold text-slate-950">
+                    {rect.score.toFixed(2)}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
         ) : null}
 
         {connectionStatus !== "CONNECTED" || !showStream ? (

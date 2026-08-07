@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS station_measurement (
     session_id     VARCHAR(100) NOT NULL COMMENT '측정 세션 식별자',
     status         VARCHAR(30)  NOT NULL COMMENT '측정 처리 상태',
     cargo_width         DOUBLE       NULL COMMENT '화물 폭(m). 스테이션 미전송 시 NULL — 폭 검사 생략',
+    -- 아래 셋은 관제 화면 오버레이 전용이다. 지게차 이동에는 쓰지 않는다
+    -- (화면 픽셀 좌표라 창고 맵 좌표로 바꾸려면 카메라 외부 파라미터가 필요하다).
+    frame_width         INT          NULL COMMENT 'boxes 픽셀 좌표의 기준 가로 해상도',
+    frame_height        INT          NULL COMMENT 'boxes 픽셀 좌표의 기준 세로 해상도',
+    boxes_json          JSON         NULL COMMENT '검출 상자별 [x1,y1,x2,y2]·score. 화면 오버레이용',
     cargo_height   DOUBLE       NULL COMMENT '팔레트를 제외한 화물 높이(m)',
     tipping_level  VARCHAR(20)  NULL COMMENT '전복 위험 등급(SAFE, WARNING, DANGER)',
     overhang_ratio DOUBLE       NULL COMMENT '팔레트 대비 화물 돌출 비율',

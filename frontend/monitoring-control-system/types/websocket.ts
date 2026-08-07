@@ -19,6 +19,8 @@ export const TOPIC_VEHICLE_PATH = "/topic/vehicles/path"
 export const TOPIC_VEHICLE_RESULT = "/topic/vehicles/result"
 /** 백엔드가 이미 발행하고 있던 운반 작업 토픽. 새로 만든 경로가 아니다. */
 export const TOPIC_TRANSPORT_TASKS = "/topic/transport-tasks"
+/** 측정 완료 이벤트. 검출 상자 좌표가 여기로 온다(백엔드 StationMeasurementTopics.ALL). */
+export const TOPIC_STATION_MEASUREMENTS = "/topic/stations/measurements"
 
 /**
  * 운반 작업 이벤트. 차량 이벤트({@link RealtimeEvent})와 달리 vehicleId 가 없을 수 있어
@@ -94,4 +96,28 @@ export interface VehicleCommandResultUpdate {
   result: string | null
   message: string | null
   completedAt: string | null
+}
+
+export const STATION_MEASUREMENT_COMPLETED_EVENT_TYPE = "STATION_MEASUREMENT_COMPLETED"
+
+/**
+ * 측정 완료 결과. 백엔드 `StationMeasurementResponse` 와 같은 모양이다.
+ *
+ * `boxes` 는 검출 상자의 **이미지 픽셀 좌표**라 화면에 그릴 때만 쓴다 — 지게차 이동
+ * 좌표가 아니다(lib/monitoring/measurementBox.ts 주석 참고).
+ */
+export interface StationMeasurementData {
+  measurementId: string
+  sessionId: string | null
+  cargoId: number | null
+  status: string
+  cargoHeight: number | null
+  cargoWidth: number | null
+  frameWidth: number | null
+  frameHeight: number | null
+  boxes: { bboxPx: number[]; score: number | null }[] | null
+  tippingLevel: string | null
+  overhangRatio: number | null
+  placementEligible: boolean
+  createdAt: string | null
 }

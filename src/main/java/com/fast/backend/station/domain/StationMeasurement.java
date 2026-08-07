@@ -11,6 +11,10 @@ public class StationMeasurement {
     private StationMeasurementStatus status;
     private Double cargoHeight;
     private Double cargoWidth;
+    private Integer frameWidth;
+    private Integer frameHeight;
+    /** MeasurementBox 목록을 직렬화한 JSON. 화면 오버레이 전용이라 컬럼으로 펴지 않는다. */
+    private String boxesJson;
     private String tippingLevel;
     private Double overhangRatio;
     private LocalDateTime createdAt;
@@ -26,6 +30,12 @@ public class StationMeasurement {
     public Double getCargoHeight() { return cargoHeight; }
     public Double getCargoWidth() { return cargoWidth; }
     public void setCargoWidth(Double cargoWidth) { this.cargoWidth = cargoWidth; }
+    public Integer getFrameWidth() { return frameWidth; }
+    public void setFrameWidth(Integer frameWidth) { this.frameWidth = frameWidth; }
+    public Integer getFrameHeight() { return frameHeight; }
+    public void setFrameHeight(Integer frameHeight) { this.frameHeight = frameHeight; }
+    public String getBoxesJson() { return boxesJson; }
+    public void setBoxesJson(String boxesJson) { this.boxesJson = boxesJson; }
     public void setCargoHeight(Double cargoHeight) { this.cargoHeight = cargoHeight; }
     public String getTippingLevel() { return tippingLevel; }
     public void setTippingLevel(String tippingLevel) { this.tippingLevel = tippingLevel; }

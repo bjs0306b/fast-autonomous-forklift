@@ -103,14 +103,23 @@ def to_request(payload: dict, session_id: str | None = None) -> dict:
     막으려던 오귀속이 그대로 발생한다.
     """
     height_cm = _get(payload, "dimensions", "height_cm")
+    width_cm = _get(payload, "dimensions", "width_cm")
     return {
         "sessionId": session_id,
         "measurementId": payload.get("measurement_id"),
         "status": payload.get("status"),
         # cm → m. 화물만의 높이다(파렛트 제외) — 백엔드가 파렛트를 따로 더한다.
         "cargoHeight": round(height_cm / 100.0, 4) if height_cm is not None else None,
+        # cm → m. 깊이(depth_cm)는 정면 카메라로 측정 불가라 항상 None 이고 보내지 않는다.
+        "cargoWidth": round(width_cm / 100.0, 4) if width_cm is not None else None,
         "tippingLevel": _get(payload, "tipping", "level"),
         "overhangRatio": _get(payload, "tipping", "overhang"),
+        # 검출 상자의 이미지 픽셀 좌표. 관제 화면이 영상 위에 사각형을 그리는 데 쓴다.
+        # frameWidth/Height 를 함께 보내는 이유: 픽셀 좌표만으로는 화면 표시 크기에
+        # 맞게 환산할 수 없다. 해상도를 바꾸면 상자가 엉뚱한 자리에 그려진다.
+        "frameWidth": payload.get("frame_width"),
+        "frameHeight": payload.get("frame_height"),
+        "boxes": _boxes(payload),
         # `measuredAt` 은 보내지 않는다 — 백엔드 DTO(StationMeasurementCreateRequest)
         # 에서 제거됐고 저장 시각은 서버가 `createdAt` 으로 남긴다(2026-08-02 리팩터).
         # 보내도 Spring 이 조용히 버려서 무해했지만, 계약에 없는 필드를 계속 실어
@@ -282,3 +291,26 @@ def measurement_session(cargo_id: str, base_url: str | None = None,
     # 원래 예외가 있었다면 이 지점에 오지 않는다 — 덮어쓰지 않는다는 뜻이다.
     if failed_to_close is not None:
         raise failed_to_close
+
+
+def _boxes(payload: dict) -> list:
+    """검출 상자 목록에서 관제 화면이 쓸 값(픽셀 좌표·점수)만 추린다.
+
+    치수(height_cm 등)는 빼고 보낸다 — 화면에 그릴 때 필요 없고, 대표 치수는 이미
+    `cargoHeight` 로 따로 보내기 때문이다. 같은 값을 두 곳으로 보내면 나중에 어느
+    쪽이 정본인지 헷갈린다.
+
+    `bbox_px` 가 4개짜리 리스트가 아닌 항목은 버린다 — 모양이 어긋난 값을 그대로
+    보내면 받는 쪽이 화면에 이상한 사각형을 그리고, 원인을 여기까지 되짚기 어렵다.
+    """
+    boxes = payload.get("box_measurements") or []
+    result = []
+    for b in boxes:
+        bbox = b.get("bbox_px")
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            continue
+        result.append({
+            "bboxPx": [int(v) for v in bbox],
+            "score": b.get("score"),
+        })
+    return result

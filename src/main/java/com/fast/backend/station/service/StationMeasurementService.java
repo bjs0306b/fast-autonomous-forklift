@@ -55,6 +55,13 @@ public class StationMeasurementService {
     /** station_session.session_id 컬럼 길이와 같다 — DB 가 자르기 전에 400 으로 돌려준다. */
     private static final int MAX_SESSION_ID_LENGTH = 100;
 
+    /**
+     * boxes 를 JSON 문자열로 굳혀 저장하기 위한 것. 컬럼으로 펴지 않는 이유는 상자 개수가
+     * 가변이고 화면 오버레이 외에는 쓰지 않기 때문이다.
+     */
+    private static final com.fasterxml.jackson.databind.ObjectMapper BOXES_JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
     private final StationMeasurementMapper measurementMapper;
     private final StationSessionMapper sessionMapper;
     private final StationMeasurementResponseMapper responseMapper;
@@ -263,6 +270,9 @@ public class StationMeasurementService {
         entity.setStatus(status);
         entity.setCargoHeight(request.cargoHeight());
         entity.setCargoWidth(request.cargoWidth());
+        entity.setFrameWidth(request.frameWidth());
+        entity.setFrameHeight(request.frameHeight());
+        entity.setBoxesJson(serializeBoxes(request.boxes(), request.measurementId()));
         // 소문자 입력을 대문자로 정규화해 저장한다 — 비교하는 쪽이 표기를 신경 쓰지 않게 한다.
         entity.setTippingLevel(tippingLevel == null ? null : tippingLevel.name());
         entity.setOverhangRatio(request.overhangRatio());
@@ -431,6 +441,27 @@ public class StationMeasurementService {
         if (value != null) {
             throw new BusinessException(ErrorCode.STATION_MEASUREMENT_STATUS_INVALID,
                     "status=" + status.rawValue() + " 이면 " + fieldName + " 은 null 이어야 합니다.");
+        }
+    }
+
+    /**
+     * 검출 상자 목록을 JSON 으로 굳힌다.
+     *
+     * <p><b>직렬화에 실패해도 측정 저장을 막지 않는다.</b> boxes 는 화면에 사각형을 그리기 위한
+     * 부가 정보일 뿐이고, 이것 때문에 치수·전복 판정 같은 본체가 저장되지 않으면 본말이 뒤바뀐다.
+     * 대신 실패 사실은 남겨 조용한 유실을 막는다.
+     */
+    private String serializeBoxes(
+            java.util.List<com.fast.backend.station.dto.MeasurementBox> boxes, String measurementId) {
+        if (boxes == null || boxes.isEmpty()) {
+            return null;
+        }
+        try {
+            return BOXES_JSON.writeValueAsString(boxes);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.warn("검출 상자 직렬화 실패(측정은 그대로 저장): measurementId={}, error={}",
+                    measurementId, e.getMessage());
+            return null;
         }
     }
 }
