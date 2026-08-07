@@ -51,7 +51,11 @@
 --
 -- 이미 REAL-F01 이 들어간 기존 DB 는 이 시드만으로 정리되지 않는다(INSERT IGNORE 는 기존 행을
 -- 지우지 않는다). db/migrate-real-f01-to-sim-f01.sql 을 수동으로 실행할 것.
-USE fast_backend;
+--
+-- ⚠️ 여기에 `USE fast_backend;` 를 다시 넣지 말 것. 위 머리말이 금지하는데도 한 번 들어간 적이
+--    있고(그 상태로 mqttcheck 프로필이 기동 불가였다), H2 실측 결과는 다음과 같다.
+--      Schema "FAST_BACKEND" not found; SQL statement: USE fast_backend [90079-224]
+--    DB 지정은 실행하는 쪽이 한다(위 "실행 방법" 절).
 
 INSERT IGNORE INTO vehicle (vehicle_id, name, active) VALUES
     ('SIM-F01', '시뮬레이션 지게차 1호', TRUE);

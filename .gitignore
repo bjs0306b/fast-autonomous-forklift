@@ -43,6 +43,9 @@ __pycache__/
 ### VS Code ###
 .vscode/
 
+### Claude Code local settings ###
+.claude/
+
 ### Mac OS ###
 .DS_Store
 ### Python (S15P11A304-121 규칙 복원 — Spring 템플릿 커밋으로 덮였던 것)
