@@ -36,6 +36,11 @@ public record StationMeasurementCreateRequest(
          * {@code ai/src/station/pipeline.py} 가 항상 null 을 낸다.
          */
         Double cargoWidth,
+        /** 아래 {@code boxes} 의 픽셀 좌표가 어느 해상도 기준인지. 없으면 환산 불가. */
+        Integer frameWidth,
+        Integer frameHeight,
+        /** 검출 상자별 이미지 픽셀 좌표·점수. 관제 화면 오버레이용. */
+        java.util.List<MeasurementBox> boxes,
         String tippingLevel,
         Double overhangRatio
 ) {

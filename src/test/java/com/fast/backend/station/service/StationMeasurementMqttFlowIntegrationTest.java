@@ -37,6 +37,7 @@ class StationMeasurementMqttFlowIntegrationTest {
                 "ok",
                 0.50,
                 null,   // cargoWidth — 스테이션 미전송 경로
+                null, null, null,   // frameWidth / frameHeight / boxes — 미전송 경로
                 "safe",
                 0.02));
 

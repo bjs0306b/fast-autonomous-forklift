@@ -456,6 +456,28 @@ SET @sql = (
       AND TABLE_NAME = 'station_measurement' AND COLUMN_NAME = 'cargo_width');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- 검출 상자 픽셀 좌표 (관제 화면 오버레이 전용)
+SET @sql = (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE station_measurement ADD COLUMN frame_width INT NULL COMMENT ''boxes 픽셀 좌표 기준 가로 해상도''',
+    'SELECT ''SKIP: frame_width'' AS message')
+  FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'station_measurement' AND COLUMN_NAME = 'frame_width');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE station_measurement ADD COLUMN frame_height INT NULL COMMENT ''boxes 픽셀 좌표 기준 세로 해상도''',
+    'SELECT ''SKIP: frame_height'' AS message')
+  FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'station_measurement' AND COLUMN_NAME = 'frame_height');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE station_measurement ADD COLUMN boxes_json JSON NULL COMMENT ''검출 상자별 [x1,y1,x2,y2]·score''',
+    'SELECT ''SKIP: boxes_json'' AS message')
+  FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'station_measurement' AND COLUMN_NAME = 'boxes_json');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 SELECT 'vehicles' AS check_type, vehicle_id, name, active FROM vehicle ORDER BY vehicle_id;
 SELECT 'station_state' AS check_type, singleton_id, active_session_id, acquired_at FROM station_state;
 
