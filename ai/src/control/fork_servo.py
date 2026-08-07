@@ -56,11 +56,48 @@ from statistics import median
 
 from perception.fork_align import HOLE_SPACING_MM, AlignError
 
-# --- 속도(m/s). 상한은 teleop과 같은 0.20을 넘지 않는다. ---
-CRUISE_SPEED = 0.12
+# --- 속도(m/s). 상한은 teleop 의 max_linear_mps 를 넘지 않는다. ---
+#
+# ⚠️ **아래 값들은 duty 로 정의하고 속도는 역산한다.**
+#
+# `linear.x` 는 속도 단위로 전달되지만 실제로는 PWM 퍼센트로 매핑된다:
+#
+#     duty = min_drive_percent
+#            + (linear_x / max_linear_mps) x (max_drive_percent - min_drive_percent)
+#
+# 그래서 teleop.yaml 의 세 값 중 **하나만 바뀌어도 여기 실측값이 전부 무효가
+# 된다.** 실제로 그렇게 깨졌다: 2026-08-07 에 max_linear_mps 를 0.20 -> 0.15 로
+# 내리자 진입 duty 가 41.25% -> 43.33% 로 올라갔고, INSERT_SPEED_ACTUAL(0.20)이
+# 실제보다 작아져 진입 시간을 길게 잡는 -- 즉 파렛트를 과하게 밀고 들어가는 --
+# 상태가 됐다. 그 전에도 min_drive_percent 50 -> 35 로 같은 일이 있었다
+# (S15P11A304-198).
+#
+# 실측으로 잡힌 것은 **duty** 이지 속도가 아니다. duty 를 상수로 두고 속도를
+# 역산하면 teleop 을 어떻게 조정해도 포크 거동이 그대로 남는다.
+_CALIBRATED_DUTY = {
+    "cruise": 50.0,     # 정지 출발이 보장되는 구간 (실측표)
+    "align": 42.5,
+    "insert": 41.25,    # 2026-08-06 시연 바닥에서 INSERT_SPEED_ACTUAL 을 뽑은 duty
+    "retreat": 52.5,
+}
 
-ALIGN_SPEED = 0.06
-"""정렬 구간 전진 속도.
+# teleop.yaml 과 반드시 같아야 한다. 다르면 위 duty 가 안 나온다.
+_TELEOP_MAX_LINEAR_MPS = 0.40
+_TELEOP_MIN_DRIVE_PERCENT = 35.0
+_TELEOP_MAX_DRIVE_PERCENT = 75.0
+
+
+def speed_for_duty(duty_percent: float) -> float:
+    """teleop 매핑을 뒤집어, 그 duty 를 내는 linear.x 를 구한다."""
+    span = _TELEOP_MAX_DRIVE_PERCENT - _TELEOP_MIN_DRIVE_PERCENT
+    ratio = (duty_percent - _TELEOP_MIN_DRIVE_PERCENT) / span
+    return round(ratio * _TELEOP_MAX_LINEAR_MPS, 4)
+
+
+CRUISE_SPEED = speed_for_duty(_CALIBRATED_DUTY["cruise"])
+
+ALIGN_SPEED = speed_for_duty(_CALIBRATED_DUTY["align"])
+"""정렬 구간 전진 속도. duty 42.5% 로 고정된다 (위 speed_for_duty 참조).
 
 ⚠️ **이 값을 낮추면 이제 실제로 느려진다 (2026-08-04 오후, S15P11A304-198).**
 `min_drive_percent` 가 50 → 35 로 내려가 매핑이 벌어졌다:
@@ -109,8 +146,12 @@ STEER_DRAG_BOOST = 1.0
 ⚠️ 속도를 올리면 프레임당 이동이 늘어 제어가 거칠어진다. 그래서 **꺾을 때만** 올린다
 — 정렬이 수렴해 조향이 작아지면 자동으로 느려진다."""
 
-INSERT_SPEED = 0.05
-"""진입 시 `linear.x` 로 내보내는 값. ⚠️ **실제 속도가 아니다** — 아래 참조."""
+INSERT_SPEED = speed_for_duty(_CALIBRATED_DUTY["insert"])
+"""진입 시 `linear.x` 로 내보내는 값. ⚠️ **실제 속도가 아니다** — 아래 참조.
+
+duty 41.25% 로 고정된다. 예전에는 0.05 를 박아 두었는데, 그건 `max_linear_mps`
+가 0.20 이던 시절에 41.25% 가 나오는 값이었다 -- teleop 이 바뀌면 조용히
+달라진다."""
 
 INSERT_SPEED_ACTUAL = 0.20
 """진입 시 **실제로 나오는 속도**(m/s). 실주행 로그에서 뽑는다.
@@ -381,8 +422,8 @@ LOST_GRACE_S = 0.25
 
 # --- 재접근(S15P11A304-154) ---
 
-RETREAT_SPEED = -0.14
-"""후진 속도(m/s). **음수여야 뒤로 간다.**
+RETREAT_SPEED = -speed_for_duty(_CALIBRATED_DUTY["retreat"])
+"""후진 속도(m/s). **음수여야 뒤로 간다.** duty 52.5% 로 고정된다.
 
 ## ⚠️ -0.06 → -0.22 (2026-08-07) — 전진과 후진은 예산이 다르다
 

@@ -209,7 +209,7 @@ class SpeedController:
 
 @dataclass(frozen=True)
 class TeleopLimits:
-    max_linear_mps: float = 0.10
+    max_linear_mps: float = 0.40
     # ⚠️ 0.35 → 0.75 (2026-08-05, S15P11A304-152). teleop.yaml 이 0.75 로 올라갈 때
     #    여기만 안 따라왔다 — 아래 steering_* 주석이 경고한 바로 그 자리다.
     #    상한을 올린 것이지 명령을 키운 것이 아니다: 전진 조향은 fork_servo 의
@@ -233,7 +233,7 @@ class TeleopLimits:
     # 출발은 SpeedController 의 적분과 StartupKick 이 맡으므로, 일단 구르고
     # 나면 여기까지 내려갈 수 있어야 한다.
     min_sustain_drive_percent: int = 12
-    max_drive_percent: int = 60
+    max_drive_percent: int = 75
     # 정지마찰을 이기는 동안만 쓰는 상한. 위 값은 **순항** 상한이다.
     #
     # 위 주석대로 60 에는 INSERT_SPEED_ACTUAL·진입 깊이·조향 중립이 전부
@@ -244,7 +244,7 @@ class TeleopLimits:
     # 2026-08-07: 60 에 막혀 회전이 아예 시작되지 않았다. 25초 동안 명령은
     # 나가는데 엔코더 0.000, 회전 -2° 에서 멈춤. 이 값은 엔코더가 "안 구른다"
     # 고 말하는 동안만 쓰이고, 구르기 시작하면 곧바로 위 값으로 돌아온다.
-    max_start_drive_percent: int = 85
+    max_start_drive_percent: int = 100
     # ⚠️ **크게 꺾으면 직선 주행 속도로는 안 돈다** (2026-08-07 실측).
     #
     # 모터 토크가 약해서 뒷바퀴가 크게 누우면 바닥을 옆으로 긁는 저항을 못

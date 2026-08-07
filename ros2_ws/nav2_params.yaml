@@ -160,7 +160,7 @@ controller_server:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # 0.10 -> 0.08. teleop.yaml 의 max_linear_mps 0.10 아래에 두어야
       # 조향 보정이나 가속이 상한에 부딪히지 않는다.
-      desired_linear_vel: 0.08
+      desired_linear_vel: 0.15
       lookahead_dist: 0.25
       min_lookahead_dist: 0.15
       max_lookahead_dist: 0.35
@@ -180,7 +180,7 @@ controller_server:
       #
       # ⚠️ 반대로 올리지도 말 것. max_linear_mps 가 0.10 이고 정지거리를 그
       #    값으로 유도했다. 쓸 수 있는 범위는 0.078~0.10 로 좁다.
-      min_approach_linear_velocity: 0.08
+      min_approach_linear_velocity: 0.10
       approach_velocity_scaling_dist: 0.30
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
@@ -192,7 +192,7 @@ controller_server:
       regulated_linear_scaling_min_radius: 0.25
       # 위 min_approach_linear_velocity 주석 참고 -- 여기도 올리지 말 것.
       # 위와 같은 이유. 곡률 규제도 0.078 아래로는 의미가 없다.
-      regulated_linear_scaling_min_speed: 0.08
+      regulated_linear_scaling_min_speed: 0.10
       use_rotate_to_heading: false
       # No rear obstacle sensor is installed.  Reeds-Shepp + reversing made
       # Nav2 choose a negative-velocity path even for the first forward lap
@@ -575,8 +575,15 @@ velocity_smoother:
     #    장애물을 비켜나려면 전방 0.69 m 가 필요했는데 가드는 0.25 m 에서
     #    멈춰서, 멈춘 시점엔 이미 기하학적으로 회피가 불가능했다.
     #    0.40 rad/s 는 0.10 m/s 에서 후륜 29.9° · 반경 0.25 m 다.
-    max_velocity: [0.10, 0.0, 0.40]
-    min_velocity: [-0.10, 0.0, -0.40]
+    # ⚠️ **선속도 상한이 정지거리를 정한다.** 구동계는 0.40 m/s 까지 낼 수
+    #    있지만(teleop.yaml max_linear_mps), 그 값으로 정지거리를 유도하면
+    #    0.42 m 가 되어 2 x 3 m 목업에서는 차가 영구히 STOP 이다.
+    #
+    #    여기서 묶는 값이 곧 obstacle_avoidance.yaml 의 stop_distance_m 근거다.
+    #    한쪽만 바꾸면 안 된다 -- tools/geometry_limits.py --speed 0.20 으로
+    #    확인할 것.
+    max_velocity: [0.20, 0.0, 0.40]
+    min_velocity: [-0.20, 0.0, -0.40]
     max_accel: [0.20, 0.0, 0.40]
     max_decel: [-0.30, 0.0, -0.50]
     # EKF output. Keep this aligned with bt_navigator and Orin telemetry.

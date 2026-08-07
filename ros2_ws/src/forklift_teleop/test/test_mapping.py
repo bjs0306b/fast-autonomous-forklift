@@ -51,11 +51,14 @@ class MappingTest(unittest.TestCase):
         `rear_steering_limit_deg` 와 좌우 폭(cdeg)이 일치하는 한(둘 다 1° = 100cdeg)
         이 관계가 성립한다. 둘이 어긋나면 여기서 깨진다 — 그게 이 테스트의 목적이다.
         """
+        # 상한 속도로 낸다 -- 숫자를 박아 두면 max_linear_mps 를 바꿀 때마다
+        # 조향과 무관한 이유로 깨진다.
+        top = self.limits.max_linear_mps
         expected = round(math.degrees(
-            math.atan(self.limits.wheelbase_m * 0.35 / 0.1)) * 100)
-        left = map_twist(0.1, 0.35, self.limits)
-        right = map_twist(0.2, -0.35, self.limits)
-        self.assertEqual(left.drive_percent, 60)
+            math.atan(self.limits.wheelbase_m * 0.35 / top)) * 100)
+        left = map_twist(top, 0.35, self.limits)
+        right = map_twist(top * 2, -0.35, self.limits)
+        self.assertEqual(left.drive_percent, self.limits.max_drive_percent)
         self.assertEqual(left.steering_cdeg, self.CENTER + expected)
         self.assertEqual(right.steering_cdeg, self.CENTER - expected)
 
@@ -71,11 +74,14 @@ class MappingTest(unittest.TestCase):
         self.assertEqual(left - self.CENTER, self.CENTER - right)
 
     def test_reverse_flips_rear_steering(self):
-        forward_left = map_twist(0.2, 0.35, self.limits)
-        reverse_same_yaw = map_twist(-0.2, 0.35, self.limits)
+        # 상한 속도로 낸다 -- 숫자를 박으면 max_linear_mps 를 바꿀 때마다
+        # 조향·후진과 무관한 이유로 깨진다.
+        top = self.limits.max_linear_mps
+        forward_left = map_twist(top, 0.35, self.limits)
+        reverse_same_yaw = map_twist(-top, 0.35, self.limits)
         offset = abs(forward_left.steering_cdeg - self.CENTER)
         self.assertEqual(reverse_same_yaw.steering_cdeg, self.CENTER - offset)
-        # 후진은 상한이 다르다(전진 60 · 후진 100) — 같은 명령도 듀티가 크다.
+        # 후진은 상한이 다르다 — 같은 명령도 듀티가 크다.
         self.assertEqual(reverse_same_yaw.drive_percent,
                          -self.limits.max_drive_percent_reverse)
 
@@ -148,7 +154,8 @@ class MappingTest(unittest.TestCase):
     def test_partial_input_uses_minimum_drive(self):
         command = map_twist(0.02, 0.0, self.limits)
         self.assertGreaterEqual(command.drive_percent, 35)
-        self.assertLessEqual(command.drive_percent, 60)
+        self.assertLessEqual(command.drive_percent,
+                             self.limits.max_drive_percent)
 
     def test_low_and_high_commands_map_to_different_drive(self):
         """명령이 실제로 갈리는지 — 이게 S15P11A304-198 의 완료 조건이다.
@@ -156,8 +163,10 @@ class MappingTest(unittest.TestCase):
         하한이 50 이던 동안 0.05 와 0.20 이 52% 와 60% 로 8%p 차이였고, 그
         폭 안에서는 실제 속도가 사실상 구분되지 않았다.
         """
-        slow = map_twist(0.025, 0.0, self.limits).drive_percent
-        fast = map_twist(0.10, 0.0, self.limits).drive_percent
+        slow = map_twist(self.limits.max_linear_mps * 0.25, 0.0,
+                         self.limits).drive_percent
+        fast = map_twist(self.limits.max_linear_mps, 0.0,
+                         self.limits).drive_percent
         self.assertGreaterEqual(fast - slow, 15)
 
     def test_stale_command_stops_and_centers(self):
@@ -166,9 +175,11 @@ class MappingTest(unittest.TestCase):
         self.assertEqual(command.steering_cdeg, self.CENTER)
 
     def test_fresh_command_is_applied(self):
-        command = select_command(0.2, 0.35, 0.499, 0.5, self.limits)
-        self.assertEqual(command.drive_percent, 60)
-        self.assertEqual(command.steering_cdeg, map_twist(0.2, 0.35, self.limits).steering_cdeg)
+        top = self.limits.max_linear_mps
+        command = select_command(top, 0.35, 0.499, 0.5, self.limits)
+        self.assertEqual(command.drive_percent, self.limits.max_drive_percent)
+        self.assertEqual(command.steering_cdeg,
+                         map_twist(top, 0.35, self.limits).steering_cdeg)
 
     def test_forward_startup_kick_overcomes_static_friction_then_expires(self):
         kick = StartupKick(50, 100, 0.3)
