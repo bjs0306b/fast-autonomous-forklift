@@ -56,6 +56,29 @@ TOF_GRID_SIDE = 8
 TOF_SENSOR_NAMES = ("left", "right")
 
 
+def _cloud(stamp_ns: int, frame_id: str, payload: bytes, count: int
+           ) -> PointCloud2:
+    message = PointCloud2()
+    message.header.stamp.sec = stamp_ns // 1_000_000_000
+    message.header.stamp.nanosec = stamp_ns % 1_000_000_000
+    message.header.frame_id = frame_id
+    # Unordered: invalid zones are dropped rather than filled with NaN, so the
+    # costmap never sees a phantom return.
+    message.height = 1
+    message.width = count
+    message.fields = [
+        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+    ]
+    message.is_bigendian = False
+    message.point_step = 12
+    message.row_step = 12 * count
+    message.data = bytes(payload)
+    message.is_dense = True
+    return message
+
+
 class SensorBridge(Node):
     def __init__(self) -> None:
         super().__init__("sensor_bridge")
@@ -99,6 +122,12 @@ class SensorBridge(Node):
         self.declare_parameter("tof_persistence_frames", 3)
         self.declare_parameter("tof_persistence_hits", 2)
         self.declare_parameter("tof_persistence_tolerance_m", 0.05)
+        # Range at which a zone that keeps reporting nothing is emitted as a
+        # clearing ray. 0 disables. See _publish_tof for why this must sit
+        # between the costmap's obstacle_max_range and raytrace_max_range.
+        self.declare_parameter("tof_clear_range_m", 2.2)
+        self.declare_parameter("tof_clear_persistence_frames", 3)
+        self.declare_parameter("tof_empty_statuses", [0, 255])
 
         self.declare_parameter("encoder_enabled", True)
         self.declare_parameter("encoder_topic", "/wheel/twist")
@@ -225,6 +254,20 @@ class SensorBridge(Node):
             collections.deque(maxlen=self._tof_persistence_frames)
             for _ in range(2)
         ]
+        self._tof_clear_range = float(
+            self.get_parameter("tof_clear_range_m").value
+        )
+        self._tof_clear_persistence = max(
+            1, int(self.get_parameter("tof_clear_persistence_frames").value)
+        )
+        self._tof_empty_statuses = {
+            int(value) for value in
+            self.get_parameter("tof_empty_statuses").value
+        }
+        self._tof_empty_streak = [
+            [0] * TOF_ZONE_COUNT for _ in range(2)
+        ]
+        self._tof_cleared = [0, 0]
         self._tof_flicker_rejected = [0, 0]
         self._tof_ground_rejected = [0, 0]
         self._tof_status_seen = {}
@@ -266,11 +309,19 @@ class SensorBridge(Node):
         )
 
         self._tof_publishers = []
+        self._tof_clear_publishers = []
         self._tof_clocks = []
         if self._tof_enabled:
             for topic in self.get_parameter("tof_topics").value:
                 self._tof_publishers.append(
                     self.create_publisher(PointCloud2, str(topic), 5)
+                )
+                # Clearing rays go out on their own topic so nav2 can take
+                # them through a marking:false source. That is what lets the
+                # layer accept every row: a source that can never mark needs
+                # no height window narrow enough to keep phantoms out.
+                self._tof_clear_publishers.append(
+                    self.create_publisher(PointCloud2, f"{topic}_clear", 5)
                 )
                 self._tof_clocks.append(ClockOffsetTracker())
 
@@ -459,29 +510,58 @@ class SensorBridge(Node):
             zone: values[0] for zone, values in accepted.items()
         })
 
-        message = PointCloud2()
-        message.header.stamp.sec = stamp_ns // 1_000_000_000
-        message.header.stamp.nanosec = stamp_ns % 1_000_000_000
-        message.header.frame_id = self._tof_frame_ids[frame.sensor_id]
-        # Unordered: invalid zones are dropped rather than filled with NaN, so
-        # the costmap never sees a phantom return.
-        message.height = 1
-        message.width = valid
-        message.fields = [
-            PointField(name="x", offset=0,
-                       datatype=PointField.FLOAT32, count=1),
-            PointField(name="y", offset=4,
-                       datatype=PointField.FLOAT32, count=1),
-            PointField(name="z", offset=8,
-                       datatype=PointField.FLOAT32, count=1),
-        ]
-        message.is_bigendian = False
-        message.point_step = 12
-        message.row_step = 12 * valid
-        message.data = bytes(points)
-        message.is_dense = True
+        # Raytrace clearing only erases cells a returning ray passes through,
+        # so a direction that stops returning anything keeps whatever it
+        # marked earlier -- forever. Most of the grid reports nothing most of
+        # the time, which is how a box that has been taken away stays on the
+        # costmap.
+        #
+        # A zone that measures and finds nothing is evidence of empty space,
+        # so it is emitted as a point past obstacle_max_range but inside
+        # raytrace_max_range: the costmap clears along it and refuses to mark
+        # its endpoint. That is exactly what those two ranges are for.
+        #
+        # This is only safe because the ToF sources sit in their own costmap
+        # layer. "I see nothing" can therefore erase marks this sensor made
+        # and nothing else -- it can never reach the lidar's marks, which
+        # cover heights the ToF cannot see at all. A dark object the ToF
+        # cannot detect was never marked by the ToF either, so there is
+        # nothing here for it to wrongly erase.
+        clear_points = bytearray()
+        clear_count = 0
+        streak = self._tof_empty_streak[frame.sensor_id]
+        for zone in range(TOF_ZONE_COUNT):
+            if zone in masked or frame.status[zone] not in self._tof_empty_statuses:
+                streak[zone] = 0
+                continue
+            streak[zone] += 1
+            if (self._tof_clear_range <= 0.0
+                    or streak[zone] < self._tof_clear_persistence):
+                continue
 
-        self._tof_publishers[frame.sensor_id].publish(message)
+            # No ground or ceiling filter here, and no marking-range dance.
+            # These go to a source declared marking:false, so the layer can be
+            # given a height window wide enough to accept every row, and the
+            # voxel layer clips each ray where it leaves the grid -- at the
+            # floor for the downward rows, at the ceiling for the upward ones.
+            # Filtering here would only throw away rays nav2 clips correctly.
+            direction = self._tof_directions[zone]
+            clear_points += struct.pack(
+                "<fff",
+                direction[0] * self._tof_clear_range,
+                direction[1] * self._tof_clear_range,
+                direction[2] * self._tof_clear_range,
+            )
+            clear_count += 1
+            self._tof_cleared[frame.sensor_id] += 1
+
+        frame_id = self._tof_frame_ids[frame.sensor_id]
+        self._tof_publishers[frame.sensor_id].publish(
+            _cloud(stamp_ns, frame_id, points, valid)
+        )
+        self._tof_clear_publishers[frame.sensor_id].publish(
+            _cloud(stamp_ns, frame_id, clear_points, clear_count)
+        )
 
     def _check_sequence(self, sequence: int) -> None:
         if self._expected_sequence is not None:

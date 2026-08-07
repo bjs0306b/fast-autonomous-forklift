@@ -89,6 +89,26 @@ sensor_bridge:
     tof_persistence_frames: 3
     tof_persistence_hits: 2
     tof_persistence_tolerance_m: 0.05
+
+    # 아무것도 안 보이는 존을 "빈 공간"으로 발행해 costmap 이 그 방향을 지우게
+    # 한다. raytrace clearing 은 **반사가 돌아온 방향만** 지우는데, 격자 대부분은
+    # 대부분의 시간 아무것도 안 돌려주므로 한 번 찍힌 표시가 영영 남았다.
+    # 치운 상자가 계속 남아 있던 것이 그 때문이다.
+    #
+    # 값은 costmap 의 obstacle_max_range(2.0)와 raytrace_max_range(2.5) **사이**
+    # 여야 한다. 그래야 지나가는 칸은 지우면서 끝점은 장애물로 안 찍는다.
+    # 0 으로 두면 기능이 꺼진다.
+    #
+    # ⚠️ 이게 안전한 이유는 ToF 가 **자기 costmap 레이어**를 쓰기 때문이다.
+    #    "안 보인다" 가 지울 수 있는 것은 ToF 가 찍은 표시뿐이고, 높이가 달라
+    #    ToF 가 애초에 못 보는 LiDAR 표시에는 닿지 않는다. ToF 가 못 보는
+    #    검은 물체는 ToF 가 찍은 적도 없으므로 잘못 지울 것이 없다.
+    tof_clear_range_m: 2.2
+    # 연속 이만큼 비어 있어야 지운다. 마킹의 tof_persistence_hits 와 대칭이다.
+    tof_clear_persistence_frames: 3
+    # "측정했는데 아무것도 없다" 를 뜻하는 상태값. 실측상 1 m 벽을 볼 때 빈
+    # 구역이 status 0 으로 온다(64존 중 19개).
+    tof_empty_statuses: [0, 255]
     # 포크·섀시를 항상 보는 존. 거리가 아니라 인덱스로 버린다.
     # tools/tof_mask_learn.py 로 학습해서 채운다.
     tof_masked_zones_left: []

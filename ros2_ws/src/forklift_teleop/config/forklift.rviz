@@ -21,19 +21,24 @@ Visualization Manager:
       Plane Cell Count: 40
       Color: 160; 160; 164
       Alpha: 0.3
-      Reference Frame: base_link
+      # Empty means "whatever the fixed frame is", so the grid never asks for
+      # a transform that may not exist yet and errors before SLAM has run.
+      Reference Frame: <Fixed Frame>
 
     # Every geometry question in procedure J is really a TF question. Leave
     # this on: a point cloud in the right place under the wrong transform is
     # indistinguishable from a wrong cloud until the frames are visible.
+    # Off by default and slow to update: at Update Interval 0 this recomputes
+    # every frame for every frame in the tree, which is one of the more
+    # expensive displays here. Turn it on when a transform is in question.
     - Class: rviz_default_plugins/TF
       Name: TF
-      Enabled: true
+      Enabled: false
       Show Names: true
       Show Axes: true
       Show Arrows: false
       Marker Scale: 0.15
-      Update Interval: 0
+      Update Interval: 0.5
       Frame Timeout: 15
 
     - Class: rviz_default_plugins/LaserScan
@@ -65,6 +70,37 @@ Visualization Manager:
       Size (m): 0.03
       Style: Spheres
       Color: 0; 255; 128
+      Color Transformer: FlatColor
+      Decay Time: 0
+
+    # "측정했는데 아무것도 없다" 광선. 장애물이 아니라 **지워진 공간**이므로
+    # 색을 다르게 두고 기본은 꺼 둔다 -- 켜 두면 앞쪽이 점으로 덮여 정작 봐야
+    # 할 장애물이 안 보인다. 소멸이 왜 안 되는지 볼 때만 켤 것.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ToF clear rays (left)
+      Enabled: false
+      Topic:
+        Value: /tof/left/points_clear
+        Depth: 5
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+      Size (m): 0.02
+      Style: Points
+      Color: 80; 80; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ToF clear rays (right)
+      Enabled: false
+      Topic:
+        Value: /tof/right/points_clear
+        Depth: 5
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+      Size (m): 0.02
+      Style: Points
+      Color: 80; 80; 255
       Color Transformer: FlatColor
       Decay Time: 0
 
@@ -137,18 +173,51 @@ Visualization Manager:
         Head Radius: 0.02
 
   Global Options:
-    # base_link, not odom: the geometry checks ask where a box is relative to
-    # the vehicle, and holding the vehicle still on screen makes a sign error
-    # obvious the moment the box appears on the wrong side.
-    Fixed Frame: base_link
+    # odom, not map. A goal has to be dropped in a frame that stays put, and
+    # base_link does not -- it travels with the vehicle and takes the goal
+    # with it. map stays put too, but it only exists once slam_toolbox has
+    # matched a scan, and under load it stops being published for seconds at
+    # a time; every display that needs it then warns. odom comes from the EKF
+    # and is always there. Goals are stamped in this frame and nav2 transforms
+    # them itself, so pointing still works.
+    #
+    # ⚠️ For the ToF geometry checks, switch this to base_link in the GUI.
+    #    Those ask where a box is *relative to the vehicle*, and holding the
+    #    vehicle still on screen makes a sign error obvious the moment the box
+    #    appears on the wrong side.
+    Fixed Frame: odom
     Background Color: 48; 48; 48
-    Frame Rate: 30
+    # 10, not 30. RViz on this Jetson costs a full core at 30 Hz, and over
+    # xrdp the desktop stack costs two more. On 2026-08-07 that starved
+    # slam_toolbox until it dropped scans ("queue is full") and stopped
+    # publishing map->odom, which then made every display warn -- the display
+    # was reporting a problem it had caused.
+    Frame Rate: 10
   Tools:
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
       Line color: 128; 128; 0
+    # "2D Goal Pose" -- drag to set position and heading. bt_navigator picks
+    # this up straight off /goal_pose, so no action client is needed to drive
+    # the vehicle by hand from here.
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+    # "2D Pose Estimate" -- only needed if SLAM starts up badly localised.
+    - Class: rviz_default_plugins/SetInitialPose
+      Covariance x: 0.25
+      Covariance y: 0.25
+      Covariance yaw: 0.06853891909122467
+      Topic:
+        Value: /initialpose
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
