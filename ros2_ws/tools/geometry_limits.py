@@ -46,15 +46,88 @@ def load():
     return teleop, guard, local, footprint
 
 
+def handover(teleop, guard, local, footprint):
+    """Print everything a simulator needs to model this vehicle.
+
+    Read from the live config rather than copied into a document. The moment
+    a spec sheet carries its own numbers there are two sources of truth, and
+    the copy is wrong from the first change nobody propagates -- which has
+    already happened here more than once (max_linear_mps moved and the fork
+    insertion silently started over-pushing the pallet).
+
+    Regenerate with `tools/geometry_limits.py --handover` rather than editing
+    the output by hand.
+    """
+    front = max(point[0] for point in footprint)
+    rear = -min(point[0] for point in footprint)
+    half_width = max(abs(point[1]) for point in footprint)
+    padding = float(local.get("footprint_padding", 0.0))
+    wheelbase = float(teleop["wheelbase_m"])
+    steer_limit = math.radians(float(teleop["rear_steering_limit_deg"]))
+    radius = wheelbase / math.tan(steer_limit)
+    # 패딩을 포함해 낸다 -- 가드의 minimum_turn_clearance_m 가 그 값이라,
+    # 여기서 뺀 값을 내면 같은 항목이 두 숫자를 갖게 된다.
+    tail_swing = math.hypot(rear + padding,
+                            radius + half_width + padding) - radius
+
+    print("# 실차 제원 — tools/geometry_limits.py --handover 로 생성")
+    print("#")
+    print("# ⚠️ 손으로 고치지 말 것. 설정이 바뀌면 다시 돌려서 갈아끼운다.")
+    print()
+    print("## 좌표 규약")
+    print("  base_link      전륜 구동축 중심, 바닥에서 30 mm 위 (REP-103)")
+    print(f"  후륜(조향)축   x = {-wheelbase:+.3f} m")
+    print("  yaw            +x 가 0, 반시계 +, 라디안 (−π ~ +π)")
+    print()
+    print("## 치수 (base_link 기준, m)")
+    print(f"  앞끝 {front:+.3f} · 뒤끝 {-rear:+.3f} · 반폭 {half_width:.3f}"
+          f" · 전장 {front + rear:.3f} · 전폭 {half_width * 2:.3f}")
+    print(f"  축거 {wheelbase:.3f}")
+    print()
+    print("## 조향 (후륜 조향)")
+    print(f"  최대 조향각      {math.degrees(steer_limit):.0f}°")
+    print(f"  최소 회전반경    {radius:.3f} m   (= 축거 / tan(조향각))")
+    print(f"  꼬리 휨          {tail_swing:.3f} m  (패딩 {padding:.3f} 포함)")
+    print("    회전 시 바깥 뒷모서리가 회전반경보다 이만큼 더 나간다.")
+    print("    후륜 조향차의 특징이라 시뮬에서도 반드시 재현해야 한다.")
+    print()
+    print("## 속도")
+    print(f"  구동계 최대      {float(teleop['max_linear_mps']):.2f} m/s"
+          f"  (duty {float(teleop['max_drive_percent']):.0f}% 에서 실측)")
+    print("  안정 최저        0.078 m/s  (그 아래로는 유지 못 함)")
+    print(f"  명령 상한        nav2_params.yaml velocity_smoother max_velocity")
+    print()
+    print("## 안전거리 (실측 기하에서 유도)")
+    print(f"  전방 정지        {float(guard['stop_distance_m']):.2f} m")
+    print(f"  후방 정지        {float(guard['rear_stop_distance_m']):.2f} m")
+    print(f"  회전 여유        {float(guard['minimum_turn_clearance_m']):.2f} m"
+          f"  (꼬리 휨 포함)")
+    print()
+    print("## 축척")
+    print("  시뮬 = 실물 x 10 (2x3 m 목업 <-> 20x30 m 창고).")
+    print("  위치만 곱한다. 각도는 축척과 무관하므로 그대로 보낸다.")
+    print()
+    print("## 이 값들이 사는 곳")
+    print("  치수·조향·속도    ros2_ws/src/forklift_teleop/config/teleop.yaml")
+    print("  footprint         ros2_ws/nav2_params.yaml")
+    print("  안전거리          .../config/obstacle_avoidance.yaml")
+    print("  좌표 규약         docs/센서-측정-칼리브레이션.md §1")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--speed", type=float, default=None,
                         help="제동거리 계산에 쓸 주행 속도 (기본 max_linear_mps)")
     parser.add_argument("--reaction", type=float, default=None,
                         help="반응 시간 s (기본 1/control_rate + command_timeout)")
+    parser.add_argument("--handover", action="store_true",
+                        help="시뮬 차량 모델에 넣을 제원 일체를 출력")
     args = parser.parse_args()
 
     teleop, guard, local, footprint = load()
+    if args.handover:
+        return handover(teleop, guard, local, footprint)
 
     front = max(point[0] for point in footprint)
     rear = -min(point[0] for point in footprint)
