@@ -259,6 +259,19 @@ class TeleopLimits:
     # 조향각 자체는 원래 명령한 곡률로 정하고 속도만 올리므로, 따라가는 호는
     # 그대로이고 그 위를 더 빨리 지날 뿐이다.
     steered_speed_boost: float = 1.0
+    # ⚠️ **정지 상태에서 뒷바퀴가 완전히 누우면 못 출발한다** (2026-08-07 실측,
+    #    100% 듀티까지 확인). 굴러가는 중이면 완전 조향으로도 잘 돈다 -- 안 되는
+    #    것은 그 상태로 서 있다가 출발하는 것 하나뿐이다.
+    #
+    # 그 상태는 컨트롤러가 저속에서 큰 곡률을 명령할 때 생긴다. 곡률은
+    # 각속도/선속도라 **선속도가 작아질수록 같은 각속도가 더 큰 조향을 만든다**:
+    # 0.08 m/s 에 0.35 rad/s 면 반경 0.23 m 로 거의 완전 조향이다.
+    #
+    # nav2 의 minimum_turning_radius 는 **경로**를 제약할 뿐, 컨트롤러가 그
+    # 경로를 따라가며 내는 순간 곡률은 제약하지 않는다. 그래서 여기서 막는다.
+    #
+    # 0 이면 끈다. 기계 한계는 0.198 m 이고, 출발까지 감안한 여유값을 넣는다.
+    min_command_turning_radius_m: float = 0.30
     # ⚠️ **후진은 상한이 다르다** (2026-08-05, S15P11A304-152).
     #
     # 실측: 같은 60% 로 전진 0.178 m/s · 후진 0.033 m/s — **19%** 다. 바닥을 바꿔도
@@ -297,6 +310,10 @@ class TeleopLimits:
         # 같은 100 이다. 그보다 좁게 두면 여기서 막혀 후진 힘을 못 쓴다.
         if self.steered_speed_boost < 1.0:
             raise ValueError("steered_speed_boost must be at least 1.0")
+        if self.min_command_turning_radius_m < 0.0:
+            raise ValueError(
+                "min_command_turning_radius_m cannot be negative"
+            )
         if not 0 <= self.min_sustain_drive_percent <= self.min_drive_percent:
             raise ValueError(
                 "min_sustain_drive_percent must be between 0 and "
@@ -478,6 +495,18 @@ def map_twist(
         -limits.max_angular_rps,
         limits.max_angular_rps,
     )
+    # 실행 가능한 곡률 안으로 각속도를 깎는다. 선속도가 작을수록 상한도 작아야
+    # 같은 반경이 나온다 -- 이걸 안 하면 저속에서 곡률이 무한정 커진다.
+    #
+    # 선속도는 건드리지 않는다. 여기서 막으려는 것은 "너무 빠름" 이 아니라
+    # "이 차가 낼 수 없는 조향" 이고, 속도를 줄이면 곡률은 오히려 더 커진다.
+    if limits.min_command_turning_radius_m > 0.0:
+        angular_ceiling = (abs(bounded_linear_x)
+                           / limits.min_command_turning_radius_m)
+        bounded_angular_z = _clamp(
+            bounded_angular_z, -angular_ceiling, angular_ceiling
+        )
+
     # 조향각을 먼저 정한다. 속도를 올려도 이 각은 그대로 두어야 따라가는 호가
     # 안 바뀐다 -- 같은 호를 더 빨리 지나는 것이 목적이다.
     straight = abs(bounded_angular_z) < 1e-6

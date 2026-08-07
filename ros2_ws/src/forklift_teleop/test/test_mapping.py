@@ -145,11 +145,24 @@ class MappingTest(unittest.TestCase):
         second = map_twist(0.05, 0.1, self.limits)
         self.assertEqual(first.steering_cdeg, second.steering_cdeg)
 
-    def test_steering_is_limited_at_low_speed(self):
-        left = map_twist(0.02, 0.35, self.limits)
-        right = map_twist(0.02, -0.35, self.limits)
+    def test_steering_never_exceeds_the_mechanical_lock(self):
+        """조향은 어떤 명령에도 기계 한계를 넘지 않는다.
+
+        예전에는 저속 + 큰 각속도가 곧장 완전 잠김으로 포화되는 것을 확인했다.
+        이제는 min_command_turning_radius_m 이 그 앞에서 먼저 깎으므로, 포화
+        자체를 보려면 그 제한을 끈 상태여야 한다. 넘지 않는다는 보장은 그대로다.
+        """
+        from dataclasses import replace as _replace
+        uncapped = _replace(self.limits, min_command_turning_radius_m=0.0)
+        left = map_twist(0.02, 0.35, uncapped)
+        right = map_twist(0.02, -0.35, uncapped)
         self.assertEqual(left.steering_cdeg, self.LEFT_FULL)
         self.assertEqual(right.steering_cdeg, self.RIGHT_FULL)
+
+    def test_low_speed_hard_turns_stay_startable(self):
+        """저속에서 곡률이 무한정 커지지 않는다 -- 정지 출발이 가능한 범위."""
+        capped = map_twist(0.02, 0.35, self.limits)
+        self.assertNotEqual(capped.steering_cdeg, self.LEFT_FULL)
 
     def test_partial_input_uses_minimum_drive(self):
         command = map_twist(0.02, 0.0, self.limits)
@@ -568,6 +581,59 @@ class StallKickBurstTest(unittest.TestCase):
         command = self.command()
         kick.apply(command, 0.0, 0.0)
         self.assertEqual(kick.apply(command, 1.0, 0.08).drive_percent, 35)
+
+
+class CommandCurvatureLimitTest(unittest.TestCase):
+    """Never ask for a turn this vehicle cannot start.
+
+    Curvature is angular over linear, so the slower the command the harder the
+    same yaw rate steers. nav2 constrains the *path* through
+    minimum_turning_radius but not the instantaneous curvature the controller
+    produces while following it, and at 0.08 m/s with 0.35 rad/s that came out
+    at 0.23 m -- near full lock, where a stopped vehicle cannot start again at
+    any duty the drivetrain has.
+    """
+
+    def limits(self):
+        return TeleopLimits(min_command_turning_radius_m=0.30)
+
+    def realised_radius(self, command, limits):
+        offset = abs(command.steering_cdeg - limits.steering_center_cdeg) / 100.0
+        if offset < 0.01:
+            return math.inf
+        return limits.wheelbase_m / math.tan(math.radians(offset))
+
+    def test_slow_hard_turns_are_opened_up(self):
+        limits = self.limits()
+        command = map_twist(0.08, 0.35, limits)
+        self.assertGreaterEqual(
+            self.realised_radius(command, limits), 0.30 - 0.01
+        )
+
+    def test_the_limit_scales_with_speed(self):
+        limits = self.limits()
+        slow = self.realised_radius(map_twist(0.08, 0.35, limits), limits)
+        fast = self.realised_radius(map_twist(0.25, 0.35, limits), limits)
+        self.assertGreater(fast, slow)
+
+    def test_speed_is_not_reduced_to_achieve_it(self):
+        """Slowing down would make the curvature worse, not better."""
+        limits = self.limits()
+        capped = map_twist(0.08, 0.35, limits)
+        straight = map_twist(0.08, 0.0, limits)
+        self.assertEqual(capped.drive_percent, straight.drive_percent)
+
+    def test_gentle_turns_pass_through_untouched(self):
+        limits = self.limits()
+        capped = map_twist(0.25, 0.05, limits)
+        plain = map_twist(0.25, 0.05,
+                          TeleopLimits(min_command_turning_radius_m=0.0))
+        self.assertEqual(capped.steering_cdeg, plain.steering_cdeg)
+
+    def test_zero_disables_it(self):
+        limits = TeleopLimits(min_command_turning_radius_m=0.0)
+        command = map_twist(0.08, 0.35, limits)
+        self.assertLess(self.realised_radius(command, limits), 0.30)
 
 
 if __name__ == "__main__":
