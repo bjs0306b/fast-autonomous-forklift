@@ -48,6 +48,20 @@
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
         <RoundRobin name="RecoveryActions">
+          <!-- Backing up comes first, because the failure this vehicle
+               actually has is not a stale costmap.
+
+               With the rear wheels at full lock and the vehicle stopped, it
+               cannot start again at any duty the drivetrain can produce
+               (verified to 100%). Reversing straight breaks it out, and
+               reversing straight works.
+
+               Clearing the costmap first cost two full progress timeouts
+               before the tree reached this branch: about fifty seconds of
+               a vehicle sitting still while nav2 tidied a map that was never
+               the problem. Recoveries should be ordered by what fixes this
+               robot, not by what is cheapest to run. -->
+          <BackUp backup_dist="0.20" backup_speed="0.10"/>
           <Sequence name="ClearingActions">
             <ClearEntireCostmap name="ClearLocalCostmap-Subtree"
                                 service_name="local_costmap/clear_entirely_local_costmap"/>
@@ -57,7 +71,6 @@
           <!-- Waiting is a real recovery here: the obstacles this vehicle
                cannot drive around are usually people, and they move. -->
           <Wait wait_duration="3"/>
-          <BackUp backup_dist="0.15" backup_speed="0.08"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

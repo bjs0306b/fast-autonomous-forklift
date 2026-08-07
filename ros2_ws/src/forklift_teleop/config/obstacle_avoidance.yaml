@@ -33,13 +33,13 @@ obstacle_avoidance:
 
     # base_link 기준이다. 사용자 현장 충돌 방지 조치와 명시적 승인 하에 0.25m.
     # footprint 전면 x=0.190m 대비 차체 여유는 0.06m다.
-    # tools/geometry_limits.py --speed 0.20
+    # tools/geometry_limits.py --speed 0.25
     #
-    # ⚠️ 0.20 은 **구동계 최대(0.40)가 아니라 nav2 velocity_smoother 가 묶는
+    # ⚠️ 0.25 는 **구동계 최대(0.40)가 아니라 nav2 velocity_smoother 가 묶는
     #    상한**이다. 그 상한을 올리면 여기도 같이 올려야 한다.
     #
-    # 앞끝 0.190 + 패딩 0.010 + 제동 0.110 = 0.310.
-    stop_distance_m: 0.31
+    # 앞끝 0.190 + 패딩 0.010 + 제동 0.138 = 0.338.
+    stop_distance_m: 0.34
     # 이 거리 **아래에서만** 가드가 조향에 개입한다. 여기부터 감속 시작
     # 거리(1.00) 사이에서는 감속만 하고 조향은 Nav2 에 맡긴다.
     #
@@ -47,7 +47,7 @@ obstacle_avoidance:
     # 0.03~0.12 보다 커서 더하면 조향이 **뒤집힌다.** 2026-08-07 실측에서
     # 15회 중 9회가 반대로 뒤집혔고, 후륜 조향이 좌우로 계속 흔들려 차가 한
     # 방향으로 힘을 실어 본 적이 없다 -- 정지마찰을 못 이긴 직접 원인.
-    avoidance_engage_distance_m: 0.45
+    avoidance_engage_distance_m: 0.48
     # 전방 ToF 를 좌/중/우 방위 구간으로 가르는 중앙 구간 반각.
     # 이게 생기기 전엔 센서당 값 하나였고, 두 센서가 같은 앞을 보므로 값이
     # 거의 같아 좌우 판단이 **항상** LiDAR 로 떨어졌다 -- 포크 높이를 못 보는
@@ -89,8 +89,8 @@ obstacle_avoidance:
     # 앞이 지나갈 수 있다고 보고 회전을 시작하면 뒤가 걸린다.
     minimum_turn_clearance_m: 0.38
     # 360도 상부 LiDAR의 후방 ±18도 통로. 자동 후진 복구 중 이 거리에서 정지.
-    # 뒤끝 0.245 + 패딩 0.010 + 제동 0.110 = 0.365.
-    rear_stop_distance_m: 0.37
+    # 뒤끝 0.245 + 패딩 0.010 + 제동 0.138 = 0.393.
+    rear_stop_distance_m: 0.40
 
     vision_confidence_threshold: 0.60
     dynamic_object_stop_distance_m: 1.50

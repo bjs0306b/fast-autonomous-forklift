@@ -136,11 +136,18 @@ controller_server:
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.5
-      # 비용 규제 감속이 걸리면 속도가 regulated_linear_scaling_min_speed(0.04)
-      # 까지 떨어진다. 그 속도로 0.5 m 는 12.5초, min_approach(0.03)면 16.7초다.
-      # 10초로는 **제대로 가고 있어도 abort** 됐다. 인플레이션 0.55 m 가 2 m 폭
-      # 경기장 전체를 덮어 규제가 상시 걸리므로 예외 상황이 아니라 평시다.
-      movement_time_allowance: 25.0
+      # 10 -> 25 -> 12 (2026-08-07).
+      #
+      # 25 로 올렸던 이유는 규제 감속이 0.03~0.04 m/s 까지 떨어져 0.5 m 에
+      # 16.7초가 걸렸기 때문이다. 그 전제가 바뀌었다 -- 이 차의 **안정 최저
+      # 속도가 0.078 m/s** 로 실측됐고(그 아래로는 유지 자체가 안 된다),
+      # nav2 하한도 0.10 으로 올렸다. 0.5 m 는 이제 최악이라도 6.4초다.
+      #
+      # ⚠️ 이 값은 **멈춘 차를 알아채는 데 걸리는 시간**이기도 하다. 그동안
+      #    복구는 시작되지 않는다. 25 로 두었더니 RoundRobin 이 실제로 듣는
+      #    복구(BackUp)에 닿기까지 50초가 걸렸고, 그 사이 차는 완전 조향으로
+      #    선 채 명령만 받고 있었다.
+      movement_time_allowance: 12.0
     # Goal checker parameters
     #precise_goal_checker:
     #  plugin: "nav2_controller::SimpleGoalChecker"
@@ -160,7 +167,7 @@ controller_server:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # 0.10 -> 0.08. teleop.yaml 의 max_linear_mps 0.10 아래에 두어야
       # 조향 보정이나 가속이 상한에 부딪히지 않는다.
-      desired_linear_vel: 0.15
+      desired_linear_vel: 0.20
       lookahead_dist: 0.25
       min_lookahead_dist: 0.15
       max_lookahead_dist: 0.35
@@ -189,7 +196,7 @@ controller_server:
       # 이 반경보다 급한 곡선에서 감속이 시작된다. 플래너 최소반경과 같은
       # 값이어야 한다 — 크게 두면 계획된 모든 곡선에서 감속이 걸리고, 그
       # 속도는 실측 스톨 구간이라 차가 아예 멎는다.
-      regulated_linear_scaling_min_radius: 0.25
+      regulated_linear_scaling_min_radius: 0.35
       # 위 min_approach_linear_velocity 주석 참고 -- 여기도 올리지 말 것.
       # 위와 같은 이유. 곡률 규제도 0.078 아래로는 의미가 없다.
       regulated_linear_scaling_min_speed: 0.10
@@ -492,18 +499,28 @@ planner_server:
       max_iterations: 100000
       max_on_approach_iterations: 1000
       max_planning_time: 2.0
-      # Forward-only field lap. DUBIN keeps the global path consistent with
-      # the controller and avoids unsensed reverse motion.
-      motion_model_for_search: "DUBIN"
+      # ⚠️ DUBIN -> REEDS_SHEPP (2026-08-07). 전진 전용이면 **나올 길이 없는
+      #    자리가 생긴다.** 2 x 3 m 목업에서 실제로 그랬다: 앞이 정지 임계에
+      #    닿고 좌우 회전 여유도 없어, 사람이 손으로 빼기 전엔 못 움직였다.
+      #
+      #    원래 주석은 "unsensed reverse motion 을 피한다" 였는데 그 전제가
+      #    바뀌었다 -- 360도 라이다가 후방을 보고 rear_stop_distance_m 가
+      #    막는다. 곧은 후진은 실측으로 잘 된다(-0.25 m/s).
+      #
+      #    ⚠️ 대가: 경로에 커스프(방향 전환점)가 생기고, 매 커스프마다 정지에서
+      #    다시 출발해야 한다. 조향이 완전히 누운 채로 서면 못 뜬다 -- 그건
+      #    아직 안 풀린 한계다. reverse_penalty 가 후진을 최후 수단으로 남긴다.
+      motion_model_for_search: "REEDS_SHEPP"
       angle_quantization_bins: 72
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 3.0
       # ⚠️ 이 값은 velocity_smoother 의 각속도 상한과 **짝이다**.
       #    상한 0.18 rad/s 에서 0.10 m/s 로 낼 수 있는 최소 반경은
       #    0.10/0.18 = 0.556 m 이므로, 0.54 는 컨트롤러가 추종할 수 없는 값이었다.
-      #    0.40 rad/s 로 올리면서 0.10/0.40 = 0.25 로 맞춘다.
+      #    2026-08-07: 순항 0.25 m/s · 각속도 0.75 rad/s 로 올리면서
+      #    0.25/0.75 = 0.333 -> 0.35 로 맞춘다.
       #    기계 한계는 축거 0.144 / tan(36°) = 0.198 m 라 아직 여유가 있다.
-      minimum_turning_radius: 0.25
+      minimum_turning_radius: 0.35
       reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.2
@@ -582,8 +599,8 @@ velocity_smoother:
     #    여기서 묶는 값이 곧 obstacle_avoidance.yaml 의 stop_distance_m 근거다.
     #    한쪽만 바꾸면 안 된다 -- tools/geometry_limits.py --speed 0.20 으로
     #    확인할 것.
-    max_velocity: [0.20, 0.0, 0.40]
-    min_velocity: [-0.20, 0.0, -0.40]
+    max_velocity: [0.25, 0.0, 0.75]
+    min_velocity: [-0.25, 0.0, -0.75]
     max_accel: [0.20, 0.0, 0.40]
     max_decel: [-0.30, 0.0, -0.50]
     # EKF output. Keep this aligned with bt_navigator and Orin telemetry.
