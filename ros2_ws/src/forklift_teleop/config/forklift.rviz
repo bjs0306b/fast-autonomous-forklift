@@ -118,6 +118,22 @@ Visualization Manager:
       Color Transformer: FlatColor
       Decay Time: 0
 
+    # 심에서 만든 지도(또는 SLAM 지도). 스캔 점이 이 벽 위에 얹히는지가
+    # "차를 맞는 자리에 놓았는가" 를 눈으로 보는 방법이다. 어긋나 있으면
+    # 2D Pose Estimate 로 실제 위치를 찍어 고친다.
+    #
+    # costmap 아래에 두려고 먼저 선언한다 -- RViz 는 나중 것을 위에 그린다.
+    - Class: rviz_default_plugins/Map
+      Name: Map (sim or SLAM)
+      Enabled: true
+      Topic:
+        Value: /map
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Color Scheme: map
+      Alpha: 0.7
+
     # The local costmap is where the two sensors have to agree. A ToF mark that
     # appears here and then disappears as the vehicle turns is the lidar
     # raytracing through it, which is what clearing:False and the VoxelLayer
@@ -185,7 +201,12 @@ Visualization Manager:
     #    Those ask where a box is *relative to the vehicle*, and holding the
     #    vehicle still on screen makes a sign error obvious the moment the box
     #    appears on the wrong side.
-    Fixed Frame: odom
+    # 정적 지도를 쓸 때는 map 으로 볼 것 -- 그래야 스캔이 지도 벽 위에 얹히는지
+    # 보인다. odom 으로 보면 지도가 차와 함께 떠다녀 비교가 안 된다.
+    #
+    # SLAM 으로 지도를 만드는 중이라면 odom 이 낫다: map 은 slam_toolbox 가 첫
+    # 스캔을 맞춰야 생기고, 부하가 걸리면 몇 초씩 끊긴다.
+    Fixed Frame: map
     Background Color: 48; 48; 48
     # 10, not 30. RViz on this Jetson costs a full core at 30 Hz, and over
     # xrdp the desktop stack costs two more. On 2026-08-07 that starved

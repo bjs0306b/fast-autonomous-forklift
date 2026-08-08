@@ -42,6 +42,8 @@ setup(
             "unmanned_mission = forklift_teleop.unmanned_mission:main",
             "field_lap_mission = forklift_teleop.field_lap_mission:main",
             "drive_mux = forklift_teleop.drive_mux:main",
+            "map_odom_publisher = "
+            "forklift_teleop.map_odom_publisher:main",
         ],
     },
 )
