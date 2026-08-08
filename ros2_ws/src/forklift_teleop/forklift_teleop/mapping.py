@@ -46,6 +46,13 @@ class StartupKick:
     reverse_percent: int
     duration_sec: float
     reverse_straight_percent: int = 0
+    # 조향 명령이 중립으로 바뀐 뒤 서보가 실제로 도달하기까지 기다리는 시간.
+    #
+    # 할인은 **바퀴가 곧을 때** 성립하는데, 판단은 명령으로 한다. 회전 직후에는
+    # 명령만 중립이고 서보는 아직 꺾여 있어서, 그 순간 60% 를 주면 물리적으로
+    # 100% 가 필요한 상태에 모자란 값을 주게 된다. 2026-08-08 에 실제로 그랬다:
+    # BackUp 이 cmd -0.100/+0.000 을 8초간 냈는데 엔코더는 0.000 이었다.
+    steering_settle_sec: float = 0.6
     steering_center_cdeg: int = 0
     straight_steering_tolerance_cdeg: int = 300
     stall_speed_mps: float = 0.01
@@ -62,6 +69,7 @@ class StartupKick:
     stall_kick_rest_sec: float = 1.0
     deadline: float = -math.inf
     stall_started: float = -math.inf
+    straight_since: float = -math.inf
     last_direction: int = 0
 
     def _pushing(self, now: float) -> bool:
@@ -76,6 +84,23 @@ class StartupKick:
     def _steering_is_straight(self, command: ActuatorCommand) -> bool:
         return (abs(command.steering_cdeg - self.steering_center_cdeg)
                 <= self.straight_steering_tolerance_cdeg)
+
+    def _steering_has_settled(
+        self, command: ActuatorCommand, now: float
+    ) -> bool:
+        """Straight long enough that the servo is actually there.
+
+        The wait exists because the wheels were just turned, so a kick that
+        has never seen a turned command does not owe one -- straight_since
+        starts at -inf meaning "straight all along". A turn sets it to +inf,
+        which the next straight command replaces with the current time.
+        """
+        if not self._steering_is_straight(command):
+            self.straight_since = math.inf
+            return False
+        if self.straight_since == math.inf:
+            self.straight_since = now
+        return now - self.straight_since >= self.steering_settle_sec
 
     def apply(
         self,
@@ -127,7 +152,7 @@ class StartupKick:
         # Reverse duty is negative, so the stronger command is the smaller one.
         percent = (
             self.reverse_straight_percent
-            if (self._steering_is_straight(command)
+            if (self._steering_has_settled(command, now)
                 and self.reverse_straight_percent > 0)
             else self.reverse_percent
         )

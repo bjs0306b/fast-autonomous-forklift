@@ -48,6 +48,7 @@ class UartTeleopBridge(Node):
         self.declare_parameter(
             "reverse_startup_kick_straight_percent", 60
         )
+        self.declare_parameter("steering_settle_sec", 0.6)
         self.declare_parameter("wheel_twist_topic", "/wheel/twist")
         self.declare_parameter("stall_speed_mps", 0.01)
         self.declare_parameter("max_stall_kick_sec", 2.0)
@@ -190,6 +191,9 @@ class UartTeleopBridge(Node):
             reverse_kick,
             kick_duration,
             reverse_straight_percent=reverse_straight_kick,
+            steering_settle_sec=float(
+                self.get_parameter("steering_settle_sec").value
+            ),
             steering_center_cdeg=self._limits.steering_center_cdeg,
             stall_speed_mps=float(
                 self.get_parameter("stall_speed_mps").value

@@ -636,5 +636,58 @@ class CommandCurvatureLimitTest(unittest.TestCase):
         self.assertLess(self.realised_radius(command, limits), 0.30)
 
 
+class SteeringSettleTest(unittest.TestCase):
+    """The discount is about where the wheels are, not what we just asked for.
+
+    Straight reverse needs 60% and steered reverse needs 100%, but the check
+    reads the commanded steering. Right after a turn the command is centred
+    while the servo is still at lock, so the moment that most needs the higher
+    figure was getting the lower one. nav2's BackUp commanded -0.100 with zero
+    angular for eight seconds and the encoder never left zero.
+    """
+
+    def kick(self):
+        return StartupKick(
+            forward_percent=50,
+            reverse_percent=100,
+            duration_sec=0.3,
+            reverse_straight_percent=60,
+            steering_center_cdeg=9600,
+            steering_settle_sec=0.6,
+        )
+
+    def straight(self):
+        return ActuatorCommand(drive_percent=-20, steering_cdeg=9600)
+
+    def turned(self):
+        return ActuatorCommand(drive_percent=-20, steering_cdeg=13200)
+
+    # 실속(0.0)을 넘겨 킥을 살려 둔다 -- 그러지 않으면 duration_sec 에 만료돼
+    # 명령이 그대로 통과하고, 할인 여부를 볼 수 없다.
+    def test_just_centred_still_uses_the_steered_figure(self):
+        kick = self.kick()
+        kick.apply(self.turned(), 0.0, 0.0)
+        self.assertEqual(
+            kick.apply(self.straight(), 0.1, 0.0).drive_percent, -100
+        )
+
+    def test_after_settling_it_takes_the_discount(self):
+        kick = self.kick()
+        kick.apply(self.turned(), 0.0, 0.0)
+        kick.apply(self.straight(), 0.1, 0.0)
+        self.assertEqual(
+            kick.apply(self.straight(), 0.8, 0.0).drive_percent, -60
+        )
+
+    def test_turning_again_restarts_the_wait(self):
+        kick = self.kick()
+        kick.apply(self.straight(), 0.0, 0.0)
+        kick.apply(self.straight(), 0.8, 0.0)
+        kick.apply(self.turned(), 0.9, 0.0)
+        self.assertEqual(
+            kick.apply(self.straight(), 1.0, 0.0).drive_percent, -100
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
