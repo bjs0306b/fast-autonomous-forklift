@@ -239,7 +239,19 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        # ⚠️ 0.55 -> 0.25 (2026-08-08). **목업보다 넓은 팽창 반경은 기울기를
+        #    없앤다.** 이 지도에서 벽에서 가장 멀리 떨어질 수 있는 거리가
+        #    0.595 m 뿐이라, 0.55 면 거의 모든 칸이 팽창에 덮여 값이 평평해진다.
+        #    그러면 플래너가 통로 가운데로 갈 이유를 잃고 벽을 스치는 경로를
+        #    내고, 그 경로 위에서 발자국이 내접 띠(0.074 m)에 걸려 RPP 가
+        #    `collision ahead` 를 낸다. 실제 증상은 "앞뒤앞뒤 반복" 이었다:
+        #    전진 -> collision -> 인내 초과 -> 복구 BackUp -> 그것도 collision
+        #    -> Wait 3초 -> 재계획 -> 전진. 50초에 collision 166회였다.
+        #
+        #    0.25 는 차체 외접 반경 0.256 m 바로 아래다. 자유칸의 절반이
+        #    0.205 m 이상 여유를 가지므로 통로 가운데가 가장 싼 선이 되어
+        #    기울기가 다시 살아난다.
+        inflation_radius: 0.25
       # 상부 LiDAR 전용. 스캔 평면(z 약 0.20m) 위아래를 모두 관장한다.
       voxel_layer_lidar:
         plugin: "nav2_costmap_2d::VoxelLayer"
@@ -473,7 +485,9 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        # 로컬과 같은 이유로 0.55 -> 0.25. 글로벌이 평평하면 애초에 벽을
+        # 스치는 경로가 나오므로, 로컬만 고쳐서는 안 된다.
+        inflation_radius: 0.25
       always_send_full_costmap: True
 
 map_server:
