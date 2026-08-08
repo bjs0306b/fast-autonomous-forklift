@@ -29,8 +29,12 @@ DIR = "/home/ubuntu/forklift_ws/nav2/scripts"
 # 초기 배치 (x, y, yaw). 순환로 아래 홀 위에 두 대를 세운다.
 # 물리를 껐으므로 위치는 전적으로 스크립트가 쓴다(kinematic_vehicle 이 매 프레임
 # set_world_pose 로 프림을 옮긴다). 물리가 되돌리려는 충돌이 없어 안정적이다.
-F02_SPAWN = (15.5, 4.0, 0.0)
-F03_SPAWN = (10.0, 4.0, 0.0)
+# 세 대가 왼쪽 통로에 어깨를 나란히 하고 +x(동쪽)를 본다.
+# 실물 오린카는 REAL_SPAWN 자리에서 시작한다 — 세트장 바닥에
+# (40cm, 20cm) 를 표시해 두고 매번 거기서 출발시킨다.
+F02_SPAWN  = (4.0, 4.0, 0.0)     # 실물 0.400, 0.400 m
+F03_SPAWN  = (4.0, 6.0, 0.0)     # 실물 0.400, 0.600 m
+REAL_SPAWN = (4.0, 2.0, 0.0)     # 실물 0.400, 0.200 m  ← 오린카
 
 _result = []
 
@@ -186,7 +190,8 @@ except Exception as _e:
     print(f"  (place.py 로드 실패, 무시: {_e})")
 try:
     _placed = []
-    for _vid, _sp in (("SIM_F02", F02_SPAWN), ("SIM_F03", F03_SPAWN)):
+    for _vid, _sp in (("SIM_F02", F02_SPAWN), ("SIM_F03", F03_SPAWN),
+                      ("REAL_F01", REAL_SPAWN)):
         _v = fleet.vehicles.get(_vid)
         if _v is None:
             continue

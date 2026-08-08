@@ -1,0 +1,92 @@
+# 오린카(fk01) 위치추정 설정 — 실물 세트장 2 x 3 m
+#
+#   ros2 launch nav2_bringup localization_launch.py \
+#       map:=/path/to/real_warehouse.yaml \
+#       params_file:=/path/to/orin_localization.yaml
+#
+# 맵은 sim_warehouse.pgm 을 resolution 0.005 로 읽은 것이다 (real_warehouse.yaml).
+# 시뮬과 같은 그림을 1/10 눈금으로 보는 것이라, 여기서 나오는 좌표에 x10 만
+# 하면 MQTT 규격(시뮬 좌표계)이 된다. docs/orin-pose-spec.md 2장 참조.
+#
+# 시작 위치 (0.400, 0.200) m, 포크가 +x 를 봄.
+# 세트장 바닥에 (40cm, 20cm) 를 십자 테이프로 표시해 두고 매번 거기서 출발한다.
+# 시뮬에서는 REAL_F01 이 (4.0, 2.0) 에 대응한다.
+
+amcl:
+  ros__parameters:
+    use_sim_time: false
+
+    # 초기 위치를 반드시 준다.
+    # 2 x 3 m 직사각형은 180도 돌려도 같아 보여서, 초기 위치 없이
+    # 전역 재정합을 하면 반대편으로 수렴할 수 있다.
+    set_initial_pose: true
+    initial_pose:
+      x: 0.400
+      y: 0.200
+      z: 0.0
+      yaw: 0.0
+
+    # 이 차는 후륜 조향이지만 헤딩을 조향각이 아니라 IMU 자이로에서 얻는다.
+    # 그래서 회전 오도메트리가 정확한 편이라 alpha1/2/4 를 낮게 둔다.
+    # (조향각으로 헤딩을 적분하면 백래시·미끄러짐이 그대로 오차가 된다)
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    alpha1: 0.05      # 회전 -> 회전
+    alpha2: 0.05      # 이동 -> 회전
+    alpha3: 0.10      # 이동 -> 이동 (엔코더)
+    alpha4: 0.05      # 회전 -> 이동
+
+    # 세트장이 2 x 3 m 로 작다. 조금만 움직여도 갱신한다.
+    update_min_d: 0.02          # 2 cm
+    update_min_a: 0.10          # 약 6도
+    resample_interval: 1
+
+    # 통로 폭이 0.82 m 라 벽까지 0.10~0.40 m 다.
+    # laser_min_range 는 라이다의 range_min 보다 크게 잡아야 한다.
+    # ★ 쓰는 라이다의 실제 range_min 을 확인해서 맞출 것.
+    laser_min_range: 0.10
+    laser_max_range: 6.0
+    max_beams: 120
+
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+
+    laser_model_type: "likelihood_field"
+    sigma_hit: 0.02             # 세트장이 작으니 좁게
+    z_hit: 0.6
+    z_rand: 0.4
+    z_max: 0.0
+    z_short: 0.0
+    laser_likelihood_max_dist: 0.10
+
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    global_frame_id: "map"
+    scan_topic: "scan"
+    tf_broadcast: true
+    transform_tolerance: 0.5
+
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    yaml_filename: "real_warehouse.yaml"
+
+# ── 참고: costmap 용 맵을 따로 쓰고 싶을 때 ────────────────────────
+#
+# 실물 랙(높이 140 mm)은 라이다(200 mm)에 안 잡힌다. 그래서 AMCL 은
+# 벽으로만 정합하는데, 경로 계획은 랙을 막힌 것으로 봐야 한다.
+# 지금 맵은 랙이 이미 꽉 찬 블록으로 그려져 있어 그대로 쓰면 된다.
+#
+# 만약 AMCL 정합이 잘 안 되어 "랙을 지운 맵" 을 따로 만들게 되면,
+# map_server 를 두 개 띄우고 costmap 만 다른 토픽을 보게 한다.
+#
+#   map_server_obstacles:
+#     ros__parameters:
+#       topic_name: "map_obstacles"
+#       yaml_filename: "real_warehouse.yaml"     # 랙 있는 맵
+#
+#   global_costmap/global_costmap:
+#     ros__parameters:
+#       static_layer:
+#         map_topic: /map_obstacles

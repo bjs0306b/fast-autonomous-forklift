@@ -7,6 +7,11 @@
 #
 # 따라서 실물 세트장은 2.00 x 3.00 m 로, 시뮬과 같은 비율로 지으면 된다.
 # 벽·랙 위치가 어긋나면 오린카의 라이다 정합(AMCL)이 실패한다.
+#
+# 시작 위치는 이 파일이 아니라 AMCL 파라미터에 있다:
+#     nav2/config/orin_localization.yaml
+#     initial_pose: x 0.400, y 0.200, yaw 0.0   (= 시뮬 4.0, 2.0)
+# 세트장 바닥 (40cm, 20cm) 에 십자 표시를 하고 포크가 +x 를 보게 놓는다.
 image: sim_warehouse.pgm
 resolution: 0.005
 origin: [0.0, 0.0, 0.0]
