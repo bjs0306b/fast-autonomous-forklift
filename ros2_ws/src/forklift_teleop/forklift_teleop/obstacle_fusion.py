@@ -41,6 +41,13 @@ class FrontTofClearance:
     front_left_m: float = math.inf
     front_right_m: float = math.inf
     front_center_m: float = math.inf
+    # 차체가 실제로 쓸고 갈 통로 안의 최근접. 정지 판정은 이것만 본다.
+    #
+    # 방위 구간으로 정지를 걸면 **옆에 있는 것에 멈춘다.** 0.27 m 거리에서
+    # 차체 반폭 0.074 m 가 차지하는 각은 15.3° 뿐인데, 좌/우 구간은 12~35° 라
+    # 통로 밖이 대부분이다. 모서리에 세워 두면 옆벽을 보고 "정면 장애물" 로
+    # 읽어 앞이 훤히 비어 있어도 못 나간다.
+    front_path_m: float = math.inf
 
 
 @dataclass(frozen=True)
@@ -180,6 +187,7 @@ def front_tof_corridors_from_points(
     minimum_height_m: float,
     maximum_height_m: float,
     minimum_hits: int = 2,
+    path_half_width_m: float = 0.0,
 ) -> FrontTofClearance:
     """Split one ToF cloud into left/centre/right clearances by bearing.
 
@@ -189,15 +197,20 @@ def front_tof_corridors_from_points(
     left = []
     center = []
     right = []
+    path = []
     for x, y, z in points_xyz:
         if not all(math.isfinite(value) for value in (x, y, z)):
             continue
         if x <= 0.0 or not minimum_height_m <= z <= maximum_height_m:
             continue
+        distance = math.hypot(x, y)
+        # 통로 판정은 각도가 아니라 **가로 오프셋**이다. 각도로 보면 가까울수록
+        # 통로가 넓어져서, 바로 옆에 있는 것이 정면으로 읽힌다.
+        if path_half_width_m > 0.0 and abs(y) <= path_half_width_m:
+            path.append(distance)
         angle = math.atan2(y, x)
         if abs(angle) > front_half_angle_rad:
             continue
-        distance = math.hypot(x, y)
         if abs(angle) <= center_half_angle_rad:
             center.append(distance)
         elif angle > 0.0:
@@ -208,6 +221,7 @@ def front_tof_corridors_from_points(
         front_left_m=robust_nearest(left, minimum_hits),
         front_right_m=robust_nearest(right, minimum_hits),
         front_center_m=robust_nearest(center, minimum_hits),
+        front_path_m=robust_nearest(path, minimum_hits),
     )
 
 
@@ -328,16 +342,17 @@ def decide_avoidance(
 
     # LiDAR covers tall/side structure.  ToFs cover the low frontal area that
     # the roof scan passes over because the fork sits below its scan plane.
-    # ⚠️ **세 구간 전부 넣어야 한다.** 좌/우만 넣으면 정중앙에 있는 것이 어느
-    #    검사에도 안 걸린다 -- 구간을 가르기 전에는 좌/우 값이 각각 원뿔
-    #    전체를 덮어서 정면이 딸려 들어왔지만, 가른 뒤에는 아니다.
-    #    2026-08-07 에 실제로 이 상태로 벽을 들이받았다.
-    nearest_front = min(
-        lidar.center_m,
-        tof.front_left_m,
-        tof.front_center_m,
-        tof.front_right_m,
-    )
+    # ⚠️ **차체가 지나갈 통로 안의 것만 정지에 쓴다.**
+    #
+    # 방위 구간(좌/중/우)을 전부 넣으면 반대 문제가 난다: 12~35° 구간은 통로
+    # 밖이 대부분이라 **옆에 있는 것에 멈춘다.** 0.27 m 거리에서 차체 반폭이
+    # 차지하는 각은 15.3° 뿐이다. 모서리에 세워 두면 옆벽을 정면 장애물로 읽어
+    # 앞이 비어 있어도 못 나갔다.
+    #
+    # 좌/우 구간은 회전 방향을 고를 때 쓴다(_choose_turn). 거기서는 "어느 쪽이
+    # 더 비었나" 를 묻는 것이라 통로 밖도 의미가 있다.
+    #
+    nearest_front = min(lidar.center_m, tof.front_path_m)
     if nearest_front <= config.stop_distance_m:
         return AvoidanceDecision(
             AvoidanceAction.STOP,

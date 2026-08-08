@@ -41,7 +41,7 @@ class ObstacleFusionTest(unittest.TestCase):
 
     def test_low_center_obstacle_seen_only_by_tof_stops(self):
         decision = self.decide(
-            tof=FrontTofClearance(0.20, 2.0)
+            tof=FrontTofClearance(0.20, 2.0, front_path_m=0.20)
         )
         self.assertEqual(decision.action, AvoidanceAction.STOP)
 
@@ -55,7 +55,7 @@ class ObstacleFusionTest(unittest.TestCase):
         # Inside avoidance_engage_distance_m -- outside it the guard slows
         # down and leaves the steering to the planner.
         decision = self.decide(
-            tof=FrontTofClearance(0.35, 1.40)
+            tof=FrontTofClearance(0.35, 1.40, front_path_m=0.35)
         )
         self.assertEqual(decision.action, AvoidanceAction.AVOID_RIGHT)
         linear, angular = apply_decision(0.1, 0.0, decision, 0.35)
@@ -65,7 +65,7 @@ class ObstacleFusionTest(unittest.TestCase):
 
     def test_front_right_tof_obstacle_avoids_left_when_lidar_clear(self):
         decision = self.decide(
-            tof=FrontTofClearance(1.40, 0.35)
+            tof=FrontTofClearance(1.40, 0.35, front_path_m=0.35)
         )
         self.assertEqual(decision.action, AvoidanceAction.AVOID_LEFT)
 
@@ -76,7 +76,7 @@ class ObstacleFusionTest(unittest.TestCase):
         steering. Applied across the whole slowdown band it fought the planner
         every cycle and the vehicle never committed to a direction.
         """
-        decision = self.decide(tof=FrontTofClearance(0.70, 1.40))
+        decision = self.decide(tof=FrontTofClearance(0.70, 1.40, front_path_m=0.70))
         self.assertEqual(decision.action, AvoidanceAction.SLOW)
         self.assertEqual(decision.yaw_bias_rps, 0.0)
         self.assertLess(decision.speed_scale, 1.0)
@@ -86,7 +86,7 @@ class ObstacleFusionTest(unittest.TestCase):
     def test_field_wall_at_43cm_avoids_left_instead_of_stopping(self):
         decision = self.decide(
             lidar=LidarCorridors(1.331, 0.468, 0.446),
-            tof=FrontTofClearance(0.463, 0.431),
+            tof=FrontTofClearance(0.463, 0.431, front_path_m=0.431),
         )
         self.assertEqual(decision.action, AvoidanceAction.AVOID_LEFT)
         self.assertGreater(decision.yaw_bias_rps, 0.0)
@@ -95,7 +95,7 @@ class ObstacleFusionTest(unittest.TestCase):
     def test_tof_nominated_turn_is_rejected_when_lidar_side_blocked(self):
         decision = self.decide(
             lidar=LidarCorridors(2.0, 2.0, 0.40),
-            tof=FrontTofClearance(0.70, 1.40),
+            tof=FrontTofClearance(0.70, 1.40, front_path_m=0.70),
         )
         self.assertEqual(decision.action, AvoidanceAction.SLOW)
         self.assertEqual(decision.yaw_bias_rps, 0.0)
@@ -210,6 +210,7 @@ class FrontCentreIsNotABlindSpotTest(unittest.TestCase):
                 front_left_m=2.0,
                 front_right_m=2.0,
                 front_center_m=0.15,
+                front_path_m=0.15,
             ),
             (),
             (),
@@ -225,12 +226,67 @@ class FrontCentreIsNotABlindSpotTest(unittest.TestCase):
                 front_left_m=2.0,
                 front_right_m=2.0,
                 front_center_m=0.60,
+                front_path_m=0.60,
             ),
             (),
             (),
             AvoidanceConfig(),
         )
         self.assertLess(decision.speed_scale, 1.0)
+
+
+class SweptPathStopTest(unittest.TestCase):
+    """Stop for what is in the way, not for what is beside it.
+
+    Defining "ahead" by bearing makes the corridor widen as things get closer:
+    at 0.27 m the vehicle's half width subtends 15.3 degrees while the side
+    sectors run from 12 to 35. Parked in a corner the guard read the side wall
+    as a front obstacle and refused to move with the aisle wide open.
+    """
+
+    HALF_WIDTH = 0.11
+    FRONT = math.radians(35.0)
+    CENTER = math.radians(12.0)
+
+    def corridors(self, points):
+        return front_tof_corridors_from_points(
+            points, self.FRONT, self.CENTER, 0.02, 0.80,
+            minimum_hits=2, path_half_width_m=self.HALF_WIDTH,
+        )
+
+    def decide(self, tof):
+        return decide_avoidance(
+            LidarCorridors(2.0, 2.0, 2.0, 2.0), tof, (), (), AvoidanceConfig()
+        )
+
+    def test_a_wall_beside_the_vehicle_is_not_in_the_way(self):
+        # 0.27 m ahead, 0.25 m to the side: 43 degrees off, well clear of a
+        # body 0.074 m wide.
+        points = [(0.27, -0.25, 0.20), (0.28, -0.26, 0.20),
+                  (0.29, -0.27, 0.20), (0.30, -0.28, 0.20)]
+        result = self.corridors(points)
+        self.assertEqual(result.front_path_m, math.inf)
+        self.assertNotEqual(self.decide(result).action, AvoidanceAction.STOP)
+
+    def test_the_same_distance_dead_ahead_still_stops(self):
+        points = [(0.20, 0.01, 0.20), (0.21, -0.02, 0.20),
+                  (0.22, 0.00, 0.20)]
+        result = self.corridors(points)
+        self.assertLess(result.front_path_m, 0.25)
+        self.assertEqual(self.decide(result).action, AvoidanceAction.STOP)
+
+    def test_the_body_edge_counts_as_in_the_way(self):
+        edge = self.HALF_WIDTH - 0.005
+        points = [(0.27, edge, 0.20), (0.28, -edge, 0.20)]
+        self.assertLess(self.corridors(points).front_path_m, 0.30)
+
+    def test_side_sectors_still_report_for_turn_choice(self):
+        """회전 방향을 고를 때는 통로 밖도 봐야 한다."""
+        points = [(0.60, -0.30, 0.20), (0.61, -0.31, 0.20),
+                  (1.50, 0.40, 0.20), (1.51, 0.41, 0.20)]
+        result = self.corridors(points)
+        self.assertLess(result.front_right_m, 0.8)
+        self.assertGreater(result.front_left_m, 1.0)
 
 
 if __name__ == "__main__":

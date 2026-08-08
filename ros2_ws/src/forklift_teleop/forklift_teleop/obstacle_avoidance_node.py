@@ -52,6 +52,8 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter("lidar_center_half_angle_deg", 18.0)
         self.declare_parameter("tof_front_half_angle_deg", 35.0)
         self.declare_parameter("tof_center_half_angle_deg", 12.0)
+        # 차체 반폭 + 여유. 정지 판정이 쓰는 통로의 반폭이다.
+        self.declare_parameter("path_half_width_m", 0.11)
         self.declare_parameter("tof_min_height_m", 0.02)
         self.declare_parameter("tof_max_height_m", 0.80)
         self.declare_parameter("minimum_sector_hits", 2)
@@ -118,6 +120,11 @@ class ObstacleAvoidanceNode(Node):
                 "tof_center_half_angle_deg must be between 0 and "
                 "tof_front_half_angle_deg"
             )
+        self._path_half_width = float(
+            self.get_parameter("path_half_width_m").value
+        )
+        if self._path_half_width <= 0.0:
+            raise ValueError("path_half_width_m must be positive")
         self._tof_min_height = float(
             self.get_parameter("tof_min_height_m").value
         )
@@ -324,6 +331,7 @@ class ObstacleAvoidanceNode(Node):
                 self._tof_min_height,
                 self._tof_max_height,
                 self._minimum_hits,
+                self._path_half_width,
             )
             self._tof_time[index] = time.monotonic()
         except (TransformException, ValueError, struct.error) as error:
@@ -387,6 +395,7 @@ class ObstacleAvoidanceNode(Node):
             front_left_m=min(first.front_left_m, second.front_left_m),
             front_right_m=min(first.front_right_m, second.front_right_m),
             front_center_m=min(first.front_center_m, second.front_center_m),
+            front_path_m=min(first.front_path_m, second.front_path_m),
         )
         decision = decide_avoidance(
             self._lidar,
@@ -444,6 +453,8 @@ class ObstacleAvoidanceNode(Node):
                 "left": finite_or_none(tof.front_left_m),
                 "center": finite_or_none(tof.front_center_m),
                 "right": finite_or_none(tof.front_right_m),
+                # 정지 판정이 실제로 쓰는 값. 좌/우는 회전 방향 고를 때만 쓴다.
+                "path": finite_or_none(tof.front_path_m),
             },
             "visionLabels": [item.label for item in vision],
         }
