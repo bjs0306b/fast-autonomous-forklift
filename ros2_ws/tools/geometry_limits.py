@@ -140,12 +140,18 @@ def main():
         teleop["max_linear_mps"]
     )
 
-    # One control period to notice, plus the window the firmware waits before
-    # its own watchdog would cut the motor. Being late is what a stopping
-    # distance is for.
+    # ⚠️ 예전에는 여기에 command_timeout_sec(0.5) 을 더했다. 그건 **명령이
+    #    끊겼을 때** 브리지가 기다리는 시간이지, 가드가 멈추기로 했을 때의
+    #    지연이 아니다 -- 그때 가드는 0 을 능동적으로 보낸다. 3배 이상 보수적인
+    #    값이었고, 그 때문에 속도를 못 올리고 조향각까지 묶고 있었다.
+    #
+    # 실제 사슬은 각 20 Hz 인 세 단계다: 가드 -> drive_mux -> 브리지. 거기에
+    # 감속에 걸리는 시간을 얹어 여유를 둔다.
+    STAGES = 3
+    DECELERATION_MARGIN_SEC = 0.10
     rate = float(guard["control_rate_hz"])
     reaction = args.reaction if args.reaction is not None else (
-        1.0 / rate + float(guard["command_timeout_sec"])
+        STAGES / rate + DECELERATION_MARGIN_SEC
     )
     braking = speed * reaction
 
@@ -173,8 +179,8 @@ def main():
           f"— 회전 바깥쪽에 이만큼 더 필요하다")
     print()
     print(f"제동거리  {speed:.3f} m/s x {reaction:.2f} s = {braking:.3f} m")
-    print(f"  (반응 = 제어주기 1/{rate:.0f} s + 명령 타임아웃 "
-          f"{guard['command_timeout_sec']} s)")
+    print(f"  (반응 = 20 Hz 세 단계 {STAGES/rate:.2f} s + 감속 여유 "
+          f"{DECELERATION_MARGIN_SEC:.2f} s)")
     print()
 
     rows = [

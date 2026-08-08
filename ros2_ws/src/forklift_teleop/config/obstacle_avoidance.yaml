@@ -33,13 +33,13 @@ obstacle_avoidance:
 
     # base_link 기준이다. 사용자 현장 충돌 방지 조치와 명시적 승인 하에 0.25m.
     # footprint 전면 x=0.190m 대비 차체 여유는 0.06m다.
-    # tools/geometry_limits.py --speed 0.25
+    # tools/geometry_limits.py --speed 0.35
     #
-    # ⚠️ 0.25 는 **구동계 최대(0.40)가 아니라 nav2 velocity_smoother 가 묶는
+    # ⚠️ 0.35 는 **구동계 최대(0.40)가 아니라 nav2 velocity_smoother 가 묶는
     #    상한**이다. 그 상한을 올리면 여기도 같이 올려야 한다.
     #
-    # 앞끝 0.190 + 패딩 0.010 + 제동 0.138 = 0.338.
-    stop_distance_m: 0.34
+    # 앞끝 0.190 + 패딩 0.010 + 제동 0.087 = 0.287.
+    stop_distance_m: 0.29
     # 이 거리 **아래에서만** 가드가 조향에 개입한다. 여기부터 감속 시작
     # 거리(1.00) 사이에서는 감속만 하고 조향은 Nav2 에 맡긴다.
     #
@@ -88,7 +88,17 @@ obstacle_avoidance:
     #    기계 한계 36° 의 42% 라 포화 여유가 있다. Nav2 조향에 더해지는
     #    편향이고 max_abs_yaw_rate_rps 로 잘린다.
     avoidance_yaw_rate_rps: 0.15
-    max_abs_yaw_rate_rps: 0.35
+    # ⚠️ **이건 회피 편향의 상한이 아니라 Nav2 명령까지 포함한 전체 상한이다.**
+    #    0.35 는 순항 0.20 m/s 에서 곡률 1.75 → 후륜 **15.2°** 를 뜻한다.
+    #    조향을 ±58° 로 넓히고 각가속도를 3.0 으로 올려도 여기서 잘려
+    #    "왜 조향이 얕은가" 가 그대로 남는다 (2026-08-08 실측: w 를 0.6 으로
+    #    주든 1.2 로 주든 통과값이 똑같이 15.2° 였다).
+    #
+    #    2.50 은 mapping.py 의 max_angular_rps 와 같은 값이다. 회전 깊이는
+    #    거기서 곡률(min_command_turning_radius_m 0.10)로 이미 제한하므로,
+    #    가드가 한 번 더 자를 이유가 없다. 회피 편향 자체는 위의
+    #    avoidance_yaw_rate_rps 0.15 로 여전히 작게 유지된다.
+    max_abs_yaw_rate_rps: 2.50
     tof_imbalance_m: 0.10
     lidar_clearance_margin_m: 0.15
     # 이 값 이상 비어 있어야 그쪽으로 틀 수 있다. 0.55 는 폭 2 m 경기장에서
@@ -102,8 +112,8 @@ obstacle_avoidance:
     # 앞이 지나갈 수 있다고 보고 회전을 시작하면 뒤가 걸린다.
     minimum_turn_clearance_m: 0.38
     # 360도 상부 LiDAR의 후방 ±18도 통로. 자동 후진 복구 중 이 거리에서 정지.
-    # 뒤끝 0.245 + 패딩 0.010 + 제동 0.138 = 0.393.
-    rear_stop_distance_m: 0.40
+    # 뒤끝 0.245 + 패딩 0.010 + 제동 0.087 = 0.343.
+    rear_stop_distance_m: 0.35
 
     vision_confidence_threshold: 0.60
     dynamic_object_stop_distance_m: 1.50

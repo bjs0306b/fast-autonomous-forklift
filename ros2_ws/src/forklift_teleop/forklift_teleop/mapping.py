@@ -239,13 +239,13 @@ class TeleopLimits:
     #    여기만 안 따라왔다 — 아래 steering_* 주석이 경고한 바로 그 자리다.
     #    상한을 올린 것이지 명령을 키운 것이 아니다: 전진 조향은 fork_servo 의
     #    MAX_ANGULAR(0.35)이 그대로 자르고, 후진만 RETREAT_MAX_ANGULAR(0.60)를 쓴다.
-    max_angular_rps: float = 0.75
+    max_angular_rps: float = 2.50
     linear_deadband_mps: float = 0.01
     wheelbase_m: float = 0.144
     # ⚠️ 이 값은 아래 steering_min/max 로 표현 가능한 각도와 **같아야 한다**
     #    (중립 9000 ± 3600 cdeg = ±36°). 어긋나면 turn_ratio 1.0 이 다른 각도를
     #    뜻하게 돼 "최대 조향" 이 실제 최대가 아니게 된다.
-    rear_steering_limit_deg: float = 36.0
+    rear_steering_limit_deg: float = 58.0
     # 2026-08-04 실측으로 50 → 35 (S15P11A304-198). 근거·측정표는
     # config/teleop.yaml 주석에 있다 — 여기 옮겨 적으면 갈라진다.
     min_drive_percent: int = 35
@@ -296,7 +296,7 @@ class TeleopLimits:
     # 경로를 따라가며 내는 순간 곡률은 제약하지 않는다. 그래서 여기서 막는다.
     #
     # 0 이면 끈다. 기계 한계는 0.198 m 이고, 출발까지 감안한 여유값을 넣는다.
-    min_command_turning_radius_m: float = 0.30
+    min_command_turning_radius_m: float = 0.10
     # ⚠️ **후진은 상한이 다르다** (2026-08-05, S15P11A304-152).
     #
     # 실측: 같은 60% 로 전진 0.178 m/s · 후진 0.033 m/s — **19%** 다. 바닥을 바꿔도
@@ -319,8 +319,8 @@ class TeleopLimits:
     #   ±3600 은 그 뒤 실물에서 확인한 가동 범위다. 근거·측정표는 config/teleop.yaml
     #   주석에 있다 — 여기 옮겨 적으면 갈라진다.
     steering_center_cdeg: int = 9000
-    steering_min_cdeg: int = 5400
-    steering_max_cdeg: int = 12600
+    steering_min_cdeg: int = 3200
+    steering_max_cdeg: int = 14800
 
     def validate(self) -> None:
         if self.max_linear_mps <= 0.0 or self.max_angular_rps <= 0.0:

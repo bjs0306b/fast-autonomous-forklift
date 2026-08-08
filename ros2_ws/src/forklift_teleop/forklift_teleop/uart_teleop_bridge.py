@@ -23,6 +23,7 @@ from forklift_teleop.mapping import (
     steering_turn_ratio,
     select_command,
 )
+from forklift_teleop import protocol
 from forklift_teleop.protocol import (
     encode_command,
     encode_lift_command,
@@ -139,6 +140,24 @@ class UartTeleopBridge(Node):
             ),
         )
         self._limits.validate()
+
+        # 운전 범위가 프로토콜 봉투 밖이면 **여기서** 죽는다.
+        #
+        # 그러지 않으면 launch 는 멀쩡히 뜨고, 차가 처음으로 그만큼 깊게
+        # 꺾는 순간 encode_command 가 타이머 콜백 안에서 ValueError 를 내며
+        # 브리지만 조용히 사라진다. 2026-08-08 에 정확히 그렇게 됐다 --
+        # teleop.yaml 만 ±58° 로 넓히고 protocol.py 를 안 따라 넓혀서,
+        # 랩 주행 세 번이 전부 "서보가 안 꺾이고 엔코더 0" 으로 끝났다.
+        # 나머지 스택은 살아 있으니 가드는 SLOW 를 계속 발행했고, 밖에서
+        # 보면 "가는 중" 이었다. 시작할 때 못 뜨는 편이 훨씬 낫다.
+        if (protocol.STEERING_MIN_CDEG > self._limits.steering_min_cdeg
+                or self._limits.steering_max_cdeg > protocol.STEERING_MAX_CDEG):
+            raise ValueError(
+                f"조향 운전 범위 [{self._limits.steering_min_cdeg}, "
+                f"{self._limits.steering_max_cdeg}] 가 프로토콜 봉투 "
+                f"[{protocol.STEERING_MIN_CDEG}, {protocol.STEERING_MAX_CDEG}] "
+                f"밖이다 -- protocol.py 와 펌웨어 config.h 를 같이 넓힐 것"
+            )
 
         # 정지마찰을 이기는 순간 킥. 클래스와 설정은 예전부터 있었는데
         # **아무도 만들지 않아 죽은 코드였다** — Nav2 순항 0.10 m/s 는 48% 로
@@ -272,6 +291,13 @@ class UartTeleopBridge(Node):
             fork_status_topic,
             10,
         )
+        # 실제로 UART 로 나간 값. 이게 없으면 "서보가 안 움직인다" 를 밖에서
+        # 확인할 방법이 아예 없다 -- /cmd_vel_safe 는 가드의 출력이지 서보
+        # 명령이 아니고, 그 사이에 킥·속도제어·곡률제한이 전부 들어간다.
+        # 2026-08-08 에 이것 때문에 브리지가 죽은 것과 조향이 얕은 것을
+        # 구분하는 데 여러 번을 썼다.
+        self._command_publisher = self.create_publisher(
+            String, "/teleop/command", 10)
         self._timer = self.create_timer(1.0 / command_rate_hz, self._on_timer)
         self.get_logger().info(
             f"UART teleop ready: topic={cmd_vel_topic}, "
@@ -526,6 +552,18 @@ class UartTeleopBridge(Node):
                     command.steering_cdeg,
                 )
             )
+            self._command_publisher.publish(String(data=json.dumps({
+                "drivePercent": command.drive_percent,
+                "steeringCdeg": command.steering_cdeg,
+                "rearSteeringDeg": round(
+                    (command.steering_cdeg
+                     - self._limits.steering_center_cdeg) / 100.0, 1),
+                # 엔코더가 아직 안 왔으면 None 이다. 그걸 0.0 으로 적으면
+                # "정지" 와 "모름" 이 구분이 안 된다 -- 지금 찾는 것이 정확히
+                # 그 차이라서 그대로 둔다.
+                "measuredMps": (None if self._measured_speed is None
+                                else round(self._measured_speed, 3)),
+            })))
             self._read_uart()
             self._sequence = next_sequence(self._sequence)
         except (serial.SerialException, OSError) as error:

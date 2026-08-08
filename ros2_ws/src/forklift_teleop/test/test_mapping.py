@@ -4,6 +4,7 @@ import unittest
 
 import yaml
 
+from forklift_teleop import protocol
 from forklift_teleop.mapping import (
     ActuatorCommand,
     StartupKick,
@@ -123,6 +124,24 @@ class MappingTest(unittest.TestCase):
         # yaml 에 없는 관계(조향 폭 ↔ 각도 한계)는 여기서 따로 못 박는다.
         self.assertEqual(self.limits.rear_steering_limit_deg,
                          (self.LEFT_FULL - self.CENTER) / 100.0)
+
+    def test_deployed_steering_fits_inside_the_protocol_envelope(self):
+        """운전 범위가 프로토콜 봉투를 넘으면 **주행 중에** 브리지가 죽는다.
+
+        test_protocol 은 경계를 상수에서 끌어오므로 늘 통과한다 -- 그래서 이
+        불일치를 못 잡는다. 어긋나는 것은 상수끼리가 아니라 `teleop.yaml` 의
+        운전 범위와 `protocol.py` 의 봉투 사이다.
+
+        2026-08-08: yaml 과 펌웨어만 ±58° 로 넓히고 봉투는 ±50° 로 두었더니,
+        랩 주행 세 번이 전부 조향 14522 에서 브리지 사망으로 끝났다. 나머지
+        노드는 살아 있어 가드가 SLOW 를 계속 발행했고, 증상은 "서보가 안
+        꺾이는데 아무도 에러를 안 낸다" 였다.
+        """
+        params = self._deployed_params()
+        self.assertGreaterEqual(params["steering_min_cdeg"],
+                                protocol.STEERING_MIN_CDEG)
+        self.assertLessEqual(params["steering_max_cdeg"],
+                             protocol.STEERING_MAX_CDEG)
 
     def _deployed_params(self):
         path = (pathlib.Path(__file__).resolve().parent.parent

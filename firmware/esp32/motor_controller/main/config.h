@@ -17,6 +17,17 @@
  */
 #define MOTOR_INIT_RETRY_COUNT          5U
 #define MOTOR_INIT_RETRY_DELAY_MS       500U
+
+/*
+ * ToF(VL53L8CX) 초기화 재시도. `vl53l8cx_pair.c` 가 쓴다.
+ *
+ * ⚠️ 이 두 값은 원래 **젯슨의 로컬 config.h 에만** 있었고, 2026-08-07 에 노트북
+ * 사본을 젯슨으로 복사하면서 덮어써 사라졌다(빌드가 undeclared 로 깨졌다). 여기
+ * 값은 모터 쪽 재시도(5회/500ms)를 따라 복원한 것이라 **원래 값과 다를 수 있다.**
+ * 담당자가 확인해 고칠 것.
+ */
+#define TOF_INIT_RETRY_COUNT            5U
+#define TOF_INIT_RETRY_DELAY_MS         500U
 #define MOTOR_RECOVERY_PERIOD_MS        5000U
 
 /*
@@ -47,6 +58,14 @@
 #define STEPPER_MOTOR_TASK_PRIORITY       5U
 
 #define STEPPER_MOTOR_START_RATE_SPS      200U
+/*
+ * 동작 후 드라이버를 켜둘 것인가(유지 토크). 1 이면 켜둔다.
+ *
+ * 0 이면 포크가 중력으로 내려앉는다 — 2026-08-07 에 높이를 맞춰도 몇 분 뒤 달라졌다.
+ * 1 은 대기 전류를 쓰므로 드라이버가 따뜻해진다.
+ */
+#define STEPPER_MOTOR_HOLD_AFTER_MOTION   1
+
 #define STEPPER_MOTOR_DEFAULT_RATE_SPS    5000U
 #define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  10000U
 #define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  19200U
@@ -59,25 +78,20 @@
  * 14mm(상판 2 + 구멍 10 + 하판 2)라 여기서 몇 mm만 어긋나도 포크가 구멍이 아니라
  * 상판이나 하판을 민다.
  *
- * 1600 -> 1200 -> **7500** (2026-08-07). 앞의 두 값은 눈대중이었고, 7500 은 하한에서
- * 스텝을 실어 올려가며 **실물로 맞춘 값**이다(`/fork/command` 에 "UP 7500").
+ * 1600 -> 1200 -> 7500 -> **6500** (2026-08-07). 앞의 값들은 눈대중이었고, 6500 은 하한에서
+ * 스텝을 실어 올려가며 **실물로 맞춘 값**이다(`/fork/command` 에 "UP 7500" 뒤
+ * "DOWN 1000").
+ *
+ * ⚠️ **이 상수는 부팅 호밍에서만 쓰인다.** `/fork/command` 의 `HOME` 은 하한까지만
+ * 내려가고 거기서 멈춘다(백오프 없음) — 그래서 손으로 맞출 때는 `HOME` 뒤에
+ * "UP 6500" 을 따로 보내야 같은 높이가 된다. 2026-08-07 에 이걸 모르고 HOME 만
+ * 걸어놓고 "높이가 맞다" 고 판단했다.
  *
  * ⚠️ 이 상수를 고치기 전까지는 몇 mm 를 옮기려고 매번 재플래시했다. 지금은 프레임에
  * 스텝을 실을 수 있으므로, 다시 맞출 때는 하한(HOME 직후 DOWN)에서 "UP <스텝>" 으로
  * 찾은 뒤 그 숫자를 여기 적는다.
  */
-/*
- * ⚠️ 2026-08-07: 1600 -> 7500 으로 다시 올렸다.
- *
- * 앞서 7500 -> 1600 으로 내린 이유는 부팅할 때마다 포크가 15초간 파렛트
- * 높이까지 올라가는 게 불필요해 보여서였다. 실주행에서 그게 뒤집혔다:
- * **1600 은 포크가 바닥 요철에 걸릴 만큼 낮다.** 포크가 작은 턱에 걸려
- * 차가 아예 못 나갔고, 구동 계통 고장으로 오진할 뻔했다.
- *
- * 부팅 15초는 걸려서 못 움직이는 것보다 싸다. 낮추고 싶으면 먼저 실제
- * 주행 바닥의 요철 높이를 재고, 그보다 위인지 확인할 것.
- */
-#define STEPPER_MOTOR_HOME_BACKOFF_STEPS  7500U
+#define STEPPER_MOTOR_HOME_BACKOFF_STEPS  6500U
 #define STEPPER_MOTOR_HOME_BACKOFF_RATE_SPS 500U
 #define STEPPER_MOTOR_HOME_BACKOFF_ACCEL_SPS2 300U
 #define STEPPER_MOTOR_LIMIT_DEBOUNCE_MS   20U
@@ -206,8 +220,19 @@
  *    "여기까지 허용" 이지 "여기까지 쓰라" 가 아니다.
  */
 #define TELEOP_STEERING_CENTER_CDEG     9000U
-#define TELEOP_STEERING_MIN_CDEG        4000U
-#define TELEOP_STEERING_MAX_CDEG        14000U
+/*
+ * !! 4000/14000 (+-50도) -> 3200/14800 (+-58도) (2026-08-08).
+ *
+ * 조향이 얕아 2 x 3 m 목업에서 90도 선회를 완성하지 못했다. 아래쪽 띠 높이가
+ * 0.7 m 뿐인데 +-36도(ROS 쪽 한계)의 회전반경이 0.198 m 라, 차가 좌우로만
+ * 왕복하며 y 방향으로 나가지 못했다. 58도면 반경 0.090 m 다.
+ *
+ * !! 60도로 더 열지 않은 이유: SERVO_MIN/MAX_ANGLE_DEG 가 30~150 이라 60도는
+ *    물리 한계에 정확히 닿는다. 하드 스톱에 밀어붙이면 서보가 스톨한다.
+ *    2도를 여유로 남긴다.
+ */
+#define TELEOP_STEERING_MIN_CDEG        3200U
+#define TELEOP_STEERING_MAX_CDEG        14800U
 
 /* I2C */
 #define I2C_SDA_GPIO                    GPIO_NUM_8
@@ -402,37 +427,8 @@
 #define TOF_ADDRESS_SETTLE_MS           50
 
 /*
- * vl53l8cx_init() 은 84 KB 펌웨어를 I2C 로 올린다 — 400 kHz 에서 센서당 약
- * 2초다. 접촉이 조금만 불안해도 그 긴 전송에서 깨지는데, 주소 스캔 같은 짧은
- * 트랜잭션은 멀쩡히 통과하므로 **배선 문제가 센서 고장처럼 보인다.**
- *
- * 2026-08-07: 우측 센서가 부팅마다 갈렸다(한 번은 성공, 다음엔 init failed: 3).
- * 실패가 간헐적이므로 한 번에 포기하지 않는다. 액추에이터도 같은 패턴이다
- * (MOTOR_INIT_RETRY_COUNT).
- *
- * ⚠️ 재시도는 증상 완화지 원인 해결이 아니다. 재시도가 실제로 쓰이면
- * 그 센서의 배선을 점검할 것 — 로그에 몇 번째에 성공했는지 남긴다.
- */
-#define TOF_INIT_RETRY_COUNT            3U
-#define TOF_INIT_RETRY_DELAY_MS         200U
-
-/*
  * 100 kHz cannot carry two 8x8 readouts at 15 Hz. The part is rated to 1 MHz;
  * 400 kHz leaves margin for the external pull-ups actually fitted.
- */
-/*
- * The part is rated to 1 MHz; 100 kHz cannot carry two 8x8 readouts at
- * 15 Hz.
- *
- * ⚠️ This speed only works with **external pull-ups**. On 2026-08-07 the
- * bus ran on the ESP32's internal pull-ups alone (about 45 kOhm), some
- * twenty times too weak here, and one of the two sensors failed its
- * 84 KB firmware upload on every boot -- alternating sides, so it read
- * as flaky hardware rather than as a bus problem. Short transactions
- * always passed; only the long transfer accumulated enough error to
- * fail. Dropping to 100 kHz made it disappear (3 boots, both sensors,
- * no retries), which is what identified rise time rather than supply as
- * the cause. 2 kOhm to 3V3 on SDA and SCL, one pair for the whole bus.
  */
 #define TOF_I2C_CLOCK_HZ                400000
 

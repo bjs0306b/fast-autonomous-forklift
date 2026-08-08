@@ -167,7 +167,11 @@ controller_server:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # 0.10 -> 0.08. teleop.yaml 의 max_linear_mps 0.10 아래에 두어야
       # 조향 보정이나 가속이 상한에 부딪히지 않는다.
-      desired_linear_vel: 0.20
+      # 0.28 -> 0.36 (2026-08-08). 58° 로 꺾은 채 굴러가려면 속도가 필요하다 --
+      # 조향륜이 바닥을 옆으로 긁는 저항은 느릴수록 못 이긴다. teleop.yaml 의
+      # max_linear_mps 0.40 아래이므로 듀티 매핑(따라서 파렛 진입 깊이)은
+      # 그대로다. 듀티 상·하한을 올려 속도를 얻으려 하면 그쪽이 바뀐다.
+      desired_linear_vel: 0.36
       lookahead_dist: 0.25
       min_lookahead_dist: 0.15
       max_lookahead_dist: 0.35
@@ -187,7 +191,7 @@ controller_server:
       #
       # ⚠️ 반대로 올리지도 말 것. max_linear_mps 가 0.10 이고 정지거리를 그
       #    값으로 유도했다. 쓸 수 있는 범위는 0.078~0.10 로 좁다.
-      min_approach_linear_velocity: 0.10
+      min_approach_linear_velocity: 0.12
       approach_velocity_scaling_dist: 0.30
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
@@ -196,16 +200,18 @@ controller_server:
       # 이 반경보다 급한 곡선에서 감속이 시작된다. 플래너 최소반경과 같은
       # 값이어야 한다 — 크게 두면 계획된 모든 곡선에서 감속이 걸리고, 그
       # 속도는 실측 스톨 구간이라 차가 아예 멎는다.
-      regulated_linear_scaling_min_radius: 0.35
+      regulated_linear_scaling_min_radius: 0.18
       # 위 min_approach_linear_velocity 주석 참고 -- 여기도 올리지 말 것.
       # 위와 같은 이유. 곡률 규제도 0.078 아래로는 의미가 없다.
-      regulated_linear_scaling_min_speed: 0.10
+      regulated_linear_scaling_min_speed: 0.12
       use_rotate_to_heading: false
       # No rear obstacle sensor is installed.  Reeds-Shepp + reversing made
       # Nav2 choose a negative-velocity path even for the first forward lap
       # goal, where the low reverse ramp could not overcome static friction.
       allow_reversing: false
-      max_angular_accel: 0.5
+      # 위 velocity_smoother 와 같은 이유로 0.5 -> 3.0. 컨트롤러가 낸 각속도를
+      # 스무더가 다시 자르므로 **둘 다** 올려야 효과가 있다.
+      max_angular_accel: 3.0
 
 local_costmap:
   local_costmap:
@@ -520,7 +526,7 @@ planner_server:
       #    2026-08-07: 순항 0.25 m/s · 각속도 0.75 rad/s 로 올리면서
       #    0.25/0.75 = 0.333 -> 0.35 로 맞춘다.
       #    기계 한계는 축거 0.144 / tan(36°) = 0.198 m 라 아직 여유가 있다.
-      minimum_turning_radius: 0.35
+      minimum_turning_radius: 0.18
       reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.2
@@ -599,10 +605,22 @@ velocity_smoother:
     #    여기서 묶는 값이 곧 obstacle_avoidance.yaml 의 stop_distance_m 근거다.
     #    한쪽만 바꾸면 안 된다 -- tools/geometry_limits.py --speed 0.20 으로
     #    확인할 것.
-    max_velocity: [0.25, 0.0, 0.75]
-    min_velocity: [-0.25, 0.0, -0.75]
-    max_accel: [0.20, 0.0, 0.40]
-    max_decel: [-0.30, 0.0, -0.50]
+    # 선속도 상한은 desired_linear_vel(0.36) 위에 있어야 한다. 같거나 낮으면
+    # 순항에서 늘 포화라 회전 중 감속·재가속 여유가 없다.
+    max_velocity: [0.45, 0.0, 2.60]
+    min_velocity: [-0.45, 0.0, -2.60]
+    # ⚠️ 각속도 가속을 0.40 -> 3.00 (2026-08-08). **여기가 조향을 얕게
+    #    만들고 있었다.** 조향각은 곡률(각속도/선속도)로 정해지는데, 0.40
+    #    rad/s^2 면 2.0 rad/s 까지 5초가 걸린다. 차는 그 전에 멈추거나 방향을
+    #    바꾸므로 각속도가 한 번도 커지지 못했고, 조향 한계를 36 -> 58도로
+    #    열어도 실제로는 얕게만 꺾였다.
+    #
+    #    이건 물리적 제약이 아니다. 조향은 서보가 0.2초면 돌아간다 -- 바퀴가
+    #    도는 속도(선속도)와 달리 질량을 이겨 낼 일이 없다.
+    #
+    # 선속도 가속은 그대로 둔다. 그쪽은 정지마찰과 모터 토크가 진짜로 제한한다.
+    max_accel: [0.20, 0.0, 3.00]
+    max_decel: [-0.30, 0.0, -3.00]
     # EKF output. Keep this aligned with bt_navigator and Orin telemetry.
     odom_topic: "/odometry/filtered"
     odom_duration: 0.1

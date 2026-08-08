@@ -229,7 +229,20 @@ static void stepper_motor_finish_motion(void)
     }
 
     gpio_set_level(STEPPER_MOTOR_STEP_GPIO, 0);
-    stepper_motor_set_enabled(false);
+    /*
+     * ⚠️ **동작이 끝나도 드라이버를 끄지 않는다.**
+     *
+     * 끄면 유지 토크가 사라져 포크가 중력으로 조금씩 내려앉는다. 2026-08-07 에
+     * 포크 높이를 파렛트 구멍에 맞춰 놓고 몇 분 뒤 정렬을 돌리면 **이미 내려가
+     * 있어서** 구멍에 안 들어갔고, 그걸 "명령한 스텝만큼 안 올라간다" 로 오해해
+     * 하루 종일 높이를 다시 맞췄다.
+     *
+     * 대가는 대기 전류(발열)다. 시연 시간에는 문제없지만 장시간 방치하면
+     * 드라이버·모터가 따뜻해진다.
+     */
+    if (STEPPER_MOTOR_HOLD_AFTER_MOTION == 0) {
+        stepper_motor_set_enabled(false);
+    }
 
     if (s_motion.timer_error) {
         ESP_LOGE(TAG, "Motion aborted due to STEP timer error");
