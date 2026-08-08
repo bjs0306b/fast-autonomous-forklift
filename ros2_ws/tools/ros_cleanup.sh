@@ -24,6 +24,14 @@ PATTERNS+='|tf2_ros/static_transform_publisher|slam_toolbox'
 PATTERNS+='|nav2_controller/controller_server|nav2_planner/planner_server'
 PATTERNS+='|bt_navigator|behavior_server|smoother_server|velocity_smoother'
 PATTERNS+='|waypoint_follower|lifecycle_manager|nav2_map_server'
+# ⚠️ robot_localization/ekf_node 가 빠져 있었다. 살아남은 EKF 는 다른 것들보다
+#    나쁘다 -- odom->base_link 를 자기도 발행하므로, 두 개가 동시에 살아 있으면
+#    TF 리스너가 마지막에 온 것을 쓰면서 자세가 두 값 사이를 튄다.
+#
+#    2026-08-08 에 세 개가 떠 있었고, 정지한 차의 yaw 가 -45도와 0도 사이를
+#    오갔다. RViz 에서는 점군이 통째로 흔들리는 것으로 보이고, 센서를 아무리
+#    들여다봐도 원인이 안 나온다 -- 센서는 멀쩡하기 때문이다.
+PATTERNS+='|robot_localization/ekf_node'
 PORTS=${PORTS:-"/dev/ttyACM0 /dev/ttyUSB0 /dev/ttyTHS1"}
 
 pkill -f "ros2 launch forklift_teleop" 2>/dev/null
