@@ -17,14 +17,18 @@ so poses can be handed across without anyone converting anything.
    map_odom_publisher 가 /initialpose 를 받아 좌표계를 거기에 맞춘다. 멈춘
    상태에서 고치고 다시 계획할 것 -- 고치면 움직이는 것은 차가 아니라 세계다.
 
-⚠️ **AMCL 을 안 쓴다.** 심 쪽 주석이 이유를 적어 두었다 -- 반복적인 창고에서는
-   스캔 정합이 엉뚱한 통로에 걸려 몇 미터씩 어긋난다. 통로가 두 줄뿐인 목업은
-   그 위험이 더 크다.
+localization 인자로 둘 중 하나를 고른다. **택일이고, 둘 다 map->odom 을 발행
+하므로 같이 띄우면 자세가 튄다.**
 
-⚠️ **그래서 위치는 순전히 적산이다.** 심에서는 odom 이 정답값이라 이 방식이
-   공짜지만, 실물 odom 은 엔코더와 IMU 적산이라 **시간이 갈수록 밀린다**. 짧은
-   임무에는 쓸 만하고 긴 주행에는 아니다. 밀림이 보이면 차를 시작 지점에 다시
-   놓고 재기동하는 것이 가장 확실하다.
+  localization:=manual  기본값. map_odom_publisher 가 발행하고 사람이 RViz 의
+                        2D Pose Estimate 로 고친다. 추적을 안 하므로 엉뚱한
+                        통로에 걸릴 일이 없는 대신 **밀림도 안 잡힌다** --
+                        실물 odom 은 엔코더·IMU 적산이라 시간이 갈수록 밀린다.
+
+  localization:=amcl    스캔 정합으로 계속 추적한다. 밀림을 잡아 주지만 이
+                        지도에서 잘 될지는 해봐야 안다 -- 시뮬 지도는 선반을
+                        꽉 찬 덩어리로 그리는데 실물 선반은 열린 구조라 **빔의
+                        46% 가 지도상 빈 공간에 떨어진다**(2026-08-08 실측).
 
 지도를 새로 만들려면 field_slam_nav2.launch.py 를 쓴다. 둘을 같이 띄우면
 map->odom 을 둘이 발행해 자세가 튄다 -- 2026-08-08 에 EKF 가 세 개 떠서 겪은
@@ -40,9 +44,9 @@ from launch.actions import (
     IncludeLaunchDescription,
     SetEnvironmentVariable,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
@@ -96,6 +100,13 @@ def generate_launch_description() -> LaunchDescription:
             description="시뮬 지도의 실물 축척 버전 (_real 이 붙은 쪽)",
         ),
         DeclareLaunchArgument("drive_enabled", default_value="false"),
+        # manual: map_odom_publisher (사람이 RViz 로 고침, 추적 없음)
+        # amcl:   스캔 정합으로 계속 추적
+        #
+        # ⚠️ 택일이다. 둘 다 map->odom 을 발행하므로 같이 띄우면 TF 리스너가
+        #    마지막에 온 것을 쓰면서 자세가 두 값 사이를 튄다 -- 2026-08-08 에
+        #    EKF 세 개로 겪은 것과 같은 고장이고, 센서를 봐서는 안 보인다.
+        DeclareLaunchArgument("localization", default_value="manual"),
         # 시작 지점의 map 좌표. 차를 물리적으로 여기에 놓고 켠다.
         DeclareLaunchArgument("start_x_m", default_value="0.30"),
         DeclareLaunchArgument("start_y_m", default_value="0.20"),
@@ -153,6 +164,11 @@ def generate_launch_description() -> LaunchDescription:
         executable="map_odom_publisher",
         name="map_odom_publisher",
         output="screen",
+        condition=UnlessCondition(
+            PythonExpression(
+                ["'", LaunchConfiguration("localization"), "' == 'amcl'"]
+            )
+        ),
         parameters=[{
             "start_x_m": ParameterValue(
                 LaunchConfiguration("start_x_m"), value_type=float),
@@ -160,6 +176,67 @@ def generate_launch_description() -> LaunchDescription:
                 LaunchConfiguration("start_y_m"), value_type=float),
             "start_yaw_rad": ParameterValue(
                 LaunchConfiguration("start_yaw_rad"), value_type=float),
+        }],
+    )
+
+    # ⚠️ AMCL 이 이 지도에서 잘 될지는 해봐야 안다. 스캔이 지도와 맞는 정도로
+    #    위치를 고르는데, 시뮬 지도는 선반을 꽉 찬 덩어리로 그리고 실물 선반은
+    #    열린 구조라 **빔의 46% 가 지도상 빈 공간에 떨어진다**(2026-08-08 실측).
+    #    그만큼 정보가 줄어 벽에만 의존하게 되는데, 2 x 3 m 상자에서는 그것으로
+    #    충분할 수도 있다.
+    #
+    #    manual 쪽과 비교해 보고 고를 것. 밀림이 쌓이는 긴 주행에는 AMCL 이,
+    #    한 번 맞춰 놓고 짧게 도는 데는 manual 이 낫다.
+    amcl = Node(
+        package="nav2_amcl",
+        executable="amcl",
+        name="amcl",
+        output="screen",
+        condition=IfCondition(
+            PythonExpression(
+                ["'", LaunchConfiguration("localization"), "' == 'amcl'"]
+            )
+        ),
+        parameters=[{
+            "use_sim_time": False,
+            "base_frame_id": "base_link",
+            "odom_frame_id": "odom",
+            "global_frame_id": "map",
+            "scan_topic": "/scan",
+            "set_initial_pose": True,
+            "initial_pose.x": ParameterValue(
+                LaunchConfiguration("start_x_m"), value_type=float),
+            "initial_pose.y": ParameterValue(
+                LaunchConfiguration("start_y_m"), value_type=float),
+            "initial_pose.yaw": ParameterValue(
+                LaunchConfiguration("start_yaw_rad"), value_type=float),
+            # 목업이 2 x 3 m 라 라이다가 사방 벽을 짧은 거리에서 본다. 기본값
+            # (12 m)은 이 공간에 비해 지나치게 멀다.
+            "laser_max_range": 4.0,
+            "laser_min_range": 0.1,
+            "max_particles": 2000,
+            "min_particles": 500,
+            # 이 차는 후륜 조향이지만 AMCL 의 운동 모델은 전륜 기준 이름뿐이고,
+            # 실제로는 odom 증분만 쓴다.
+            "robot_model_type": "nav2_amcl::DifferentialMotionModel",
+            "update_min_d": 0.05,
+            "update_min_a": 0.1,
+        }],
+    )
+    amcl_manager = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_amcl",
+        output="screen",
+        condition=IfCondition(
+            PythonExpression(
+                ["'", LaunchConfiguration("localization"), "' == 'amcl'"]
+            )
+        ),
+        parameters=[{
+            "use_sim_time": False,
+            "autostart": True,
+            "node_names": ["amcl"],
         }],
     )
 
@@ -182,5 +259,5 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         *arguments, sensors, lidar_odom, map_server, map_manager,
-        map_to_odom, nav2, guarded_drive,
+        map_to_odom, amcl, amcl_manager, nav2, guarded_drive,
     ])
