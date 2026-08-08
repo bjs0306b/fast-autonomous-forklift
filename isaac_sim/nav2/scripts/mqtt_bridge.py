@@ -75,6 +75,12 @@ SIM_CAMERA = "fast/v1/sim/camera"
 REAL_VEHICLES = {
     "fk01": "/real_f01/pose",       # MQTT telemetry -> ROS (미러용, 들어옴)
 }
+# 실물의 화물 사건을 시뮬에 반영한다. 실물이 세트장에서 실제로 적재를 끝내면
+# 시뮬의 REAL_F01 도 같은 화물을 들거나 같은 랙에 놓아야 그림이 맞는다.
+#   fast/v1/vehicle/fk01/cargo  ->  ROS /real_f01/cargo_cmd  ->  cargo_demo
+REAL_CARGO = {
+    "fk01": "/real_f01/cargo_cmd",
+}
 
 # 관제 -> 실물 명령 중계. 관제 스크립트는 ROS 토픽으로만 말하고, MQTT 전송은
 # 여기서 한다. 그래야 관제가 시뮬/실물을 같은 방식(ROS 발행)으로 다룰 수 있다.
@@ -141,6 +147,9 @@ class MqttBridge(Node):
         # 브릿지는 이 토픽으로 넘기고, camera_switch.enable_mqtt_camera() 가 받는다.
         self.camera_pub = self.create_publisher(String, "/sim/camera_cmd", 10)
         # 실물 좌표를 Isaac 으로 넘기는 토픽 (트윈 미러)
+        self.real_cargo_pubs = {
+            rid: self.create_publisher(String, topic, 10)
+            for rid, topic in REAL_CARGO.items()}
         self.real_pubs = {rid: self.create_publisher(String, topic, 10)
                           for rid, topic in REAL_VEHICLES.items()}
         # 관제가 ROS 로 낸 실물 명령을 MQTT 로 내보낸다
@@ -236,6 +245,9 @@ class MqttBridge(Node):
         for rid in REAL_VEHICLES:
             client.subscribe(f"{BASE}/{rid}/telemetry", qos=0)
             self.get_logger().info(f"구독: {BASE}/{rid}/telemetry (실물 미러)")
+        for rid in REAL_CARGO:
+            client.subscribe(f"{BASE}/{rid}/cargo", qos=1)
+            self.get_logger().info(f"구독: {BASE}/{rid}/cargo (실물 화물 반영)")
         self.get_logger().info(
             "구독: task, control, cargo, control/all, sim/camera")
 
@@ -266,6 +278,15 @@ class MqttBridge(Node):
                     if pose:
                         self.real_pubs[rid].publish(String(
                             data=json.dumps({"pose": pose})))
+                    hit = True
+            if hit:
+                continue
+            # 실물 화물 지시 -> 시뮬의 미러 차량에 반영
+            for rid, ros_topic in REAL_CARGO.items():
+                if topic == f"{BASE}/{rid}/cargo":
+                    self.real_cargo_pubs[rid].publish(
+                        String(data=json.dumps(payload, ensure_ascii=False)))
+                    self.get_logger().info(f"실물 화물 반영: {rid} {payload}")
                     hit = True
             if hit:
                 continue
@@ -354,6 +375,26 @@ class MqttBridge(Node):
     def accept_task(self, v, p):
         if v["stopped"]:
             self.get_logger().warn(f"{v['id']} {v['stop_kind']} 중 — task 무시")
+            return
+
+        # 랙 적재/반출은 미션이 아니라 화물 처리기로 넘긴다.
+        # 백엔드가 시뮬·실물에 **같은 페이로드**를 쓸 수 있게 하려는 것이다.
+        #   실물은 approach/dock/shelfHeight 좌표를 보고 스스로 도킹하고,
+        #   시뮬은 rack 이름만 보고 내장 좌표표로 처리한다.
+        # 그래서 백엔드는 둘을 한 메시지에 같이 담아 보내면 된다.
+        act = str(p.get("action", "")).upper()
+        if act in ("PLACE_RACK", "PICK_RACK"):
+            rack = p.get("rack")
+            if not rack:
+                self.get_logger().warn(
+                    f"{v['id']} {act} 에 rack 이름이 없음 — 시뮬은 이름이 필요합니다. "
+                    f"백엔드는 좌표와 함께 \"rack\":\"A1\" 도 넣어 주세요")
+                return
+            v["task_id"] = p.get("taskId")
+            body = {"action": "place_rack" if act == "PLACE_RACK" else "pick_rack",
+                    "rack": rack}
+            v["cargo_pub"].publish(String(data=json.dumps(body)))
+            self.get_logger().info(f"{v['id']} {act} {rack} (task {v['task_id']})")
             return
 
         mission = []
@@ -509,7 +550,13 @@ class MqttBridge(Node):
         if not p:
             return
         d = math.hypot(p["x"] - BAY_XY[0], p["y"] - BAY_XY[1])
-        stopped = msg["state"] in ("IDLE", "ESTOPPED", "HOLDING")
+        # "멈췄나" 는 상태 이름이 아니라 실제 속도로 본다.
+        # 상태 이름으로만 보면 새 상태가 생길 때마다 여기가 조용히 깨진다
+        # (LOADING 을 추가했을 때 실제로 그랬다 — arrived 가 안 나가 AI 가
+        #  측정을 시작하지 못했다).
+        v_lin = abs((msg.get("velocity") or {}).get("linear", 0.0))
+        stopped = (v_lin < 0.05
+                   or msg["state"] in ("IDLE", "ESTOPPED", "HOLDING", "LOADING"))
 
         if d <= BAY_RADIUS and stopped:
             if v["arrived_sent"]:

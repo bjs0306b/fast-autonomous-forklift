@@ -28,6 +28,7 @@ REAL_ID = "REAL_F01"
 REAL_PRIM = f"/World/Forklift_{REAL_ID}"
 REAL_TOPIC = "/real_f01/pose"
 REAL_SCALE = 1.0         # MQTT 는 시뮬 좌표계 — 그대로 쓴다
+REAL_SPAWN = (4.0, 2.0, 0.0)   # 실물 (0.400, 0.200) m, +x 를 봄
 
 _mirror_sub = []
 _stage_m = omni.usd.get_context().get_stage()
@@ -57,7 +58,7 @@ def _ensure_real_vehicle():
         print(f"{REAL_PRIM} 생성됨 — 씬을 저장(Ctrl+S)해 두면 다음부터 재사용")
     lift = f"{REAL_PRIM}/forklift_c/lift"
     v = fleet.spawn(REAL_ID, REAL_PRIM,      # noqa: F821
-                    spawn=(3.0, 2.0, 0.0),
+                    spawn=REAL_SPAWN,
                     lift_prim=lift if _stage_m.GetPrimAtPath(lift).IsValid()
                     else None)
     v.mirror = True                          # cmd_vel 로 움직이지 않는다

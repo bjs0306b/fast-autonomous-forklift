@@ -860,6 +860,60 @@ def _check_vehicle_version(need=8):
     return True
 
 
+def place_rack_direct(rack="A1", vehicle=None, height_real=None,
+                      cargo_id=None):
+    """랙 슬롯에 화물을 그대로 놓는다 — 주행 절차 없이.
+
+    실물 지게차(REAL_F01)가 세트장에서 실제로 적재를 끝냈을 때 쓴다.
+    실물은 이미 자기 힘으로 도킹·적재를 마쳤으므로, 시뮬은 그 결과만
+    반영하면 된다. 스텝 머신을 돌리면 미러 위치와 싸우게 되므로 쓰지 않는다.
+
+        place_rack_direct("A1")                     # 빈 슬롯에 새로 놓기
+        place_rack_direct("A1", vehicle="REAL_F01") # 그 차가 들고 있던 걸 놓기
+    """
+    if rack not in RACK_SLOTS:
+        print(f"랙 '{rack}' 없음. 사용 가능: {list(RACK_SLOTS)}")
+        return False
+    px, py, pz = RACK_SLOTS[rack]["place"]
+
+    v = fleet.vehicles.get(vehicle) if vehicle else None   # noqa: F821
+
+    # 차가 들고 있던 화물이면 그걸 옮기고 추종만 끊는다.
+    if v is not None and (v.cargo is not None or v.cargo_id is not None):
+        cid = v.cargo_id
+        v.place(px, py, pz, yaw=_YAW_WEST)
+        try:
+            v.set_work_state("")
+        except AttributeError:
+            pass
+        print(f"{vehicle} 의 화물 {cid} 를 {rack} ({px}, {py}, {pz}) 에 놓음")
+        return True
+
+    # 들고 있는 게 없으면 새로 만들어 슬롯에 얹는다 (실물이 이미 놓은 경우).
+    h = (height_real if height_real is not None else 0.15) * SCALE
+    _cargo_counter[0] += 1
+    cid = cargo_id or f"R{_cargo_counter[0]:04d}"
+    root = f"{CARGO_ROOT}/{cid}"
+    if not _stage.GetPrimAtPath(CARGO_ROOT).IsValid():
+        UsdGeom.Xform.Define(_stage, CARGO_ROOT)
+    if _stage.GetPrimAtPath(root).IsValid():
+        _stage.RemovePrim(root)
+
+    grp = UsdGeom.Xform.Define(_stage, root)
+    UsdGeom.XformCommonAPI(grp).SetTranslate((px, py, pz))
+    UsdGeom.XformCommonAPI(grp).SetRotate((0.0, 0.0,
+                                           math.degrees(_YAW_WEST)))
+    top = _make_pallet(root, (px, py, pz))
+    box = UsdGeom.Cube.Define(_stage, f"{root}/box")
+    box.CreateSizeAttr(1.0)
+    bw, bd, bh = box_size(h)
+    UsdGeom.XformCommonAPI(box).SetScale((bw, bd, bh))
+    UsdGeom.XformCommonAPI(box).SetTranslate((0.0, 0.0, top + bh / 2))
+    box.CreateDisplayColorAttr([Gf.Vec3f(0.8, 0.5, 0.2)])
+    print(f"{rack} ({px}, {py}, {pz}) 에 화물 {cid} 배치 (실물 적재 반영)")
+    return True
+
+
 def place_on_rack(rack="A1", vehicle="SIM_F02"):
     """랙 적재 — Nav2 가 approach 까지 데려온 뒤 이 함수를 부른다.
 
@@ -1020,7 +1074,19 @@ def _drain_cargo_cmds(event):
                 drop_here(vehicle)
                 continue
             if act in ("place_rack", "rack"):
-                place_on_rack(p.get("rack", "A1"), vehicle)
+                # 미러(실물 추종) 차량은 주행 절차를 돌리지 않는다.
+                # 실물이 이미 실제로 적재를 끝냈으므로 결과만 반영한다.
+                _v = fleet.vehicles.get(vehicle)          # noqa: F821
+                if _v is not None and getattr(_v, "mirror", False):
+                    place_rack_direct(p.get("rack", "A1"), vehicle,
+                                      p.get("height"), p.get("cargoId"))
+                else:
+                    place_on_rack(p.get("rack", "A1"), vehicle)
+                continue
+            if act in ("spawn_rack", "rack_set"):
+                # 차량과 무관하게 슬롯에 화물을 놓는다 (재고 초기화 등)
+                place_rack_direct(p.get("rack", "A1"), None,
+                                  p.get("height"), p.get("cargoId"))
                 continue
             if act in ("align_bay", "align"):
                 align_bay(vehicle, float(p.get("timeout", 10.0)))
@@ -1136,6 +1202,8 @@ def enable_mqtt_cargo():
         except Exception:
             pass
     _cargo_subs.clear()
+    # 미러 차량(REAL_F01)도 포함한다. 실물이 적재를 끝내면 그 결과를
+    # 시뮬에 반영해야 하기 때문이다 (place_rack_direct 로 처리된다).
     for vid, v in fleet.vehicles.items():   # noqa: F821
         topic = f"/{v.ns}/cargo_cmd"
         sub = fleet.create_subscription(     # noqa: F821

@@ -300,7 +300,7 @@ fast/v1/vehicle/fk01/task       QoS 1
 { "taskId": "T-0043", "action": "PLACE_RACK", "cargoId": "C-0007",
   "approach":    { "x": 5.00, "y": 9.30, "yaw": 3.1416 },
   "dock":        { "x": 2.60, "y": 9.30, "yaw": 3.1416 },
-  "shelfHeight": 13.25,
+  "shelfHeight": 1.325,
   "reverseDist": 2.0 }
 ```
 
@@ -308,7 +308,7 @@ fast/v1/vehicle/fk01/task       QoS 1
 
 ```
 1. approach (0.500, 0.930) 까지 Nav2 로 주행
-2. 포크를 shelfHeight (1.325 m) 로 상승
+2. 포크를 shelfHeight ÷10 = **0.1325 m (132.5 mm)** 로 상승
 3. approach → dock (0.260, 0.930) 까지 저속 직진    ← Nav2 를 쓰지 않는다
 4. 포크 하강 (= 화물이 선반에 얹힌다)
 5. reverseDist (0.20 m) 만큼 후진

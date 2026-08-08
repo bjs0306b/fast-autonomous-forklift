@@ -65,7 +65,7 @@ fast/v1/vehicle/fk01/telemetry     10 Hz     QoS 0
   "ts": 1785000000000,
   "pose":     { "x": 15.5, "y": 4.0, "yaw": 1.5708 },
   "velocity": { "linear": 1.2, "angular": 0.03 },
-  "forkHeight": 13.25,
+  "forkHeight": 1.325,
   "loaded": true,
   "cargoId": "C-0007",
   "cargo":    { "id": "C-0007", "w": 0.75, "d": 0.91, "h": 1.11 },
@@ -202,7 +202,7 @@ fast/v1/vehicle/fk01/task     QoS 1
   "cargoId": "C-0007",
   "approach":    { "x": 5.00, "y": 9.30, "yaw": 3.1416 },
   "dock":        { "x": 2.60, "y": 9.30, "yaw": 3.1416 },
-  "shelfHeight": 13.25,
+  "shelfHeight": 1.325,
   "reverseDist": 2.0
 }
 ```
@@ -239,7 +239,7 @@ fast/v1/vehicle/fk01/task     QoS 1
 
 ```json
 {"taskId":"T-0043","action":"PICK_RACK","cargoId":"C-0007",
- "approach":{...},"dock":{...},"shelfHeight":13.25,"reverseDist":2.0}
+ "approach":{...},"dock":{...},"shelfHeight":1.325,"reverseDist":2.0}
 ```
 완료 후 `CARGO_LOADED` 이벤트를 발행한다.
 
@@ -324,7 +324,7 @@ mosquitto_pub -t 'fast/v1/vehicle/fk01/task' -m '{
   "taskId":"T-2","action":"PLACE_RACK","cargoId":"C-0007",
   "approach":{"x":5.00,"y":9.30,"yaw":3.1416},
   "dock":{"x":2.60,"y":9.30,"yaw":3.1416},
-  "shelfHeight":13.25,"reverseDist":2.0}'
+  "shelfHeight":1.325,"reverseDist":2.0}'
 
 # 관제 흉내 — 정지 / 해제
 mosquitto_pub -t 'fast/v1/vehicle/fk01/control' -m '{"command":"HOLD"}'
