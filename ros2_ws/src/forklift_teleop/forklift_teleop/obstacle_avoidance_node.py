@@ -1,5 +1,6 @@
 """ROS2 guard for roof LiDAR and two forward-facing fork-level ToFs."""
 
+from dataclasses import replace
 import json
 import math
 import struct
@@ -8,7 +9,11 @@ import time
 from geometry_msgs.msg import Twist
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSProfile,
+    qos_profile_sensor_data,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan, PointCloud2, PointField
 from std_msgs.msg import String
@@ -67,6 +72,10 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter("lidar_clearance_margin_m", 0.15)
         self.declare_parameter("minimum_turn_clearance_m", 0.55)
         self.declare_parameter("rear_stop_distance_m", 0.30)
+        # 파렛 진입 중에만 쓰는 전방 임계. footprint 전면이 0.190 m 이므로
+        # 0.20 은 차체가 닿기 직전이다.
+        self.declare_parameter("align_stop_distance_m", 0.20)
+        self.declare_parameter("mode_topic", "/drive/mode")
         self.declare_parameter("vision_confidence_threshold", 0.60)
         self.declare_parameter("dynamic_object_stop_distance_m", 1.50)
         self.declare_parameter("dynamic_labels", [
@@ -176,6 +185,41 @@ class ObstacleAvoidanceNode(Node):
             ),
         )
         self._policy.validate()
+
+        # ⚠️ **ALIGN 일 때는 파렛이 장애물이 아니다.** 포크를 넣으려면 일부러
+        #    파렛까지 다가가야 하는데, 순항용 0.25 m 로는 닿기 전에 가드가
+        #    세운다. 그러면 미션은 "정렬 성공, 포크 헛돌음" 으로 끝난다.
+        #
+        #    풀어 주는 것은 **전방 거리 하나뿐**이다. 회피 조향은 오히려 꺼야
+        #    한다 -- 파렛을 비켜 가면 진입 자체가 어긋난다. 후방 정지와 센서
+        #    타임아웃은 그대로 산다. 사람이 뒤에 있는 것과 포크 앞의 파렛은
+        #    다른 문제다.
+        align_stop = float(self.get_parameter("align_stop_distance_m").value)
+        if align_stop <= 0.0 or align_stop > self._policy.stop_distance_m:
+            raise ValueError(
+                "align_stop_distance_m 는 0 보다 크고 stop_distance_m "
+                f"({self._policy.stop_distance_m}) 이하여야 한다"
+            )
+        # 회피 구간은 최소로 좁힌다(정지 임계 바로 위 1 cm). validate() 가
+        # stop < engage <= slowdown 을 요구해서 0 으로는 못 두는데, 넓게 두면
+        # 조향률이 0 인데도 상태가 계속 AVOID_LEFT 로 찍혀 로그가 거짓말을
+        # 한다 -- 진입 중 무슨 일이 있었는지 나중에 못 읽는다.
+        align_slowdown = max(align_stop * 2.0, 0.30)
+        self._align_policy = replace(
+            self._policy,
+            stop_distance_m=align_stop,
+            slowdown_distance_m=align_slowdown,
+            avoidance_engage_distance_m=align_stop + 0.01,
+            avoidance_yaw_rate_rps=0.0,
+        )
+        self._align_policy.validate()
+        self._drive_mode = "NAV"
+        latched = QoSProfile(depth=1)
+        latched.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
+        self.create_subscription(
+            String, str(self.get_parameter("mode_topic").value),
+            self._on_drive_mode, latched)
+
         self._max_yaw_rate = float(
             self.get_parameter("max_abs_yaw_rate_rps").value
         )
@@ -375,6 +419,18 @@ class ObstacleAvoidanceNode(Node):
             missing.append("vision")
         return missing
 
+    def _on_drive_mode(self, message: String) -> None:
+        mode = message.data.strip().upper()
+        if mode == self._drive_mode:
+            return
+        self._drive_mode = mode
+        # 크게 남긴다. 전방 임계가 바뀌는 순간이라, 사고가 나면 제일 먼저
+        # 확인할 줄이다.
+        self.get_logger().info(
+            f"Drive mode {mode}: front stop "
+            f"{(self._align_policy if mode == 'ALIGN' else self._policy).stop_distance_m:.2f} m"
+        )
+
     def _on_timer(self) -> None:
         now = time.monotonic()
         output = Twist()
@@ -402,7 +458,8 @@ class ObstacleAvoidanceNode(Node):
             tof,
             vision,
             self._missing_required_sensors(now),
-            self._policy,
+            self._align_policy if self._drive_mode == "ALIGN"
+            else self._policy,
         )
         if self._command.linear.x < 0.0:
             if self._lidar.rear_m <= self._rear_stop_distance:

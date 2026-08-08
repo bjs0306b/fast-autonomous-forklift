@@ -43,6 +43,8 @@ class SimTaskReceiver(Node):
         self.declare_parameter("mqtt_keepalive", 30)
         self.declare_parameter("mqtt_ca_cert", "")
         self.declare_parameter("mqtt_tls_insecure", False)
+        # 로컬 mosquitto 로 사슬을 시험할 때만 켠다. 운영 브로커는 인증·TLS 다.
+        self.declare_parameter("mqtt_allow_anonymous", False)
         self.declare_parameter("task_topic", "fast/v1/vehicle/fk01/task")
         self.declare_parameter("mission_topic", "/mission/task")
         # isaac_sim/nav2/README.md: 시뮬 20 x 30 m, 목업 2 x 3 m.
@@ -87,26 +89,42 @@ class SimTaskReceiver(Node):
                 self._mqtt = mqtt.Client(
                     client_id=client_id, clean_session=True)
 
+        # ⚠️ **익명·평문은 명시적으로 켤 때만.** 기본값이 아니어야 하는 이유는,
+        #    실수로 켜졌을 때 증상이 없기 때문이다 -- 운영 브로커에 인증 없이
+        #    붙으려다 조용히 실패하거나, 더 나쁘게는 붙는다. 로컬 mosquitto 로
+        #    사슬 전체를 시험하려면 이 값을 손으로 켜야 한다.
+        anonymous = bool(self.get_parameter("mqtt_allow_anonymous").value)
         username = str(self.get_parameter("mqtt_username").value)
         password = os.environ.get(
             str(self.get_parameter("mqtt_password_env").value), "")
-        if not username or not password:
-            raise ValueError(
-                "MQTT username and password environment variable are required"
-            )
-        self._mqtt.username_pw_set(username, password)
+        if not anonymous:
+            if not username or not password:
+                raise ValueError(
+                    "MQTT username and password environment variable are "
+                    "required (로컬 브로커로 시험하려면 "
+                    "mqtt_allow_anonymous:=true)"
+                )
+            self._mqtt.username_pw_set(username, password)
+        elif username:
+            self._mqtt.username_pw_set(username, password)
 
         ca_cert = os.path.expanduser(str(self.get_parameter("mqtt_ca_cert").value))
-        if not ca_cert or not os.path.isfile(ca_cert):
-            raise ValueError("mqtt_ca_cert must point to FAST-MQTT-CA")
-        self._mqtt.tls_set(ca_certs=ca_cert)
-        insecure = bool(self.get_parameter("mqtt_tls_insecure").value)
-        self._mqtt.tls_insecure_set(insecure)
-        if insecure:
+        if anonymous and not ca_cert:
             self.get_logger().warning(
-                "TLS hostname verification is disabled because the field "
-                "certificate is issued to an IP. Use only with FAST-MQTT-CA."
+                "익명·평문 MQTT 로 붙는다 -- 시험용이다. 운영 브로커에는 "
+                "mqtt_allow_anonymous 를 켜지 말 것."
             )
+        else:
+            if not ca_cert or not os.path.isfile(ca_cert):
+                raise ValueError("mqtt_ca_cert must point to FAST-MQTT-CA")
+            self._mqtt.tls_set(ca_certs=ca_cert)
+            insecure = bool(self.get_parameter("mqtt_tls_insecure").value)
+            self._mqtt.tls_insecure_set(insecure)
+            if insecure:
+                self.get_logger().warning(
+                    "TLS hostname verification is disabled because the field "
+                    "certificate is issued to an IP. Use only with FAST-MQTT-CA."
+                )
 
         self._mqtt.on_connect = self._on_connect
         self._mqtt.on_message = self._on_message

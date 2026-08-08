@@ -43,6 +43,8 @@ setup(
             "field_lap_mission = forklift_teleop.field_lap_mission:main",
             "drive_mux = forklift_teleop.drive_mux:main",
             "unstick_node = forklift_teleop.unstick_node:main",
+            "mode_marker = forklift_teleop.mode_marker:main",
+            "mission_runner = forklift_teleop.mission_runner:main",
             "map_odom_publisher = "
             "forklift_teleop.map_odom_publisher:main",
         ],
