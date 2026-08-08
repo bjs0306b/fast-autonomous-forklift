@@ -28,6 +28,15 @@ def generate_launch_description():
             name="drive_mux",
             output="screen",
         ),
+        # 가드가 STOP 을 걸면 컨트롤러가 명령을 안 내고, 그러면 nav2 의 진행
+        # 판정이 돌 기회가 없어 복구가 영영 발동하지 않는다. 가드 **바깥**에서
+        # 봐야만 알 수 있는 상태라 별도 노드로 둔다.
+        Node(
+            package="forklift_teleop",
+            executable="unstick_node",
+            name="unstick_node",
+            output="screen",
+        ),
         Node(
             package="forklift_teleop",
             executable="obstacle_avoidance",
