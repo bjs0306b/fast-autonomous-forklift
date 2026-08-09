@@ -49,7 +49,7 @@ from geometry_msgs.msg import Twist, TwistWithCovarianceStamped
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 ALIGN = "ALIGN"
 NAV = "NAV"
@@ -99,6 +99,29 @@ class ForkAlignNode(Node):
         self.declare_parameter("mode_topic", "/drive/mode")
         self.declare_parameter("status_topic", "/align/status")
         self.declare_parameter("timeout_sec", 90.0)
+        self.declare_parameter("fork_status_topic", "/fork/status")
+        self.declare_parameter("loaded_topic", "/fork/loaded")
+        self.declare_parameter("fork_timeout_sec", 30.0)
+        self.declare_parameter("home_timeout_sec", 60.0)
+        # 진입 전 포크 높이. 호밍 뒤 하한에서 여기까지 올려놓고 파렛에 들어간다.
+        #
+        # ⚠️ **`HOME` 은 하한까지만 내려가고 거기서 멈춘다 -- 백오프가 없다.**
+        #    부팅 호밍(config.h STEPPER_MOTOR_HOME_BACKOFF_STEPS)과 다르다.
+        #    그래서 HOME 뒤에 "UP <스텝>" 을 따로 보내야 같은 높이가 된다.
+        #    2026-08-07 에 이걸 모르고 HOME 만 걸어놓고 "높이가 맞다" 고 봤다.
+        self.declare_parameter("entry_steps", 7500)
+        self.declare_parameter("home_before_pickup", True)
+        # 진입 뒤 파렛을 바닥에서 띄우는 양(스텝).
+        #
+        # ⚠️ **아직 실측값이 아니다.** 스텝<->mm 환산 기록이 저장소에 없다 --
+        #    바닥 기준 7 mm 가 호밍 백오프 6500스텝이라는 것만 알려져 있다.
+        #    tools/fork_lift_calib.py 로 파렛이 뜨는 최소 스텝을 찾아 넣을 것.
+        #
+        # ⚠️ **높이 상한이 빡빡하다.** ToF 는 바닥에서 40 mm 에 달렸고 가드는
+        #    20 mm 위를 장애물로 본다. 파렛 총높이가 14 mm 라 6 mm 넘게 띄우면
+        #    가드가 자기 화물을 장애물로 본다. 그래서 적재 중에는 ToF 높이 창을
+        #    따로 올린다(/fork/loaded).
+        self.declare_parameter("lift_steps", 1200)
 
         (self._Detector, self._eligible, self._Smoother,
          self._ForkServo, self._Phase) = _load_vision(
@@ -109,6 +132,9 @@ class ForkAlignNode(Node):
         self._travel_at: Optional[float] = None
         self._pending: Optional[dict] = None
         self._running = False
+        self._fork_running_seen = False
+        self._fork_done = False
+        self._fork_error: Optional[str] = None
         self._lock = threading.Lock()
 
         self.create_subscription(
@@ -116,6 +142,9 @@ class ForkAlignNode(Node):
             self._on_request, 10)
         self.create_subscription(
             TwistWithCovarianceStamped, "/wheel/twist", self._on_encoder, 10)
+        self.create_subscription(
+            String, str(self.get_parameter("fork_status_topic").value),
+            self._on_fork_status, 10)
 
         latched = QoSProfile(depth=1)
         latched.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
@@ -129,6 +158,8 @@ class ForkAlignNode(Node):
             Twist, str(self.get_parameter("command_topic").value), 10)
         self._fork = self.create_publisher(
             String, str(self.get_parameter("fork_command_topic").value), 10)
+        self._loaded = self.create_publisher(
+            Bool, str(self.get_parameter("loaded_topic").value), latched)
 
         self._camera = None
         self._detector = None
@@ -231,11 +262,21 @@ class ForkAlignNode(Node):
             self._say(False, failure)
             return
 
+        # 접근을 시작하기 전에 포크 높이를 되잡는다. 호밍은 하한까지 내려가는
+        # 동작이라 **여기 말고는 안전한 자리가 없다** -- 구멍 안에서 하면 파렛을
+        # 부순다.
+        failure = self._prepare(request)
+        if failure:
+            self._say(False, failure)
+            return
+
         servo = self._ForkServo()
         servo.reset()
         smoother = self._Smoother()
         fork_center = float(self.get_parameter("fork_center_x").value)
         focal = float(self.get_parameter("focal_px").value)
+        # 제한시간은 호밍이 끝난 뒤에 잡는다 -- 호밍이 정렬 시간을 잡아먹으면
+        # 접근도 못 해보고 시간 초과가 난다.
         deadline = time.monotonic() + float(
             self.get_parameter("timeout_sec").value)
 
@@ -280,26 +321,128 @@ class ForkAlignNode(Node):
                     last_phase = command.phase
                     self.get_logger().info(
                         f"{command.phase.value}: {command.reason}")
-                    self._on_phase(command.phase)
                 self._report(command.phase, error, command)
 
                 if servo.is_finished():
-                    aborted = command.phase is self._Phase.ABORT
-                    self._say(not aborted,
-                              command.reason or command.phase.value,
-                              phase=command.phase.value,
-                              travelM=round(travel, 3))
+                    self._finish(command, request, travel)
                     return
             self._say(False, "정렬 시간 초과")
         except Exception as error:          # noqa: BLE001
             self._say(False, f"정렬 중 예외: {error}")
 
-    def _on_phase(self, phase) -> None:
-        """포크를 올리고 내리는 것은 단계 전환에서만 한다."""
-        if phase is self._Phase.INSERT:
-            self._fork.publish(String(data="UP"))
-        elif phase is self._Phase.RETREAT:
-            self._fork.publish(String(data="DOWN"))
+    def _finish(self, command, request: dict, travel: float) -> None:
+        """진입이 끝났다. 여기서만 포크를 움직이고 결과를 낸다.
+
+        ⚠️ **ABORT 면 절대 올리지 않는다.** 포크가 구멍에 없다는 뜻이다.
+           fork_servo 가 남긴 기록이 그 위험을 적고 있다 -- 08-07 에 진입
+           50mm 만에 done 을 찍어 "구멍에 들어가지도 않은 채 화물을 들어올릴
+           뻔했다". DONE 의 정확성이 리프트를 지키는 유일한 장치다.
+        """
+        if command.phase is self._Phase.ABORT:
+            self._say(False, command.reason or "정렬 중단",
+                      phase="abort", travelM=round(travel, 3))
+            return
+
+        # PICKUP 은 들어올리고, DROPOFF 는 내려놓는다. mission_runner 가
+        # 이미 두 값을 넘기고 있다.
+        pickup = str(request.get("action", "PICKUP")).upper() != "DROPOFF"
+        if not self._lift("UP" if pickup else "DOWN"):
+            self._say(False, "진입은 됐는데 포크를 못 움직였다",
+                      phase=command.phase.value, travelM=round(travel, 3))
+            return
+
+        # 적재 상태가 바뀌었다. 가드가 이걸 보고 ToF 높이 창을 바꾼다 --
+        # 든 파렛은 장애물이 아니라 화물이다.
+        self._loaded.publish(Bool(data=pickup))
+        self._say(True, command.reason or "진입·리프트 완료",
+                  phase=command.phase.value, travelM=round(travel, 3),
+                  loaded=pickup)
+
+    def _prepare(self, request: dict) -> Optional[str]:
+        """진입 전에 포크 높이를 호밍으로 되잡는다. 실패 사유를 돌려준다.
+
+        ⚠️ **적재 중(DROPOFF)에는 절대 호밍하지 않는다.** 호밍은 하한 리밋까지
+           내려가는 동작이라, 파렛을 든 채로 하면 화물을 바닥에 찍는다.
+
+        ⚠️ 홈잉은 진입 **전**에만 안전하다. 포크가 이미 구멍 안에 있을 때
+           하한까지 내리면 파렛을 부순다 -- 그래서 주행 루프 밖, 접근을
+           시작하기도 전에 한 번만 한다.
+
+        높이를 유지하려면 드라이버를 켜둬야 한다(config.h
+        STEPPER_MOTOR_HOLD_AFTER_MOTION=1). 0 이면 몇 분 뒤 중력으로 내려앉아
+        여기서 맞춘 높이가 무의미해진다.
+        """
+        if str(request.get("action", "PICKUP")).upper() == "DROPOFF":
+            return None
+        if not bool(self.get_parameter("home_before_pickup").value):
+            return None
+
+        timeout = float(self.get_parameter("home_timeout_sec").value)
+        if not self._send_fork("HOME", None, timeout):
+            return "포크 호밍이 안 끝났다"
+        steps = int(self.get_parameter("entry_steps").value)
+        if steps > 0 and not self._send_fork("UP", steps, timeout):
+            return f"진입 높이({steps}스텝)로 못 올렸다"
+        return None
+
+    def _lift(self, action: str) -> bool:
+        """진입이 끝난 뒤에만 포크를 움직인다. 완료를 기다린다.
+
+        ⚠️ **진입 중에는 절대 건드리지 않는다.** 종전에는 Phase.INSERT 에서
+           UP 을, Phase.RETREAT 에서 DOWN 을 보냈는데 둘 다 틀렸다:
+
+             INSERT  는 포크가 구멍으로 미끄러져 들어가는 구간이다. 거기서
+                     올리면 날이 구멍 상판을 밀어 **진입 자체가 막힌다.**
+             RETREAT 는 최종 후퇴가 아니라 **재접근용 후진**이다
+                     (MAX_RETRIES=20, 로그 "미정렬 — 80mm 물러난다 1/20").
+                     거기서 내리면 정렬 도중에 높이가 어긋난다.
+
+           fork_servo 는 리프트를 아예 모른다 -- 구멍에 넣는 주행까지만 하고
+           들어올리는 것은 호출자 몫이다. 그래서 리프트는 DONE 뒤에 온다.
+        """
+        steps = int(self.get_parameter("lift_steps").value)
+        return self._send_fork(
+            action, steps if steps > 0 else None,
+            float(self.get_parameter("fork_timeout_sec").value))
+
+    def _send_fork(self, action: str, steps: Optional[int],
+                   timeout_sec: float) -> bool:
+        """포크 한 동작을 보내고 완료를 기다린다.
+
+        ⚠️ RUNNING 을 본 적이 있어야 DONE 을 인정한다. 그러지 않으면 직전
+           동작의 DONE 이 남아 있다가 "이미 끝났다" 로 읽힌다.
+        """
+        command = action if steps is None else f"{action} {steps}"
+        self._fork_running_seen = False
+        self._fork_done = False
+        self._fork_error = None
+        self._fork.publish(String(data=command))
+        self.get_logger().info(f"포크 {command}")
+
+        deadline = time.monotonic() + timeout_sec
+        while rclpy.ok() and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if self._fork_error is not None:
+                self.get_logger().error(f"포크 {command} 실패: {self._fork_error}")
+                return False
+            if self._fork_done:
+                return True
+        self.get_logger().error(f"포크 {command} 시간 초과")
+        self._fork.publish(String(data="STOP"))
+        return False
+
+    def _on_fork_status(self, message: String) -> None:
+        try:
+            status = json.loads(message.data)
+        except (TypeError, ValueError):
+            return
+        state = str(status.get("state", "")).upper()
+        if state == "RUNNING":
+            self._fork_running_seen = True
+        elif state == "DONE" and self._fork_running_seen:
+            self._fork_done = True
+        elif state == "ERROR":
+            self._fork_error = message.data
 
     def pump(self) -> None:
         if self._pending is None:

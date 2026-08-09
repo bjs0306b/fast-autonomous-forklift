@@ -37,6 +37,7 @@ class ForkAlignNodeTest(unittest.TestCase):
         import rclpy
         rclpy.init()
         cls.rclpy = rclpy
+        globals()['rclpy'] = rclpy
 
     @classmethod
     def tearDownClass(cls):
@@ -113,14 +114,82 @@ class ForkAlignNodeTest(unittest.TestCase):
         self.node._on_encoder(backward)
         self.assertGreater(self.node._travel_m, after_forward)
 
-    def test_fork_moves_only_on_phase_change(self):
+    def _command(self, phase, reason="시험"):
+        from control.fork_servo import DriveCommand
+        return DriveCommand(phase=phase, reason=reason)
+
+    def test_an_abort_never_lifts(self):
+        """포크가 구멍에 없다는 뜻이다 -- 올리면 화물을 밀거나 떨어뜨린다.
+
+        fork_servo 가 남긴 기록이 그 위험을 적고 있다: 08-07 에 진입 50mm 만에
+        done 을 찍어 "구멍에 들어가지도 않은 채 화물을 들어올릴 뻔했다".
+        """
         from control.fork_servo import Phase
-        self.node._on_phase(Phase.APPROACH)
+        self.node._finish(self._command(Phase.ABORT, "재접근 한계"), {}, 0.1)
         self.assertEqual(self.forks, [])
-        self.node._on_phase(Phase.INSERT)
+        self.assertEqual(self.results[-1]["state"], "ERROR")
+
+    def test_pickup_lifts_after_insertion(self):
+        from control.fork_servo import Phase
+        self.node._lift = lambda action: self.forks.append(action) or True
+        self.node._finish(self._command(Phase.DONE, "진입 완료"),
+                          {"action": "PICKUP"}, 0.9)
         self.assertEqual(self.forks, ["UP"])
-        self.node._on_phase(Phase.RETREAT)
-        self.assertEqual(self.forks, ["UP", "DOWN"])
+        self.assertEqual(self.results[-1]["state"], "DONE")
+        self.assertTrue(self.results[-1]["loaded"])
+
+    def test_dropoff_lowers_instead(self):
+        from control.fork_servo import Phase
+        self.node._lift = lambda action: self.forks.append(action) or True
+        self.node._finish(self._command(Phase.DONE, "진입 완료"),
+                          {"action": "DROPOFF"}, 0.9)
+        self.assertEqual(self.forks, ["DOWN"])
+        self.assertFalse(self.results[-1]["loaded"])
+
+    def test_a_failed_lift_is_reported_as_error(self):
+        """진입은 됐는데 포크가 안 움직인 것은 성공이 아니다."""
+        from control.fork_servo import Phase
+        self.node._lift = lambda action: False
+        self.node._finish(self._command(Phase.DONE, "진입 완료"),
+                          {"action": "PICKUP"}, 0.9)
+        self.assertEqual(self.results[-1]["state"], "ERROR")
+
+    def test_lift_carries_the_configured_steps(self):
+        """스텝을 실어야 재플래시 없이 높이를 바꾼다."""
+        self.node.set_parameters(
+            [rclpy.parameter.Parameter("lift_steps",
+                                       rclpy.Parameter.Type.INTEGER, 900)])
+        self.node._fork_done = True
+        self.node._fork_running_seen = True
+        # _lift 는 상태를 초기화하고 기다리므로, 발행만 확인한다
+        published = []
+        self.node._fork.publish = lambda m: published.append(m.data)
+        self.node._lift("UP")
+        self.assertEqual(published[0], "UP 900")
+
+    def test_pickup_homes_to_the_entry_height_before_approaching(self):
+        """HOME 은 하한까지만 내려가고 백오프가 없다 -- UP 이 뒤따라야 한다.
+
+        2026-08-07 에 이걸 모르고 HOME 만 걸어놓고 "높이가 맞다" 고 봤다.
+        """
+        sent = []
+        self.node._send_fork = lambda action, steps, timeout: (
+            sent.append((action, steps)) or True)
+        self.assertIsNone(self.node._prepare({"action": "PICKUP"}))
+        self.assertEqual(sent, [("HOME", None), ("UP", 7500)])
+
+    def test_dropoff_never_homes_with_a_pallet_on_the_fork(self):
+        """호밍은 하한 리밋까지 내려간다 -- 짐을 든 채로 하면 바닥에 찍는다."""
+        sent = []
+        self.node._send_fork = lambda action, steps, timeout: (
+            sent.append(action) or True)
+        self.assertIsNone(self.node._prepare({"action": "DROPOFF"}))
+        self.assertEqual(sent, [])
+
+    def test_a_failed_homing_stops_before_driving(self):
+        """높이를 모르는 채 접근하면 상판이나 하판을 민다."""
+        self.node._send_fork = lambda action, steps, timeout: False
+        self.assertIsNotNone(self.node._prepare({"action": "PICKUP"}))
 
     def test_a_second_request_is_refused_while_one_runs(self):
         from std_msgs.msg import String
