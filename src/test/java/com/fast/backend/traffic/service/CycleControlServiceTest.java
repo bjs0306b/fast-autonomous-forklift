@@ -193,6 +193,23 @@ class CycleControlServiceTest {
     }
 
     @Test
+    @DisplayName("선반 코드를 차량이 아는 이름으로 바꾼다 — A001 → A1")
+    void 랙_코드를_차량_형식으로_바꾼다() {
+        // 시뮬의 RACK_SLOTS 키는 A1..A12 / B1..B12 다(cargo_demo.py:321).
+        // A001 을 그대로 보내면 조용히 실패해 아무것도 안 놓는다.
+        assertThat(CycleControlService.toWireRackCode("A001")).isEqualTo("A1");
+        assertThat(CycleControlService.toWireRackCode("B012")).isEqualTo("B12");
+        assertThat(CycleControlService.toWireRackCode("A1")).isEqualTo("A1");
+    }
+
+    @Test
+    @DisplayName("모르는 형식은 그대로 둔다 — 짐작해서 바꾸면 어느 쪽도 아닌 이름이 나간다")
+    void 모르는_랙_코드는_그대로() {
+        assertThat(CycleControlService.toWireRackCode("RACK-A-01")).isEqualTo("RACK-A-01");
+        assertThat(CycleControlService.toWireRackCode(null)).isNull();
+    }
+
+    @Test
     @DisplayName("초기 단계는 TO_BAY 다")
     void 초기_단계() {
         CycleControlService svc = service();
