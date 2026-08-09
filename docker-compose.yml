@@ -65,10 +65,19 @@ services:
       # WebRTC ICE candidate 에 실을 공인 IP. 없으면 브라우저가 컨테이너 내부 IP로 접속을
       # 시도해 협상이 실패한다.
       MTX_WEBRTCADDITIONALHOSTS: "3.38.178.143"
+      # ⚠️ **ICE 를 TCP 로도 받는다 — 시연 망이 UDP 를 막는다.**
+      # 2026-08-09 실측: 이 망에서 `3.38.178.143:8189/udp` 도, 대조군인
+      # `stun.l.google.com:19302` 도 무응답이었다. UDP 자체가 나가지 않는다.
+      # 그래서 WebRTC 협상이 끝나지 않고 MediaMTX 로그에 `deadline exceeded while
+      # waiting connection` 만 쌓였다(성공 0회 / 실패 56회). 시그널링(8889/tcp)과
+      # RTSP 입력(8554/tcp)은 TCP 라 멀쩡했기 때문에 **송출은 되는데 화면만 안 뜨는**
+      # 모양이 됐다.
+      MTX_WEBRTCICETCPMUXADDRESS: ":8189"
     ports:
       - "8554:8554"     # RTSP 입력 (Isaac Sim 워크스테이션 → 여기)
       - "8889:8889"     # WebRTC HTTP 재생 페이지 (브라우저 → 여기)
-      - "8189:8189/udp" # WebRTC ICE
+      - "8189:8189/udp" # WebRTC ICE (UDP — 되는 망에서는 이쪽이 빠르다)
+      - "8189:8189/tcp" # WebRTC ICE (TCP 폴백 — UDP 막힌 망용)
 
 volumes:
   mysql-data:
