@@ -6,6 +6,12 @@ import com.fast.backend.traffic.domain.Track;
 import com.fast.backend.traffic.domain.VehicleCycle;
 import com.fast.backend.traffic.domain.VehicleMotion;
 import com.fast.backend.traffic.dto.CargoActionMessage;
+import com.fast.backend.common.time.CommunicationTime;
+import com.fast.backend.storage.domain.Cargo;
+import com.fast.backend.storage.mapper.CargoMapper;
+import com.fast.backend.storage.placement.PlacementCandidate;
+import com.fast.backend.storage.placement.PlacementRecommendation;
+import com.fast.backend.storage.placement.PlacementService;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.traffic.dto.PlaceRackTaskMessage;
 import com.fast.backend.vehicle.domain.VehicleStatus;
@@ -51,6 +57,8 @@ public class CycleControlService {
     private final RackApproachProvider rackApproaches;
     private final VehicleProcedureRegistry procedureRegistry;
     private final StorageSlotMapper storageSlotMapper;
+    private final CargoMapper cargoMapper;
+    private final PlacementService placementService;
 
     /** 등록된 칸 수. 실행 중에 늘지 않으므로 한 번만 읽는다. {@code -1} 은 아직 안 읽었다는 뜻. */
     private volatile int totalSlots = -1;
@@ -75,7 +83,9 @@ public class CycleControlService {
             CycleGoalPublisher publisher,
             RackApproachProvider rackApproaches,
             VehicleProcedureRegistry procedureRegistry,
-            StorageSlotMapper storageSlotMapper) {
+            StorageSlotMapper storageSlotMapper,
+            CargoMapper cargoMapper,
+            PlacementService placementService) {
         this.cycleProperties = cycleProperties;
         this.loopProperties = loopProperties;
         this.track = loopProperties.toTrack();
@@ -84,6 +94,8 @@ public class CycleControlService {
         this.rackApproaches = rackApproaches;
         this.procedureRegistry = procedureRegistry;
         this.storageSlotMapper = storageSlotMapper;
+        this.cargoMapper = cargoMapper;
+        this.placementService = placementService;
     }
 
     /**
@@ -284,7 +296,7 @@ public class CycleControlService {
     /** 배정된 랙 접근점으로 간다. 랙은 이 단계 진입 시 한 번만 고른다. */
     private void driveToRack(VehicleCycle cycle, VehicleMotion motion, long now) {
         if (cycle.rackCode() == null) {
-            String rack = nextRack(cycle);
+            String rack = nextRack(cycle, motion);
             if (rack == null) {
                 // 배정표가 비어 있다. 목표 없이 서 있는 것보다 순환을 유지하며 다음 tick 을 기다린다.
                 log.warn("랙 배정표가 비어 있어 주기를 진행할 수 없다: vehicleId={}", cycle.vehicleId());
@@ -432,9 +444,17 @@ public class CycleControlService {
             return;
         }
         try {
-            if (storageSlotMapper.markOccupiedIfEmpty(slotCode) == 0) {
+            // OCCUPIED 는 화물 ID 를 요구한다(chk_storage_slot_state). 주기에는 운반 작업이
+            // 없어 줄 ID 가 없으므로 여기서 하나 만든다 — 박스가 실제로 그 칸에 놓였으니
+            // 사실이고, cargo 테이블은 id 와 시각뿐이라 만드는 비용도 없다.
+            Cargo cargo = new Cargo();
+            cargo.setCreatedAt(CommunicationTime.nowLocal());
+            cargoMapper.insert(cargo);
+            if (storageSlotMapper.markOccupiedIfEmpty(slotCode, cargo.getCargoId()) == 0) {
                 // 이미 OCCUPIED 거나 다른 흐름이 예약한 칸이다. 덮어쓰지 않는다.
-                log.warn("적재 칸 상태를 바꾸지 못했다(이미 비어 있지 않음): slotCode={}", slotCode);
+                // 방금 만든 화물은 주인 없이 남는다 — 주기 데모용이라 그대로 둔다.
+                log.warn("적재 칸 상태를 바꾸지 못했다(이미 비어 있지 않음): slotCode={}, cargoId={}",
+                        slotCode, cargo.getCargoId());
             }
         } catch (RuntimeException e) {
             log.error("적재 칸 상태 기록 실패(격리됨): slotCode={}, error={}", slotCode, e.getMessage());
@@ -556,13 +576,80 @@ public class CycleControlService {
         }
     }
 
-    /** 차량별 배정표에서 다음 랙을 고른다. 목록을 다 쓰면 처음으로 돌아간다. */
-    private String nextRack(VehicleCycle cycle) {
+    /**
+     * 다음에 놓을 랙을 고른다.
+     *
+     * <p><b>화물 높이로 층을 고르는 것이 우선</b>이고({@code placement-enabled}), 그것이 안 되면
+     * 차량별 배정표 순서로 돌아간다. 폴백을 남겨 두는 이유: 높이를 모르는 차량(그 필드를 안 보내는
+     * 실물)이나 DB 조회 실패에도 주기는 계속 돌아야 한다. 배정표가 없으면 {@code null} 이고,
+     * 호출부가 순환만 유지한다.
+     */
+    private String nextRack(VehicleCycle cycle, VehicleMotion motion) {
+        String byHeight = recommendByHeight(cycle, motion);
+        if (byHeight != null) {
+            return byHeight;
+        }
         List<String> racks = cycleProperties.racksFor(cycle.vehicleId());
         if (racks.isEmpty()) {
             return null;
         }
         return racks.get(cycle.rackIndex() % racks.size());
+    }
+
+    /**
+     * 화물 높이에 맞는 칸을 고른다. 못 고르면 {@code null}(호출부가 배정표로 넘어간다).
+     *
+     * <p><b>단위에 주의.</b> telemetry 의 화물 높이는 <b>시뮬 단위</b>이고 <b>팔레트가 포함</b>돼
+     * 있다. {@code usable_height} 는 실물 m 라 {@code cargoHeightScale} 로 환산해서 비교하고,
+     * 팔레트를 두 번 더하지 않도록 {@code recommendByTotalHeight} 로 넣는다.
+     *
+     * <p><b>다른 차가 향하고 있는 칸은 뺀다.</b> 두 대가 같은 칸을 목표로 잡으면 뒤에 도착한 쪽이
+     * 이미 찬 자리에 놓는다 — 그때는 {@code markOccupiedIfEmpty} 가 0 을 돌려주지만 박스는 이미
+     * 놓인 뒤라 되돌릴 수 없다.
+     */
+    private String recommendByHeight(VehicleCycle cycle, VehicleMotion motion) {
+        if (!Boolean.TRUE.equals(cycleProperties.placementEnabled())) {
+            return null;
+        }
+        Double simHeight = motion.cargoHeight();
+        if (simHeight == null || simHeight <= 0) {
+            log.debug("화물 높이를 몰라 배정표로 고른다: vehicleId={}", cycle.vehicleId());
+            return null;
+        }
+        double totalHeight = simHeight * cycleProperties.cargoHeightScale();
+        try {
+            java.util.Set<String> taken = slotsOtherVehiclesAreHeadingTo(cycle.vehicleId());
+            List<PlacementCandidate> candidates = new java.util.ArrayList<>();
+            for (var row : storageSlotMapper.findAllEmptySlotsForPlacement()) {
+                if (taken.contains(row.getSlotCode())) {
+                    continue;
+                }
+                candidates.add(new PlacementCandidate(
+                        row.getSlotCode(), row.getUsableHeight(), row.getUsableWidth(),
+                        row.getForkHeight(), row.getDestinationX(), row.getDestinationY(),
+                        row.getDestinationHeading(), null, row.getStatus()));
+            }
+            PlacementRecommendation pick =
+                    placementService.recommendByTotalHeight(totalHeight, candidates);
+            log.info("높이로 랙 선택: vehicleId={}, 화물높이={}(시뮬)={}m, rack={}, fork={}",
+                    cycle.vehicleId(), simHeight, totalHeight, pick.slotCode(), pick.forkHeight());
+            return pick.slotCode();
+        } catch (RuntimeException e) {
+            log.warn("높이로 랙을 고르지 못해 배정표로 간다: vehicleId={}, 사유={}",
+                    cycle.vehicleId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 지금 다른 차가 향하고 있는 칸. 같은 자리를 두 대가 노리지 않게 한다. */
+    private java.util.Set<String> slotsOtherVehiclesAreHeadingTo(String vehicleId) {
+        java.util.Set<String> taken = new java.util.HashSet<>();
+        cycles.forEach((id, other) -> {
+            if (!id.equals(vehicleId) && other.rackCode() != null) {
+                taken.add(other.rackCode());
+            }
+        });
+        return taken;
     }
 
     private VehicleCycle cycleOf(String vehicleId, long now) {

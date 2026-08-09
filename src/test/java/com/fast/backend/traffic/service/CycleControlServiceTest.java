@@ -1,5 +1,8 @@
 package com.fast.backend.traffic.service;
 
+import com.fast.backend.storage.mapper.CargoMapper;
+import com.fast.backend.storage.placement.PlacementProperties;
+import com.fast.backend.storage.placement.PlacementService;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.traffic.config.CycleProperties;
 import com.fast.backend.traffic.config.LoopTrackProperties;
@@ -43,6 +46,7 @@ class CycleControlServiceTest {
     private RackApproachProvider rackApproaches;
     private VehicleProcedureRegistry procedureRegistry;
     private StorageSlotMapper storageSlotMapper;
+    private CargoMapper cargoMapper;
 
     @BeforeEach
     void setUp() {
@@ -51,6 +55,7 @@ class CycleControlServiceTest {
         rackApproaches = mock(RackApproachProvider.class);
         procedureRegistry = mock(VehicleProcedureRegistry.class);
         storageSlotMapper = mock(StorageSlotMapper.class);
+        cargoMapper = mock(CargoMapper.class);
         // 기본은 "아직 자리가 남았다" — 복귀 조건을 건드리지 않는다.
         when(storageSlotMapper.countAll()).thenReturn(48);
         when(storageSlotMapper.countEmpty()).thenReturn(47);
@@ -66,7 +71,7 @@ class CycleControlServiceTest {
     private CycleControlService service() {
         return new CycleControlService(
                 cycleProps(), loopProps(), operationService,
-                publisher, rackApproaches, procedureRegistry, storageSlotMapper);
+                publisher, rackApproaches, procedureRegistry, storageSlotMapper, cargoMapper, placementService());
     }
 
     private static CycleProperties cycleProps() {
@@ -81,7 +86,13 @@ class CycleControlServiceTest {
                 Map.of("SIM-F02", List.of("A001")),
                 Map.of("A", 2.60, "B", 11.95),
                 2.0,
-                Map.of("SIM-F02", new CycleProperties.Station(4.0, 4.0, 0.0)));
+                Map.of("SIM-F02", new CycleProperties.Station(4.0, 4.0, 0.0)),
+                false,   // 이 클래스는 주행 경로를 본다. 높이 배정은 PlacementServiceTest 가 맡는다
+                0.1);
+    }
+
+    private static PlacementService placementService() {
+        return new PlacementService(new PlacementProperties(0.025, 0.012, 0.05, 0.10));
     }
 
     private static LoopTrackProperties loopProps() {
@@ -180,10 +191,10 @@ class CycleControlServiceTest {
                 false, new CycleProperties.Station(BAY_X, BAY_Y, 0.0),
                 new CycleProperties.Station(15.5, 4.0, 1.5708),
                 1.5, 4.0, 7_000L, 12_000L, 40_000L, 90_000L, 0.15,
-                Map.of(), Map.of("A", 2.60), 2.0, Map.of());
+                Map.of(), Map.of("A", 2.60), 2.0, Map.of(), false, 0.1);
         CycleControlService svc = new CycleControlService(
                 off, loopProps(), operationService, publisher, rackApproaches,
-                procedureRegistry, storageSlotMapper);
+                procedureRegistry, storageSlotMapper, cargoMapper, placementService());
 
         svc.tick(List.of(at(5.0, 20.0)), Set.of());
 

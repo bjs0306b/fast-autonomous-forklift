@@ -68,7 +68,8 @@
         SELECT COUNT(*) FROM storage_slot WHERE status='EMPTY'
     </select>
     <update id="markOccupiedIfEmpty">
-        UPDATE storage_slot SET status='OCCUPIED'
+        UPDATE storage_slot
+        SET status='OCCUPIED', reserved_task_id=NULL, stored_cargo_id=#{storedCargoId}
         WHERE slot_code=#{slotCode} AND status='EMPTY'
     </update>
     <update id="releaseReservation">

@@ -468,7 +468,9 @@ public class TrafficControlService {
                     statuses.getOrDefault(snapshot.vehicleId(), VehicleStatus.UNKNOWN),
                     // 적재 여부를 함께 넘긴다. 예전에는 여기서 버려서 주기 상태기계가 status 로만
                     // 판정했고, 차량이 화물을 싣고도 IDLE 을 보고하면 적재를 영영 못 알아봤다.
-                    snapshot.reportedLoaded()));
+                    snapshot.reportedLoaded(),
+                    // 층 선택에 쓴다. 팔레트 포함·시뮬 단위라 쓰는 쪽이 환산한다.
+                    snapshot.reportedCargoHeight()));
         }
         return motions;
     }

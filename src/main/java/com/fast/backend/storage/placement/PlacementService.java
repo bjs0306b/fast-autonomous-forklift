@@ -35,6 +35,29 @@ public class PlacementService {
     }
 
     /**
+     * 팔레트를 <b>포함한</b> 전체 높이로 추천한다 — 차량이 보고한 값을 쓸 때.
+     *
+     * <p>{@link #recommend} 는 AI 가 잰 <b>화물만의</b> 높이를 받아 팔레트를 스스로 더한다.
+     * 반면 시뮬 telemetry 의 {@code cargo.h} 는 "팔레트가 포함된 전체 크기" 다
+     * ({@code IsaacVehicleTelemetryMessage.Cargo} 주석). 그대로 {@link #recommend} 에 넣으면
+     * 팔레트가 두 번 더해져 실제보다 높은 화물로 판정된다.
+     *
+     * <p>그래서 여기서는 팔레트를 더하지 않고 여유만 얹는다. 두 진입점을 나눠 두는 이유는
+     * <b>호출부가 어느 쪽 값을 들고 있는지 이름으로 드러나게</b> 하기 위해서다 — 숫자만 넘기면
+     * 어느 쪽인지 알 수 없고, 그 혼동이 정확히 이 버그를 만든다.
+     */
+    public PlacementRecommendation recommendByTotalHeight(
+            double totalHeight, List<PlacementCandidate> candidates) {
+        if (!Double.isFinite(totalHeight) || totalHeight <= 0) {
+            throw new BusinessException(ErrorCode.CARGO_DIMENSION_INVALID,
+                    "totalHeight 는 0 보다 큰 meter 값이어야 합니다: " + totalHeight);
+        }
+        // 팔레트 높이를 빼서 recommend 에 넘긴다 — 거기서 다시 더하므로 결과는 같고,
+        // 필터·정렬 규칙이 한 곳에만 남는다.
+        return recommend(totalHeight - palletHeight, null, candidates);
+    }
+
+    /**
      * 적재 위치를 고른다.
      *
      * @param cargoHeight 화물만의 높이(m). 팔레트 높이는 이 안에 포함하지 않는다
@@ -66,9 +89,9 @@ public class PlacementService {
                         c.slotCode(), c.destinationX(), c.destinationY(), c.destinationHeading(),
                         c.forkHeight(), c.usableHeight() - (cargoHeight + palletHeight), c.travelDistance()))
                 // 낮은 층 먼저(2026-08-10 팀 결정). 포크를 덜 올리는 쪽이 빠르고, 흔들림도
-                // 적재 실패도 적다. 랙에 층이 생기면서 필요해진 기준이다 — 0층 칸(0.14 m)이
-                // 1층 칸(0.0675 m)보다 높아서, 예전처럼 "남는 높이 최소" 로만 고르면 작은 화물이
-                // 죄다 1층으로 올라간다. 그것이 공간 효율에는 나을지 몰라도 위험을 위로 쌓는다.
+                // 적재 실패도 적다. 랙에 층이 생기면서 필요해진 기준이다 — 0층 칸 0.14 m,
+                // 1층 칸 0.2 m 라 1층이 더 넓고, "남는 높이 최소" 로만 고르면 큰 화물과 섞였을 때
+                // 순서가 뒤집힌다. 위험을 위로 쌓지 않는 쪽을 기본으로 둔다.
                 //
                 // 층이 같을 때에야 예전 기준(딱 맞는 칸 → 가까운 칸)이 순서를 정한다.
                 .min(Comparator.comparingDouble(PlacementRecommendation::forkHeight)

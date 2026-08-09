@@ -119,6 +119,11 @@ traffic:
     place-timeout-ms: ${TRAFFIC_CYCLE_PLACE_TIMEOUT_MS:90000}
     # 바이에서 받을 화물 높이. 이 값만 실물 m 다(규격 §6).
     cargo-height-m: ${TRAFFIC_CYCLE_CARGO_HEIGHT_M:0.15}
+    # 화물 높이로 층을 고른다. 켜면 아래 racks 배정표는 **폴백**이 된다 — 높이를 모르는
+    # 차량(그 필드를 안 보내는 실물)이나 DB 조회 실패 때만 쓰인다.
+    placement-enabled: ${TRAFFIC_CYCLE_PLACEMENT_ENABLED:true}
+    # telemetry 의 화물 높이(시뮬 단위)를 실물 m 로 바꾸는 배수. 좌표계가 실물의 10 배다.
+    cargo-height-scale: ${TRAFFIC_CYCLE_CARGO_HEIGHT_SCALE:0.1}
     # 차량별 랙 배정. 실물(fk01)에 B랙을 주는 이유는 오른쪽 통로가 넓어 사람이 접근하기 쉬워서다.
     # 0층(바닥, AFxx/BFxx)을 먼저 다 채우고 1층(선반, A0xx/B0xx)으로 올라간다 — 낮은 층
     # 먼저(팀 결정). 기존 A001..A012 가 **선반** 이다(rack_slots.csv 의 place_z 1.325).
