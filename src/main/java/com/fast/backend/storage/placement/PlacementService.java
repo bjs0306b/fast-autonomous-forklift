@@ -65,7 +65,14 @@ public class PlacementService {
                 .map(c -> new PlacementRecommendation(
                         c.slotCode(), c.destinationX(), c.destinationY(), c.destinationHeading(),
                         c.forkHeight(), c.usableHeight() - (cargoHeight + palletHeight), c.travelDistance()))
-                .min(Comparator.comparingDouble(PlacementRecommendation::heightRemaining)
+                // 낮은 층 먼저(2026-08-10 팀 결정). 포크를 덜 올리는 쪽이 빠르고, 흔들림도
+                // 적재 실패도 적다. 랙에 층이 생기면서 필요해진 기준이다 — 0층 칸(0.14 m)이
+                // 1층 칸(0.0675 m)보다 높아서, 예전처럼 "남는 높이 최소" 로만 고르면 작은 화물이
+                // 죄다 1층으로 올라간다. 그것이 공간 효율에는 나을지 몰라도 위험을 위로 쌓는다.
+                //
+                // 층이 같을 때에야 예전 기준(딱 맞는 칸 → 가까운 칸)이 순서를 정한다.
+                .min(Comparator.comparingDouble(PlacementRecommendation::forkHeight)
+                        .thenComparingDouble(PlacementRecommendation::heightRemaining)
                         .thenComparing(PlacementRecommendation::travelDistance,
                                 Comparator.nullsLast(Comparator.naturalOrder()))
                         .thenComparing(PlacementRecommendation::slotCode))

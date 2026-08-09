@@ -6,6 +6,7 @@ import com.fast.backend.traffic.domain.Track;
 import com.fast.backend.traffic.domain.VehicleCycle;
 import com.fast.backend.traffic.domain.VehicleMotion;
 import com.fast.backend.traffic.dto.CargoActionMessage;
+import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.traffic.dto.PlaceRackTaskMessage;
 import com.fast.backend.vehicle.domain.VehicleStatus;
 import org.slf4j.Logger;
@@ -49,6 +50,10 @@ public class CycleControlService {
     private final CycleGoalPublisher publisher;
     private final RackApproachProvider rackApproaches;
     private final VehicleProcedureRegistry procedureRegistry;
+    private final StorageSlotMapper storageSlotMapper;
+
+    /** 등록된 칸 수. 실행 중에 늘지 않으므로 한 번만 읽는다. {@code -1} 은 아직 안 읽었다는 뜻. */
+    private volatile int totalSlots = -1;
 
     private final Map<String, VehicleCycle> cycles = new ConcurrentHashMap<>();
 
@@ -69,7 +74,8 @@ public class CycleControlService {
             OperationService operationService,
             CycleGoalPublisher publisher,
             RackApproachProvider rackApproaches,
-            VehicleProcedureRegistry procedureRegistry) {
+            VehicleProcedureRegistry procedureRegistry,
+            StorageSlotMapper storageSlotMapper) {
         this.cycleProperties = cycleProperties;
         this.loopProperties = loopProperties;
         this.track = loopProperties.toTrack();
@@ -77,6 +83,7 @@ public class CycleControlService {
         this.publisher = publisher;
         this.rackApproaches = rackApproaches;
         this.procedureRegistry = procedureRegistry;
+        this.storageSlotMapper = storageSlotMapper;
     }
 
     /**
@@ -102,6 +109,8 @@ public class CycleControlService {
             return;
         }
         long now = System.currentTimeMillis();
+        // 랙이 다 찼는지는 tick 당 한 번만 본다 — 차량마다 물으면 같은 답을 여러 번 읽는다.
+        boolean full = racksFull();
 
         for (VehicleMotion motion : motions) {
             String vehicleId = motion.vehicleId();
@@ -117,6 +126,13 @@ public class CycleControlService {
                 cycle.touchStallTimer(now);     // 규칙 5 — 세워 둔 동안은 정체가 아니다
                 continue;
             }
+            // 놓을 자리가 없으면 하던 단계를 접고 시작 위치로 돌아간다. 화물을 든 채여도
+            // 마찬가지다 — 어차피 내려놓을 칸이 없고, 통로에 세워 두면 다음 운행을 막는다.
+            if (full && !cycle.phase().isHomebound()) {
+                log.info("랙이 가득 찼다 — 복귀를 시작한다: vehicleId={}, 완료 주기={}",
+                        vehicleId, cycle.cycles());
+                cycle.startReturning(now);
+            }
             advance(cycle, motion, now);
         }
     }
@@ -130,6 +146,8 @@ public class CycleControlService {
             case TO_EXIT -> driveToExit(cycle, motion, now);
             case TO_RACK -> driveToRack(cycle, motion, now);
             case RACK -> placeRack(cycle, motion, now);
+            case RETURNING -> driveHome(cycle, motion, now);
+            case PARKED -> { }      // 도착했다. 더 보낼 것이 없다.
         }
     }
 
@@ -328,12 +346,100 @@ public class CycleControlService {
         if (slotCode == null) {
             return null;
         }
-        java.util.regex.Matcher m = WIRE_RACK.matcher(slotCode);
+        // 0층(바닥)이 먼저다 — 아래 SHELF 패턴은 "AF01" 도 삼켜 "AF1" 을 만든다.
+        java.util.regex.Matcher floor = FLOOR_RACK.matcher(slotCode);
+        if (floor.matches()) {
+            return floor.group(1) + Integer.parseInt(floor.group(2)) + "F";
+        }
+        java.util.regex.Matcher m = SHELF_RACK.matcher(slotCode);
         return m.matches() ? m.group(1) + Integer.parseInt(m.group(2)) : slotCode;
     }
 
-    private static final java.util.regex.Pattern WIRE_RACK =
+    /** 0층(바닥) — {@code AF01} → {@code A1F}. */
+    private static final java.util.regex.Pattern FLOOR_RACK =
+            java.util.regex.Pattern.compile("([A-Za-z]+)F0*(\\d+)");
+
+    /** 1층(선반) — {@code A001} → {@code A1}. 지금 시뮬이 아는 유일한 형식이다. */
+    private static final java.util.regex.Pattern SHELF_RACK =
             java.util.regex.Pattern.compile("([A-Za-z]+)0*(\\d+)");
+
+    // ── RETURNING ───────────────────────────────────────────────────────────────
+
+    /**
+     * 시작 위치로 돌아간다. 규칙 1 을 그대로 지킨다 — 복귀도 순환로를 따라 간다.
+     *
+     * <p>복귀 지점이 설정에 없으면 <b>그 자리에 세운다.</b> 짐작한 좌표로 보내느니 서 있는
+     * 편이 낫다 — 통로 한가운데로 보내면 다음 운행이 시작부터 막힌다.
+     */
+    private void driveHome(VehicleCycle cycle, VehicleMotion motion, long now) {
+        cycle.setTarget("HOME");
+        CycleProperties.Station home = cycleProperties.homeFor(cycle.vehicleId()).orElse(null);
+        if (home == null) {
+            log.warn("복귀 지점이 설정에 없어 그 자리에 멈춘다(traffic.cycle.home 확인): vehicleId={}",
+                    cycle.vehicleId());
+            cycle.advance(now);     // → PARKED
+            return;
+        }
+
+        if (cycle.isApproaching()) {
+            if (distance(motion, home.x(), home.y()) <= cycleProperties.arriveTolM()) {
+                log.info("복귀 완료: vehicleId={}, 완료 주기={}", cycle.vehicleId(), cycle.cycles());
+                cycle.advance(now); // → PARKED
+                return;
+            }
+            sendGoal(cycle, motion, now, home.x(), home.y(), home.yaw(), "HOME");
+            return;
+        }
+        if (gapToEntry(motion, home.x(), home.y()) > cycleProperties.approachTriggerM()) {
+            driveLoop(cycle, motion, now);
+            return;
+        }
+        cycle.markApproaching();
+        sendGoal(cycle, motion, now, home.x(), home.y(), home.yaw(), "HOME");
+    }
+
+    /**
+     * 랙이 가득 찼는가 — 복귀 조건.
+     *
+     * <p><b>칸이 하나도 등록돼 있지 않으면 "가득 찼다"고 하지 않는다.</b> {@code COUNT(EMPTY)=0}
+     * 만 보면 시드를 넣지 않은 환경에서 시작하자마자 전 차량이 복귀해 버린다. 등록 수는 실행 중에
+     * 늘지 않으므로 한 번만 읽는다.
+     *
+     * <p>조회에 실패하면 {@code false} 다 — 모르는 상태에서 운행을 접는 쪽으로 기울지 않는다.
+     */
+    private boolean racksFull() {
+        try {
+            if (totalSlots < 0) {
+                totalSlots = storageSlotMapper.countAll();
+            }
+            return totalSlots > 0 && storageSlotMapper.countEmpty() == 0;
+        } catch (RuntimeException e) {
+            log.error("적재 칸 조회 실패(복귀 판단 보류): {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 놓은 칸을 {@code OCCUPIED} 로 표시한다.
+     *
+     * <p>이걸 하지 않으면 랙이 영원히 비어 있는 것으로 보여 복귀 조건이 성립하지 않는다.
+     * 예전에는 주기 상태기계가 {@code storage_slot} 을 전혀 건드리지 않았다.
+     *
+     * <p>실패해도 주기를 멈추지 않는다 — 기록이 안 됐다고 차를 세울 이유는 없다. 대신 남긴다.
+     */
+    private void markSlotOccupied(String slotCode) {
+        if (slotCode == null) {
+            return;
+        }
+        try {
+            if (storageSlotMapper.markOccupiedIfEmpty(slotCode) == 0) {
+                // 이미 OCCUPIED 거나 다른 흐름이 예약한 칸이다. 덮어쓰지 않는다.
+                log.warn("적재 칸 상태를 바꾸지 못했다(이미 비어 있지 않음): slotCode={}", slotCode);
+            }
+        } catch (RuntimeException e) {
+            log.error("적재 칸 상태 기록 실패(격리됨): slotCode={}, error={}", slotCode, e.getMessage());
+        }
+    }
 
     /**
      * 스테이션 <b>진입점</b>까지 진행 방향으로 남은 호장(m).
@@ -359,6 +465,7 @@ public class CycleControlService {
         if (!isLoaded(motion)) {
             log.info("주기 완료: vehicleId={}, rack={}, cycles={}",
                     cycle.vehicleId(), cycle.rackCode(), cycle.cycles() + 1);
+            markSlotOccupied(cycle.rackCode());
             cycle.advance(now);
             return;
         }

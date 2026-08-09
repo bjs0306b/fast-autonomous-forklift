@@ -61,6 +61,16 @@
         SET status='OCCUPIED', reserved_task_id=NULL, stored_cargo_id=#{storedCargoId}
         WHERE slot_code=#{slotCode} AND status='RESERVED' AND reserved_task_id=#{reservedTaskId}
     </update>
+    <select id="countAll" resultType="int">
+        SELECT COUNT(*) FROM storage_slot
+    </select>
+    <select id="countEmpty" resultType="int">
+        SELECT COUNT(*) FROM storage_slot WHERE status='EMPTY'
+    </select>
+    <update id="markOccupiedIfEmpty">
+        UPDATE storage_slot SET status='OCCUPIED'
+        WHERE slot_code=#{slotCode} AND status='EMPTY'
+    </update>
     <update id="releaseReservation">
         UPDATE storage_slot SET status='EMPTY', reserved_task_id=NULL, stored_cargo_id=NULL
         WHERE slot_code=#{slotCode} AND status='RESERVED' AND reserved_task_id=#{reservedTaskId}
