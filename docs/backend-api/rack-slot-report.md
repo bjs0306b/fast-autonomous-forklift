@@ -30,7 +30,7 @@ F팀 `backend-mqtt-guide`(2026-08-05) §6이 준 랙 좌표를 DB 시드로 옮�
 | A | 5.0 | 9.3 · 10.5 · 11.8 · 13.2 · 14.5 · 15.8 · 17.2 · 18.5 · 19.7 · 21.2 · 22.5 · 23.8 |
 | B | 14.5 | (A와 동일) |
 
-공통: `fork_height` 13.25 · `destination_heading` 180.0° · `status` EMPTY
+공통: `fork_height` 1.325 · `destination_heading` 180.0° · `status` EMPTY
 
 ### 왜 접근점만 넣었나
 
@@ -104,10 +104,15 @@ A1 → A10 → A11 → A12 → A2 → A3 → ... → A9 → B1 → B10 → ...
 이전 판에서는 "시뮬 단위와 실물 m이 섞여 있다"고 경고했으나, 팀 합의로 m로 확정했다.
 변환 코드는 넣지 않는다.
 
-> ⚠️ **하나가 아직 안 맞는다.** 이 가정대로면 `fork_height` 13.25는 "포크를 13.25 m까지
-> 올린다"는 뜻이 되어, 한 칸 높이 `usable_height` 2.00 m와 이어지지 않는다. 13.25는 F팀
-> 문서가 준 값을 그대로 쓴 것이고 `task.dropoff`로 나가는 계약값이라 **임의로 바꾸지
-> 않았다.** F팀 확인이 필요하다.
+> 🔴 **2026-08-09 정정.** 이 절의 "시뮬 좌표 = m" 전제는 틀렸다. F팀 개정 문서(`backend-mqtt-guide`
+> §2)와 `rack_slots.csv`가 **시뮬 = 실물 × 10**임을 명시한다(`approach_x 5.0` ↔ `real_approach_x 0.5`).
+> 백엔드가 변환하지 않는 것은 그대로지만, 값을 실물로 읽으면 안 된다.
+>
+> 같은 정정으로 `fork_height`가 **13.25 → 1.325**로 바뀌었다. 8/5 판 인용값이 잘못이었고,
+> 개정 문서·CSV·`shelfHeight` 예시가 모두 1.325다. 자세한 내용은
+> `docs/backend-api/traffic-control-migration-report.md` 1·2장.
+
+---
 
 ## 5. ⚠️ `usable_height` 2.00은 합의값이지 측정값이 아니다
 
@@ -206,7 +211,7 @@ mysql -h localhost -u fastbackend -p fast_backend < src/main/resources/db/seed-r
 |---|---|---|---|
 | 1 | Nav2 경로 길이 조회 연동 | 백엔드 | 🔴 거리 정렬 무력 → 항상 `A001`부터 |
 | 2 | 시드 SQL을 DB에 적용 | 백엔드 | 랙 24칸이 아직 없음 |
-| 3 | `fork_height` 13.25 확인 | F팀 | ⚠️ m 가정과 `usable_height` 2.00이 안 맞음 (4장) |
+| 3 | ~~`fork_height` 13.25 확인~~ | — | ✅ **해결** — 1.325로 정정 (2026-08-09) |
 | 4 | `usable_height` 실측 24칸 | 측정 필요 | ⚠️ 지금은 합의값 2.00 — 1.63 m 초과 화물 거부 |
 | 5 | `usable_width` 실측(선택) | 측정 필요 | 폭 검사가 항상 통과 중 |
 
