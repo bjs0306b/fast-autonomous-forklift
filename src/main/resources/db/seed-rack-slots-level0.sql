@@ -109,10 +109,16 @@ INSERT IGNORE INTO storage_slot
     ('BF12', 0.14, NULL, 0.0, 14.5, 23.8, 180.0, 'EMPTY');
 
 -- 확인 — 층별로 24 칸씩 48 칸이어야 한다.
-SELECT CASE WHEN slot_code LIKE '_F%' THEN '0층(바닥)' ELSE '1층(선반)' END AS 층,
-       COUNT(*)           AS 칸수,
+--
+-- 별칭을 ASCII 로 둔다. 한글 별칭을 쓰면 클라이언트 접속 문자셋에 따라 파이프로 넣을 때
+-- 깨져서 ERROR 1064 로 죽는다(2026-08-10 실측). 스크립트 전체가 실패한 것처럼 보이지만
+-- 실제로는 UPDATE·INSERT 가 이미 적용된 뒤라 더 헷갈린다.
+--
+--   L0_floor  = 0층(바닥)   L1_shelf = 1층(선반)
+SELECT CASE WHEN slot_code LIKE '_F%' THEN 'L0_floor' ELSE 'L1_shelf' END AS level_name,
+       COUNT(*)           AS slots,
        MIN(usable_height) AS usable_height,
        MIN(fork_height)   AS fork_height
   FROM storage_slot
- GROUP BY 1
- ORDER BY 1;
+ GROUP BY level_name
+ ORDER BY level_name;
