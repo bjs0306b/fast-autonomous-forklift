@@ -435,7 +435,7 @@ def run_stream_only(args) -> int:
     thread.start()
     overlay, _infer = start_stream_overlay(args, cfg, bus, stop)
     try:
-        server = livestream.start_server(bus, port=port, stream_width=args.stream_width,
+        server = livestream.start_server(bus, port=port, stream_width=args.stream_width, quality=args.stream_quality,
                                          overlay=overlay)
     except OSError as e:
         print(f"❌ 포트 {port} 열기 실패 — {e}", file=sys.stderr)
@@ -608,7 +608,11 @@ def main(argv: list[str] | None = None) -> int:
                              f"⚠️ 별도 송출 서버를 띄우면 카메라를 뺏겨 측정이 실패하므로 "
                              f"여기서 함께 내보낸다")
     parser.add_argument("--stream-width", type=int, default=livestream.DEFAULT_STREAM_WIDTH,
-                        help="송출 폭(px). 측정은 원본 해상도로 하고 화면만 줄인다")
+                        help="송출 폭(px). 측정은 원본 해상도로 하고 화면만 줄인다. "
+                             "관제 화면을 전체 보기로 키우면 이 폭에서 확대되므로 "
+                             "작을수록 뭉개진다")
+    parser.add_argument("--stream-quality", type=int, default=livestream.DEFAULT_QUALITY,
+                        help="송출 JPEG 품질(1~100). 높일수록 선명하지만 프레임이 커진다")
     parser.add_argument("--stream-infer-fps", type=float, default=3.0,
                         help="송출 화면에 검출 상자를 그리는 주기(fps). 0이면 원본만 "
                              "내보낸다. ⚠️ 표시 전용이고 백엔드로 가지 않는다 — 저장되는 "
@@ -881,7 +885,7 @@ def main(argv: list[str] | None = None) -> int:
                                           distance_source=shared_distance["source"])
         try:
             stream_server = livestream.start_server(
-                bus, port=args.stream_port, stream_width=args.stream_width,
+                bus, port=args.stream_port, stream_width=args.stream_width, quality=args.stream_quality,
                 overlay=overlay)
             print(f"[listen] 송출 http://<이 PC>:{args.stream_port}/stream "
                   f"(폭 {args.stream_width}px · /health 로 상태 확인)", flush=True)

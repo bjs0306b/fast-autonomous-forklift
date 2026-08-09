@@ -40,13 +40,19 @@ BOUNDARY = "frame"
 DEFAULT_PORT = 8879
 """젯슨 온보드 송출(8878)·추론 서버(8877)와 겹치지 않게 둔다."""
 
-DEFAULT_STREAM_WIDTH = 960
-"""송출 폭. 캘리브레이션 기준 1920 을 그대로 보내면 프레임당 수백 KB 라 화면이 밀린다.
+DEFAULT_STREAM_WIDTH = 1280
+"""송출 폭.
 
 ⚠️ **줄인 것은 화면뿐이고 측정은 원본으로 한다.** 치수는 픽셀 수에 비례하므로
 송출 해상도가 측정에 영향을 주면 안 된다 — `FrameBus` 는 원본을 들고 있고 축소는
 내보낼 때만 한다.
+
+960 이었다가 1280 으로 올렸다(2026-08-09). 관제 화면을 **전체 보기로 키우면 이 폭에서
+확대**되므로 작을수록 뭉개진다 — 1920 폭 화면에서 960 은 2배 확대였다.
 """
+
+DEFAULT_QUALITY = 85
+"""송출 JPEG 품질. 80 에서 올렸다 — 글자(패널)와 얇은 상자 선이 먼저 뭉개진다."""
 
 
 class FrameBus:
@@ -395,7 +401,7 @@ def _handler_factory(bus: FrameBus, stream_width: int, quality: int,
 
 def start_server(bus: FrameBus, port: int = DEFAULT_PORT, host: str = "0.0.0.0",
                  stream_width: int = DEFAULT_STREAM_WIDTH,
-                 quality: int = 80,
+                 quality: int = DEFAULT_QUALITY,
                  overlay: Overlay | None = None) -> ThreadingHTTPServer:
     """MJPEG 서버를 데몬 스레드로 띄우고 돌려준다.
 
