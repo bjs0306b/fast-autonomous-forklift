@@ -51,7 +51,7 @@ from track import Track, build_corners
 
 # ── 스테이션 (맵에서 3.8x1.9 차체가 설 수 있는지 확인한 좌표) ────────
 STATIONS = {
-    "BAY":  (17.0, 5.0, 0.0),            # 입고 바이 (공용, 한 대만)
+    "BAY":  (16.5, 5.0, 0.0),            # 입고 바이 (공용, 한 대만)
     "EXIT": (15.5, 4.0, math.pi / 2),    # 바이 탈출점 (막다른 곳에서 나옴)
 }
 
@@ -296,11 +296,22 @@ class LoopDemo(Node):
         return None
 
     # ── 시작 합류 — 한 번에 한 대씩만 순환로에 올린다 ──────────────
+    def entry_order(self):
+        """합류 허가를 줄 순서. 실물(REAL_F01)이 최우선이다.
+
+        실물은 시뮬처럼 마음대로 세웠다 다시 보낼 수 없다. 사람이 세트장에서
+        직접 다뤄야 하므로 먼저 내보내 흐름을 잡게 하고, 시뮬은 그 뒤를
+        따라가게 한다. 실물이 늦게 합류하면 앞차들 사이에 끼어들어야 해서
+        훨씬 까다롭다.
+        """
+        return sorted(self.v.items(),
+                      key=lambda kv: (0 if kv[0] == REAL_ID else 1, kv[0]))
+
     def release_one(self):
         self.release_cooldown = max(0.0, self.release_cooldown - TICK)
         if self.release_cooldown > 0:
             return
-        for vid, v in self.v.items():
+        for vid, v in self.entry_order():
             if v["joined"]:
                 continue
             p = self.pos(v["frame"])

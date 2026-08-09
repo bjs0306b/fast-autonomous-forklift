@@ -46,7 +46,7 @@ from track import Track, build_corners
 #   work  : 그 자리에서 머무는 시간(초). 이 동안 뒤차는 규칙 2로 멈춘다.
 #   fork  : 도착 시 포크 높이(m). None 이면 건드리지 않는다.
 STATIONS = {
-    "BAY":  {"pos": (17.0, 5.0, 0.0),          "work": 15.0, "fork": 0.0},
+    "BAY":  {"pos": (16.5, 5.0, 0.0),          "work": 15.0, "fork": 0.0},
     "RACK": {"pos": (5.0, 20.0, math.pi / 2),  "work": 12.0, "fork": 1.35},
 }
 # 각 차량이 반복할 일감 순서

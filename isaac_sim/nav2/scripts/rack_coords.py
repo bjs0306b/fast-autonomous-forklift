@@ -103,6 +103,63 @@ def scan_shelves(x_min=None, x_max=None, z_max=2.5, min_w=0.6):
     return found
 
 
+def near(x, y, r=3.0, z_max=1.0, skip=("Forklift", "Cargo")):
+    """그 자리 근처의 프림을 찾는다 — 바닥 표시 등을 찾을 때.
+
+        near(17, 5)            # 옛 입고 바이 근처
+        near(16.5, 5, r=2)     # 새 바이 근처
+
+    z_max 로 바닥 근처만 본다 (기본 1.0 = 실물 100 mm).
+    """
+    hits = []
+    for p in _st.Traverse():
+        if not p.IsA(UsdGeom.Gprim):
+            continue
+        path = str(p.GetPath())
+        if any(k.lower() in path.lower() for k in skip):
+            continue
+        try:
+            mn, mx = _bbox(p)
+        except Exception:
+            continue
+        w = float(mx[0] - mn[0])
+        if w <= 0 or w > 100:
+            continue
+        cx = (float(mn[0]) + float(mx[0])) / 2
+        cy = (float(mn[1]) + float(mx[1])) / 2
+        if float(mn[2]) > z_max:
+            continue
+        d = math.hypot(cx - x, cy - y)
+        if d <= r:
+            hits.append((d, path, cx, cy, float(mn[2]), float(mx[2])))
+    hits.sort()
+    print(f"({x}, {y}) 반경 {r} 안, 높이 {z_max} 이하 — {len(hits)}개\n")
+    print(f"{'거리':>6} {'중심 x':>8} {'중심 y':>8} {'z':>13}  프림")
+    for d, path, cx, cy, z0, z1 in hits[:25]:
+        print(f"{d:6.2f} {cx:8.2f} {cy:8.2f} {z0:6.2f}~{z1:5.2f}  {path[-44:]}")
+    return hits
+
+
+def move_prim(path, dx=0.0, dy=0.0, dz=0.0):
+    """프림을 상대적으로 옮긴다.
+
+        move_prim("/World/warehouse/SM_FloorMark_1", dx=-0.5)
+
+    바이를 17.0 -> 16.5 로 옮겼으므로, 바닥 표시도 dx=-0.5 하면 된다.
+    """
+    prim = _st.GetPrimAtPath(path)
+    if not prim.IsValid():
+        print(f"{path} 없음")
+        return False
+    api = UsdGeom.XformCommonAPI(prim)
+    t = api.GetXformVectors(Usd.TimeCode.Default())[0]
+    new_t = (float(t[0]) + dx, float(t[1]) + dy, float(t[2]) + dz)
+    api.SetTranslate(new_t)
+    print(f"{path.split('/')[-1]}  ({float(t[0]):.2f},{float(t[1]):.2f}) "
+          f"-> ({new_t[0]:.2f},{new_t[1]:.2f})")
+    return True
+
+
 def slice_bounds(z=2.0, skip=("Forklift", "Cargo", "Palette", "Bracket",
                                "Ceiling", "Roof", "Light")):
     """높이 z 에서 수평으로 자른 단면에 걸리는 것들을 찾는다.

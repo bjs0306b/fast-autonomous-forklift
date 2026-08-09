@@ -101,7 +101,7 @@ FORK_WAIT = 4.0          # 포크 명령 후 기다리는 시간(초)
 
 # 입고 바이. 여기 도착해 멈추면 arrived 를 발행한다(AI 측정 트리거).
 # docs/mqtt-arrived.md 참조. 좌표는 시뮬 좌표 그대로 내보낸다(SCALE=1.0).
-BAY_XY = (17.0, 5.0)
+BAY_XY = (16.5, 5.0)
 BAY_RADIUS = 2.0
 SCALE = 1.0
 
