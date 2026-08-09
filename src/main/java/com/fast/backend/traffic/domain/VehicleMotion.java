@@ -9,6 +9,9 @@ import com.fast.backend.vehicle.domain.VehicleStatus;
  * @param headingDeg 진행 방향(degree, 0=+X축, 반시계). 위치 계약이 degree 라 그대로 받는다
  * @param speedMps   속도(m/s). {@code null} 이면 <b>모른다</b>는 뜻이며 0(정지)으로 단정하지 않는다 —
  *                   "모르는데 멈춰 있다고 가정"하면 예측 거리가 실제보다 길게 나와 위험하다
+ * @param loaded     차량이 보고한 적재 여부. {@code null} 이면 <b>모른다</b>(이 필드를 안 보내는 차량).
+ *                   {@code status} 로 대신 추정하지 않고 "모른다"를 그대로 넘긴다 — 쓰는 쪽이
+ *                   폴백을 정해야 판단 근거가 한 곳에 남는다
  */
 public record VehicleMotion(
         String vehicleId,
@@ -16,8 +19,16 @@ public record VehicleMotion(
         double y,
         Double headingDeg,
         Double speedMps,
-        VehicleStatus status
+        VehicleStatus status,
+        Boolean loaded
 ) {
+
+    /** 적재 여부를 모르는 채로 만든다. 그 값을 쓰지 않는 판단(차간 거리·구역)용이다. */
+    public VehicleMotion(
+            String vehicleId, double x, double y,
+            Double headingDeg, Double speedMps, VehicleStatus status) {
+        this(vehicleId, x, y, headingDeg, speedMps, status, null);
+    }
 
     /** 지금 선반에서 하역·적재 작업 중인가. 이 상태면 그 자리를 점유한 것으로 본다. */
     public boolean isWorking() {

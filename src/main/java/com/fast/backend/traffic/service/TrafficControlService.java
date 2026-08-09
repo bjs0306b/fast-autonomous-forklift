@@ -53,7 +53,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <ul>
  *   <li>기능이 꺼져 있거나 제어 대상 목록이 비면 <b>아무 명령도 보내지 않는다</b></li>
  *   <li>위치가 낡은 차량은 판단에서 제외한다 — 낡은 좌표로 "안전"을 선언하는 것이 가장 위험하다.
- *       다만 <b>이미 세워 둔 차량은 풀지 않는다</b>(모르는 상태에서 재개시키지 않는다)</li>
+ *       <b>세워 둔 차량은 자기 위치가 낡아도, 자기를 세운 상대의 위치가 낡아도 풀지 않는다</b>
+ *       (양쪽 모두 "모르는 상태에서 재개시키지 않는다" 다 — {@link #counterpartVisible})</li>
+ *   <li><b>전체 운행이 멈춰 있으면(PAUSED·ESTOPPED) 재개하지 않는다.</b> 정지는 어느 상태에서든
+ *       내보내되, 사람이 세워 둔 것을 기계가 푸는 방향으로는 절대 움직이지 않는다</li>
  *   <li>정지는 즉시, 재개는 여유 거리({@code releaseDistanceM})에서 — 경계 채터링 방지</li>
  * </ul>
  */
@@ -132,7 +135,7 @@ public class TrafficControlService {
             if (decision.isPresent()) {
                 hold(motion.vehicleId(), decision.get());
             } else if (heldVehicles.containsKey(motion.vehicleId())
-                    && isSafeToRelease(motion, motions, zones)) {
+                    && canRelease(motion, motions, zones)) {
                 release(motion.vehicleId());
             }
         }
@@ -285,6 +288,52 @@ public class TrafficControlService {
     }
 
     /**
+     * 지금 이 차량을 풀어도 되는가.
+     *
+     * <p>세 관문을 <b>모두</b> 통과해야 한다. 하나라도 모르면 세워 둔 채로 남긴다 — 재개는
+     * 서두를 이유가 없고, 잘못 푼 것은 되돌릴 수 없다.
+     */
+    private boolean canRelease(
+            VehicleMotion target, List<VehicleMotion> all, List<WorkZone> zones) {
+
+        // (1) 전체 운행이 멈춰 있으면 관제도 풀지 않는다. 일시정지·비상정지를 눌러 둔 채로
+        //     차간 거리가 벌어졌다는 이유만으로 RESUME 이 나가면, 사람이 세운 것을 기계가 푼다.
+        if (!operationService.state().isDriving()) {
+            return false;
+        }
+        // (2) 세운 이유가 됐던 상대가 지금 안 보이면 풀지 않는다.
+        if (!counterpartVisible(target.vehicleId(), all)) {
+            return false;
+        }
+        return isSafeToRelease(target, all, zones);
+    }
+
+    /**
+     * 세운 사유의 상대 차량이 아직 판단 목록에 남아 있는가.
+     *
+     * <p><b>왜 필요한가.</b> 낡은 위치는 {@link #collectFreshMotions} 에서 목록째 빠진다. 그러면
+     * {@link #isSafeToRelease} 는 그 차량과의 거리를 아예 재지 않고 "위반 없음 = 안전"으로 읽는다.
+     * 즉 <b>앞차의 telemetry 가 끊기는 것만으로 뒤차가 풀린다.</b> 앞차가 어디 있는지 모르는데
+     * 그쪽으로 다시 보내는 셈이라, 이 클래스가 내건 "모르는 상태에서 재개시키지 않는다"와 정반대다.
+     *
+     * <p>상대가 없는 사유(작업 구역 등)면 이 관문은 통과시킨다 — 볼 대상이 없다.
+     */
+    private boolean counterpartVisible(String vehicleId, List<VehicleMotion> all) {
+        TrafficStopDecision decision = heldVehicles.get(vehicleId);
+        String counterpart = decision == null ? null : decision.counterpartVehicleId();
+        if (counterpart == null) {
+            return true;
+        }
+        for (VehicleMotion motion : all) {
+            if (motion.vehicleId().equals(counterpart)) {
+                return true;
+            }
+        }
+        log.debug("재개 보류(상대 차량 위치를 모름): vehicleId={}, 상대={}", vehicleId, counterpart);
+        return false;
+    }
+
+    /**
      * 재개해도 되는가 — FR 의 재개 조건 두 가지가 <b>모두</b> 만족해야 한다.
      * (선행 차량이 구역을 이탈했고, 현재·예상 거리가 안전거리 이상)
      *
@@ -384,7 +433,11 @@ public class TrafficControlService {
      *
      * <p>낡은 좌표를 그대로 쓰면 이미 움직인 차량을 제자리에 있다고 보고 "안전"을 선언하게 된다.
      * 그래서 오래된 차량은 목록에서 뺀다 — 그러면 그 차량과의 거리 판정 자체가 일어나지 않고,
-     * 이미 세워 둔 차량은 재개 조건({@link #isSafeToRelease})을 통과하지 못해 <b>세워진 채로 남는다</b>.
+     * 세워 둔 차량 <b>자신</b>이 낡았다면 순회 대상에서 빠져 세워진 채로 남는다.
+     *
+     * <p><b>목록에서 빼는 것만으로는 부족하다.</b> 빠진 것이 <b>상대</b> 차량이면 거리 위반이
+     * 사라져 오히려 재개 쪽으로 기운다. 그래서 {@link #counterpartVisible} 이 "나를 세운 상대가
+     * 아직 보이는가"를 따로 확인한다. 여기서 거르는 것과 거기서 거르는 것은 방향이 다르다.
      */
     private List<VehicleMotion> collectFreshMotions() {
         OffsetDateTime now = CommunicationTime.nowOffset();
@@ -412,7 +465,10 @@ public class TrafficControlService {
             motions.add(new VehicleMotion(
                     snapshot.vehicleId(), snapshot.x(), snapshot.y(),
                     snapshot.heading(), snapshot.speed(),
-                    statuses.getOrDefault(snapshot.vehicleId(), VehicleStatus.UNKNOWN)));
+                    statuses.getOrDefault(snapshot.vehicleId(), VehicleStatus.UNKNOWN),
+                    // 적재 여부를 함께 넘긴다. 예전에는 여기서 버려서 주기 상태기계가 status 로만
+                    // 판정했고, 차량이 화물을 싣고도 IDLE 을 보고하면 적재를 영영 못 알아봤다.
+                    snapshot.reportedLoaded()));
         }
         return motions;
     }

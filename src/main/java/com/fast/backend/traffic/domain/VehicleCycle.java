@@ -84,6 +84,22 @@ public final class VehicleCycle {
         lastGoal = null;
     }
 
+    /**
+     * 실패 복구 — 주기를 첫 단계({@code TO_BAY})로 되돌린다.
+     *
+     * <p><b>{@link #cycles} 를 올리지 않는다.</b> 예전에는 호출부가 {@code TO_BAY} 가 될 때까지
+     * {@link #advance} 를 반복했는데, 그 경로가 {@code RACK} 을 지나면서 완료 주기 수를 올렸다.
+     * 적재에 실패할 때마다 "완료 주기"가 하나씩 늘어, 랙에 한 번도 못 간 차량이 8 주기를
+     * 처리한 것으로 집계됐다(2026-08-10 실측). 실패는 실패로 세야 지표를 믿을 수 있다.
+     */
+    public void restartToBay(long nowMs) {
+        phase = CyclePhase.TO_BAY;
+        target = "BAY";
+        rackCode = null;
+        workStartedAtMs = nowMs;
+        lastGoal = null;
+    }
+
     /** 랙을 배정한다. 같은 주기에 두 번 부르지 않도록 {@link #rackCode()} 로 확인하고 쓴다. */
     public void assignRack(String code) {
         this.rackCode = code;

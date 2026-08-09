@@ -226,4 +226,47 @@ class VehicleCycleTest {
             assertThat(new VehicleCycle("SIM-F02", T0).workSettled(T0, 0)).isTrue();
         }
     }
+
+    @Nested
+    @DisplayName("실패 복구")
+    class Restart {
+
+        @Test
+        @DisplayName("주기 수를 올리지 않는다 — 실패를 완료로 세면 지표가 거짓말이 된다")
+        void 재시작은_주기_수를_올리지_않는다() {
+            VehicleCycle cycle = new VehicleCycle("SIM-F02", T0);
+            cycle.advance(T0);      // ALIGN_BAY
+            cycle.advance(T0);      // LOAD — 여기서 적재에 실패했다고 하자
+
+            cycle.restartToBay(T0 + 40_000);
+
+            assertThat(cycle.phase()).isEqualTo(CyclePhase.TO_BAY);
+            assertThat(cycle.cycles()).isZero();
+        }
+
+        @Test
+        @DisplayName("정상 완료(RACK 통과)는 그대로 주기 수를 올린다")
+        void 정상_완료는_주기_수를_올린다() {
+            VehicleCycle cycle = new VehicleCycle("SIM-F02", T0);
+            for (int i = 0; i < 6; i++) {
+                cycle.advance(T0);      // TO_BAY → ... → RACK → TO_BAY
+            }
+            assertThat(cycle.phase()).isEqualTo(CyclePhase.TO_BAY);
+            assertThat(cycle.cycles()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("배정된 랙과 목표 기억을 지운다 — 다음 주기가 이전 랙을 물고 가지 않게")
+        void 재시작은_랙_배정을_지운다() {
+            VehicleCycle cycle = new VehicleCycle("SIM-F02", T0);
+            cycle.assignRack("A001");
+            cycle.shouldSendGoal("BAY");
+
+            cycle.restartToBay(T0 + 1_000);
+
+            assertThat(cycle.rackCode()).isNull();
+            assertThat(cycle.target()).isEqualTo("BAY");
+            assertThat(cycle.shouldSendGoal("BAY")).isTrue();
+        }
+    }
 }
