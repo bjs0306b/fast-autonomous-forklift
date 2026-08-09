@@ -56,7 +56,12 @@ public enum ErrorCode {
     TRANSPORT_TASK_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 운반 작업입니다."),
     INVALID_TASK_STATUS_TRANSITION(HttpStatus.CONFLICT, "허용되지 않는 작업 상태 전이입니다."),
     VEHICLE_NOT_AVAILABLE(HttpStatus.CONFLICT, "배정할 수 없는 차량 상태입니다."),
-    VEHICLE_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "이미 활성 작업이 배정된 차량입니다.");
+    VEHICLE_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "이미 활성 작업이 배정된 차량입니다."),
+
+    // 운행 제어(F팀 backend-control-impl §0.6)
+    OPERATION_STATE_INVALID(HttpStatus.CONFLICT, "현재 운행 상태에서 할 수 없는 조작입니다."),
+    OPERATION_NO_VEHICLE_ONLINE(HttpStatus.CONFLICT, "연결된 차량이 없어 운행을 시작할 수 없습니다."),
+    OPERATION_VEHICLE_NOT_CONTROLLED(HttpStatus.BAD_REQUEST, "관제 대상 차량이 아닙니다.");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

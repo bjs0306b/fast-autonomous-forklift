@@ -1,5 +1,6 @@
 package com.fast.backend.isaac.service;
 
+import com.fast.backend.traffic.service.VehicleProcedureRegistry;
 import com.fast.backend.isaac.dto.IsaacVehicleTelemetryMessage;
 import com.fast.backend.vehicle.config.VehicleProperties;
 import com.fast.backend.vehicle.domain.VehicleStatus;
@@ -35,6 +36,7 @@ class IsaacVehicleTelemetryServiceTest {
 
     private VehicleLocationIngestionService ingestionService;
     private VehicleStatusService statusService;
+    private VehicleProcedureRegistry procedureRegistry;
     private IsaacVehicleTelemetryService service;
 
     @BeforeEach
@@ -43,8 +45,12 @@ class IsaacVehicleTelemetryServiceTest {
         statusService = mock(VehicleStatusService.class);
         VehicleProperties properties = new VehicleProperties(
                 false, false, 10L, Map.of("sim01", "SIM-F01", "sim02", "SIM-F02"));
+        // busy/step 기록은 주기 상태기계 전용이라 이 테스트의 관심사가 아니다. 실제 구현을
+        // 그대로 쓰되(가벼운 인메모리 맵), 검증은 VehicleProcedureRegistry 쪽에서 한다.
+        procedureRegistry = new VehicleProcedureRegistry();
         service = new IsaacVehicleTelemetryService(
-                new VehicleIdAliasResolver(properties), ingestionService, statusService);
+                new VehicleIdAliasResolver(properties), ingestionService, statusService,
+                procedureRegistry);
     }
 
     @Test

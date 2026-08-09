@@ -68,6 +68,52 @@ traffic:
   prediction-horizon-s: ${TRAFFIC_PREDICTION_HORIZON_S:2.0}
   # 선반 작업 구역 반경(m). storage_slot 의 접근 좌표를 중심으로 한 원.
   work-zone-radius-m: ${TRAFFIC_WORK_ZONE_RADIUS_M:3.0}
+  # 순환로 기하. 좌표는 시뮬 좌표계(20 × 30)이며 백엔드는 변환하지 않는다.
+  # F팀 isaac_sim/nav2/scripts/track.py 와 같은 값이어야 한다 — 갈라지면 시뮬과 관제가
+  # 서로 다른 앞차를 보게 된다.
+  loop:
+    # 반시계: 아래 +x → 오른쪽 +y → 위 -x → 왼쪽 -y. 둘레 67.0
+    corners:
+      - { x: 15.5, y: 4.0 }
+      - { x: 15.5, y: 27.0 }
+      - { x: 5.0, y: 27.0 }
+      - { x: 5.0, y: 4.0 }
+    # 모서리 도달 판정(m). 이 안에 들면 지난 것으로 보고 다음 모서리를 준다.
+    corner-tol-m: ${TRAFFIC_LOOP_CORNER_TOL_M:2.0}
+    # 순환로 이탈 판정(m). 바이·랙으로 빠진 차량을 차간 판정에서 빼는 기준.
+    off-track-tol-m: ${TRAFFIC_LOOP_OFF_TRACK_TOL_M:3.0}
+    # 합류 허가 최소 간격(m). 앞차가 이보다 가까우면 새 차를 내보내지 않는다.
+    entry-headway-m: ${TRAFFIC_LOOP_ENTRY_HEADWAY_M:10.0}
+    # 합류 허가 간격(ms). 한 대 내보낸 뒤 이만큼 기다린다(동시 출발 방지).
+    entry-interval-ms: ${TRAFFIC_LOOP_ENTRY_INTERVAL_MS:3000}
+    # 정체 감시. 이 시간 동안 stall-move-m 보다 적게 움직이면 목표를 다시 보낸다.
+    stall-sec: ${TRAFFIC_LOOP_STALL_SEC:20}
+    stall-move-m: ${TRAFFIC_LOOP_STALL_MOVE_M:0.3}
+  # 주기 상태기계(바이 → 적재 → 랙). F팀 데모와 동시에 켜면 서로 목표를 밀어내므로
+  # 기본은 꺼 둔다. 켜기 전에 F팀에 데모를 꺼 달라고 할 것.
+  cycle:
+    enabled: ${TRAFFIC_CYCLE_ENABLED:false}
+    # 입고 바이(진입 yaw 0=동), 바이 탈출점(yaw 1.5708=북). 라디안이다.
+    bay: { x: 16.5, y: 5.0, yaw: 0.0 }
+    exit: { x: 15.5, y: 4.0, yaw: 1.5708 }
+    arrive-tol-m: ${TRAFFIC_CYCLE_ARRIVE_TOL_M:1.5}
+    # 작업 단계 상한(ms). 무한 대기를 막는 안전장치이며, 단계 전이는 loaded 로 판정한다.
+    # 정렬 판정 (규격 §5). state 가 아니라 telemetry 의 busy 로 판정한다 —
+    # 정렬이 끝나도 state 는 LOADING 을 유지하므로 구별이 안 된다.
+    #   경과 < min      → 아직 (정렬 자체가 최대 8초, 지시 반영에 200~400ms)
+    #   경과 > timeout  → busy 와 무관하게 진행 (안전장치)
+    #   그 사이         → busy == false 여야 완료
+    align-min-dwell-ms: ${TRAFFIC_CYCLE_ALIGN_MIN_DWELL_MS:7000}
+    align-timeout-ms: ${TRAFFIC_CYCLE_ALIGN_TIMEOUT_MS:12000}
+    load-timeout-ms: ${TRAFFIC_CYCLE_LOAD_TIMEOUT_MS:40000}
+    place-timeout-ms: ${TRAFFIC_CYCLE_PLACE_TIMEOUT_MS:90000}
+    # 바이에서 받을 화물 높이. 이 값만 실물 m 다(규격 §6).
+    cargo-height-m: ${TRAFFIC_CYCLE_CARGO_HEIGHT_M:0.15}
+    # 차량별 랙 배정. 실물(fk01)에 B랙을 주는 이유는 오른쪽 통로가 넓어 사람이 접근하기 쉬워서다.
+    racks:
+      REAL-F01: [B001, B002, B003, B004, B005, B006, B007, B008, B009, B010, B011, B012]
+      SIM-F02: [A001, A002, A003, A004, A005, A006, A007, A008, A009, A010, A011, A012]
+      SIM-F03: [B001, B002, B003, B004, B005, B006, B007, B008, B009, B010, B011, B012]
   # 위치가 이보다 오래되면 판단에서 제외한다(낡은 좌표로 "안전"을 선언하지 않기 위해).
   stale-location-ms: ${TRAFFIC_STALE_LOCATION_MS:2000}
 

@@ -1,8 +1,11 @@
 package com.fast.backend.traffic.service;
 
 import com.fast.backend.command.dto.VehicleCommandRequest;
+import com.fast.backend.traffic.config.LoopTrackProperties;
 import com.fast.backend.traffic.config.TrafficControlProperties;
 import com.fast.backend.traffic.domain.CollisionPredictor;
+import com.fast.backend.traffic.domain.OperationState;
+import com.fast.backend.traffic.domain.Track;
 import com.fast.backend.traffic.domain.TrafficControlEvent;
 import com.fast.backend.traffic.domain.TrafficStopDecision;
 import com.fast.backend.traffic.mapper.TrafficControlEventMapper;
@@ -60,6 +63,11 @@ public class TrafficControlService {
     private static final Logger log = LoggerFactory.getLogger(TrafficControlService.class);
 
     private final TrafficControlProperties properties;
+    private final LoopTrackProperties loopProperties;
+    /** 순환로 기하. 불변이라 tick 마다 다시 만들지 않는다. */
+    private final Track track;
+    private final OperationService operationService;
+    private final CycleControlService cycleControlService;
     private final LatestVehicleLocationProvider locationProvider;
     private final VehicleCurrentStatusMapper statusMapper;
     private final WorkZoneProvider workZoneRegistry;
@@ -71,12 +79,19 @@ public class TrafficControlService {
 
     public TrafficControlService(
             TrafficControlProperties properties,
+            LoopTrackProperties loopProperties,
+            OperationService operationService,
+            CycleControlService cycleControlService,
             LatestVehicleLocationProvider locationProvider,
             VehicleCurrentStatusMapper statusMapper,
             WorkZoneProvider workZoneRegistry,
             VehicleCommandService commandService,
             TrafficControlEventMapper eventMapper) {
         this.properties = properties;
+        this.loopProperties = loopProperties;
+        this.track = loopProperties.toTrack();
+        this.operationService = operationService;
+        this.cycleControlService = cycleControlService;
         this.locationProvider = locationProvider;
         this.statusMapper = statusMapper;
         this.workZoneRegistry = workZoneRegistry;
@@ -102,9 +117,16 @@ public class TrafficControlService {
         workZoneRegistry.refresh(motions);
         List<WorkZone> zones = workZoneRegistry.zones();
 
+        releaseOneIntoLoop(motions);
+
         for (VehicleMotion motion : motions) {
             if (!properties.controls(motion.vehicleId())) {
                 continue;   // 제어 대상이 아닌 차량은 관측만 하고 명령하지 않는다
+            }
+            // 규칙 5 — 사람이 직접 세워 둔 차량은 관제가 건드리지 않는다.
+            // 여기서 RESUME 을 내보내면 "정지 버튼을 눌렀는데 다시 움직이는" 상황이 된다.
+            if (operationService.isManuallyHeld(motion.vehicleId())) {
+                continue;
             }
             Optional<TrafficStopDecision> decision = findStopReason(motion, motions, zones);
             if (decision.isPresent()) {
@@ -114,6 +136,59 @@ public class TrafficControlService {
                 release(motion.vehicleId());
             }
         }
+
+        // 차간 판정이 끝난 뒤에 주기를 진행시킨다 — 세워야 할 차를 먼저 세우고,
+        // 그 결과(heldVehicles)를 넘겨 "지금 서 있는 차에는 목표를 주지 않게" 한다.
+        cycleControlService.tick(motions, heldVehicles.keySet());
+    }
+
+    /**
+     * 규칙 0 — 한 tick 에 한 대씩 순환로에 합류시킨다.
+     *
+     * <p>앞차와의 간격 계산만 여기서 하고, 순서·쿨다운 판단은 {@link OperationService} 가 한다.
+     * 순환로 기하를 아는 쪽과 운행 상태를 아는 쪽을 나눠 두려는 것이다.
+     */
+    private void releaseOneIntoLoop(List<VehicleMotion> motions) {
+        if (!operationService.state().isDriving()) {
+            return;
+        }
+        Map<String, VehicleMotion> byId = new LinkedHashMap<>();
+        for (VehicleMotion motion : motions) {
+            byId.put(motion.vehicleId(), motion);
+        }
+        operationService.releaseOne(
+                properties.tickMs(),
+                loopProperties.entryHeadwayM(),
+                loopProperties.entryIntervalMs(),
+                candidateId -> nearestJoinedGap(candidateId, byId));
+    }
+
+    /**
+     * 합류 후보 앞쪽에 있는, <b>이미 합류한</b> 차량까지의 최단 거리. 앞이 비어 있으면 {@code null}.
+     *
+     * <p>순환로를 벗어난 차량은 세지 않는다 — 바이에서 작업 중인 차 때문에 새 차가 영영 합류하지
+     * 못하면 운행이 시작되지 않는다.
+     */
+    private Double nearestJoinedGap(String candidateId, Map<String, VehicleMotion> byId) {
+        VehicleMotion candidate = byId.get(candidateId);
+        if (candidate == null) {
+            return null;    // 위치를 모르는 차량 — 간격으로 막지 않는다(온라인 판정이 이미 걸렀다)
+        }
+        double sMe = track.project(candidate.x(), candidate.y()).s();
+        Double nearest = null;
+        for (VehicleMotion other : byId.values()) {
+            if (other.vehicleId().equals(candidateId) || !operationService.isJoined(other.vehicleId())) {
+                continue;
+            }
+            if (!CollisionPredictor.isOnTrack(track, other, loopProperties.offTrackTolM())) {
+                continue;
+            }
+            double gap = track.gap(sMe, track.project(other.x(), other.y()).s());
+            if (nearest == null || gap < nearest) {
+                nearest = gap;
+            }
+        }
+        return nearest;
     }
 
     /**
@@ -132,12 +207,14 @@ public class TrafficControlService {
                     blocking.get().slotCode(), blocking.get().occupiedBy()));
         }
 
+        boolean targetOnTrack = CollisionPredictor.isOnTrack(track, target, loopProperties.offTrackTolM());
+
         for (VehicleMotion other : all) {
             if (other.vehicleId().equals(target.vehicleId())) {
                 continue;
             }
-            double gap = CollisionPredictor.effectiveGap(target, other, properties.predictionHorizonS());
-            if (gap >= properties.holdDistanceM()) {
+            Double gap = gapTo(target, other, targetOnTrack);
+            if (gap == null || gap >= blockingDistance(other)) {
                 continue;
             }
             // 거리는 가깝다. 이제 "둘 중 누가 비켜야 하는가"를 정한다.
@@ -151,6 +228,60 @@ public class TrafficControlService {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * 이 앞차 때문에 멈춰야 하는 거리 (규칙 2 — 두 단계).
+     *
+     * <p>규격이 거리를 둘로 나눈 이유가 있다.
+     * <ul>
+     *   <li><b>서 있는 차</b>(작업 중·관제 정지·대기) → {@code holdDistanceM}(9.0).
+     *       비켜 줄 리가 없으니 멀리서부터 멈춰야 한다</li>
+     *   <li><b>움직이는 차</b> → {@code safeDistanceM}(6.0). 앞차도 가고 있으므로
+     *       9.0 에서 멈추면 <b>줄줄이 서서 순환이 죽는다</b></li>
+     * </ul>
+     *
+     * <p>한 값으로 통일하면 둘 중 하나가 어긋난다 — 9.0 이면 흐름이 막히고, 6.0 이면
+     * 하역 중인 차에 너무 가까이 붙는다.
+     */
+    private double blockingDistance(VehicleMotion other) {
+        return isStopped(other) ? properties.holdDistanceM() : properties.safeDistanceM();
+    }
+
+    /** 앞차가 <b>비켜 줄 수 없는 상태</b>인가. 규격 §4 {@code stoppedKind} 와 같은 판정이다. */
+    private boolean isStopped(VehicleMotion other) {
+        return other.isWorking()                                    // LOADING / UNLOADING / LIFTING
+                || other.isHeld()                                   // HOLDING
+                || other.status() == VehicleStatus.ESTOP            // 비상정지
+                || heldVehicles.containsKey(other.vehicleId())      // 관제가 세워 둔 차
+                || operationService.isManuallyHeld(other.vehicleId());
+    }
+
+    /**
+     * 두 차량 사이 판단 거리. 순환로 위에 둘 다 있으면 <b>호장</b>, 아니면 직선.
+     *
+     * <p><b>왜 나누는가.</b> 창고 가운데가 랙이라 좌우 통로가 갈라져 있어서, 반대편 통로의
+     * 차량은 직선으로 10.5 지만 실제 주행 거리는 반 바퀴(약 33)다. 직선으로 재면 그 차를
+     * "바로 앞차"로 보고 엉뚱하게 세운다(F팀 규격 §10 함정 1번).
+     *
+     * <p>반대로 <b>바이나 랙으로 빠진 차량은 순환로 위에 없다.</b> 그런 차량에 호장을 쓰면
+     * 투영이 엉뚱한 지점으로 떨어져 실제보다 멀거나 가깝게 나온다. 그래서 한쪽이라도 이탈했으면
+     * 직선으로 돌아간다 — 정확하진 않아도 <b>안전 쪽으로 기운다</b>(직선은 항상 호장 이하다).
+     *
+     * @return 판단 거리. 상대가 이탈해 있고 나는 순환로 위라면 {@code null}(판단에서 제외)
+     */
+    private Double gapTo(VehicleMotion target, VehicleMotion other, boolean targetOnTrack) {
+        boolean otherOnTrack = CollisionPredictor.isOnTrack(track, other, loopProperties.offTrackTolM());
+        if (targetOnTrack && otherOnTrack) {
+            return CollisionPredictor.effectiveTrackGap(
+                    track, target, other, properties.predictionHorizonS());
+        }
+        if (targetOnTrack) {
+            // 나는 통로에 있고 상대는 빠져 있다 — 내 진로를 막지 않으므로 세울 이유가 없다.
+            // 다만 작업 구역 판정(firstBlockingZone)은 위에서 이미 했으므로 놓치지 않는다.
+            return null;
+        }
+        return CollisionPredictor.effectiveGap(target, other, properties.predictionHorizonS());
     }
 
     /**
@@ -168,13 +299,13 @@ public class TrafficControlService {
             return false;
         }
         double release = properties.releaseDistanceM();
+        boolean targetOnTrack = CollisionPredictor.isOnTrack(track, target, loopProperties.offTrackTolM());
         for (VehicleMotion other : all) {
             if (other.vehicleId().equals(target.vehicleId())) {
                 continue;
             }
-            if (CollisionPredictor.currentGap(target, other) < release
-                    || CollisionPredictor.predictedGap(target, other, properties.predictionHorizonS())
-                        < release) {
+            Double gap = gapTo(target, other, targetOnTrack);
+            if (gap != null && gap < release) {
                 return false;
             }
         }

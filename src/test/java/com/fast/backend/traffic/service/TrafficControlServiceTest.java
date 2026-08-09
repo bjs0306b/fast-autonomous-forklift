@@ -2,7 +2,9 @@ package com.fast.backend.traffic.service;
 
 import com.fast.backend.command.dto.VehicleCommandRequest;
 import com.fast.backend.command.service.VehicleCommandService;
+import com.fast.backend.traffic.config.LoopTrackProperties;
 import com.fast.backend.traffic.config.TrafficControlProperties;
+import com.fast.backend.traffic.domain.OperationState;
 import com.fast.backend.traffic.domain.TrafficControlEvent;
 import com.fast.backend.traffic.domain.TrafficEventType;
 import com.fast.backend.traffic.domain.TrafficHoldReason;
@@ -45,6 +47,8 @@ class TrafficControlServiceTest {
     private WorkZoneProvider workZoneRegistry;
     private VehicleCommandService commandService;
     private TrafficControlEventMapper eventMapper;
+    private OperationService operationService;
+    private CycleControlService cycleControlService;
 
     private final List<VehicleLocationSnapshot> snapshots = new ArrayList<>();
     private final List<VehicleCurrentStatus> statuses = new ArrayList<>();
@@ -57,6 +61,11 @@ class TrafficControlServiceTest {
         workZoneRegistry = mock(WorkZoneProvider.class);
         commandService = mock(VehicleCommandService.class);
         eventMapper = mock(TrafficControlEventMapper.class);
+        // 기존 테스트는 순수 차간 판정만 본다. 운행 상태는 늘 "주행 중"이고 개별 정지는 없다고 둔다.
+        operationService = mock(OperationService.class);
+        when(operationService.state()).thenReturn(OperationState.RUNNING);
+        // 이 테스트는 차간 판정만 본다. 주기 진행은 별도 테스트(VehicleCycleTest)가 맡는다.
+        cycleControlService = mock(CycleControlService.class);
 
         snapshots.clear();
         statuses.clear();
@@ -69,7 +78,23 @@ class TrafficControlServiceTest {
 
     private TrafficControlService service(TrafficControlProperties props) {
         return new TrafficControlService(
-                props, locationProvider, statusMapper, workZoneRegistry, commandService, eventMapper);
+                props, loopProps(), operationService, cycleControlService,
+                locationProvider, statusMapper, workZoneRegistry, commandService, eventMapper);
+    }
+
+    /**
+     * 기존 테스트는 순환로를 신경 쓰지 않고 좌표를 자유롭게 쓴다. 그 좌표들이 우연히 순환로
+     * 근처에 떨어지면 판단이 호장으로 바뀌어 기대값이 흔들린다. 그래서 <b>테스트용 순환로를
+     * 아주 멀리</b> 두어 모든 차량이 "이탈" 로 판정되게 하고, 직선 거리 경로를 그대로 검증한다.
+     * 호장 자체는 {@code TrackTest} 가 따로 고정한다.
+     */
+    private static LoopTrackProperties loopProps() {
+        return new LoopTrackProperties(
+                List.of(new LoopTrackProperties.Corner(1000, 1000),
+                        new LoopTrackProperties.Corner(1000, 1100),
+                        new LoopTrackProperties.Corner(1100, 1100),
+                        new LoopTrackProperties.Corner(1100, 1000)),
+                2.0, 3.0, 10.0, 3000L, 20L, 0.3);
     }
 
     private static TrafficControlProperties props(boolean enabled, String... vehicles) {

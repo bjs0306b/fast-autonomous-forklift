@@ -1,0 +1,171 @@
+package com.fast.backend.traffic.domain;
+
+/**
+ * 차량 한 대의 주기 진행 상태 (F팀 규격 {@code backend-control-impl} §3).
+ *
+ * <p><b>메모리에만 둔다.</b> 관제가 재시작되면 주기는 처음부터 다시 시작하는 것이 맞다 —
+ * 재시작 시점에 차량이 어느 단계였는지를 DB 에서 복원해 봐야, 그 사이 차량이 실제로 무엇을
+ * 했는지는 알 수 없다. 잘못 복원한 단계로 이어 가면 빈 포크로 랙에 가는 식의 사고가 난다.
+ *
+ * <p>tick 스레드 하나만 이 객체를 고치므로 동기화하지 않는다. 다만 조회는 다른 스레드
+ * (REST·WebSocket)에서 일어날 수 있어 필드를 {@code volatile} 로 둔다.
+ */
+public final class VehicleCycle {
+
+    private final String vehicleId;
+
+    private volatile CyclePhase phase = CyclePhase.TO_BAY;
+    /** 지금 향하는 스테이션 이름(화면 표시용). */
+    private volatile String target = "BAY";
+    /** 배정된 랙 코드. {@code RACK} 단계에서만 의미가 있다. */
+    private volatile String rackCode;
+    /** 다음에 쓸 랙 번호(차량별 배정표의 인덱스). */
+    private volatile int rackIndex;
+    /** 완료한 주기 수. */
+    private volatile int cycles;
+
+    /**
+     * 마지막으로 보낸 목표. <b>같은 목표를 반복 발행하지 않기 위해</b> 쓴다.
+     *
+     * <p>규격 §10 함정 5번 — 매 tick 같은 목표를 보내면 차량이 목표를 계속 갈아타며 버벅인다.
+     */
+    private volatile String lastGoal;
+
+    /** 작업 단계의 시작 시각(ms). 무한 대기를 막는 안전장치. */
+    private volatile long workStartedAtMs;
+
+    /** 정체 감시 — 마지막으로 "움직였다"고 인정한 위치와 시각. */
+    private volatile double lastX;
+    private volatile double lastY;
+    private volatile long lastMovedAtMs;
+
+    public VehicleCycle(String vehicleId, long nowMs) {
+        this.vehicleId = vehicleId;
+        this.lastMovedAtMs = nowMs;
+        this.workStartedAtMs = nowMs;
+        this.lastX = Double.NaN;
+        this.lastY = Double.NaN;
+    }
+
+    public String vehicleId() {
+        return vehicleId;
+    }
+
+    public CyclePhase phase() {
+        return phase;
+    }
+
+    public String target() {
+        return target;
+    }
+
+    public String rackCode() {
+        return rackCode;
+    }
+
+    public int cycles() {
+        return cycles;
+    }
+
+    public String lastGoal() {
+        return lastGoal;
+    }
+
+    /** 다음 단계로 넘어간다. 작업 타이머를 새로 잡고 목표 기억을 지운다. */
+    public void advance(long nowMs) {
+        CyclePhase before = phase;
+        phase = phase.next();
+        if (before == CyclePhase.RACK) {
+            cycles++;
+            rackCode = null;
+        }
+        workStartedAtMs = nowMs;
+        // 단계가 바뀌면 목표도 바뀐다. 지우지 않으면 새 단계의 첫 목표가 "이미 보냈다"로 걸러진다.
+        lastGoal = null;
+    }
+
+    /** 랙을 배정한다. 같은 주기에 두 번 부르지 않도록 {@link #rackCode()} 로 확인하고 쓴다. */
+    public void assignRack(String code) {
+        this.rackCode = code;
+        this.rackIndex++;
+    }
+
+    public int rackIndex() {
+        return rackIndex;
+    }
+
+    public void setTarget(String target) {
+        this.target = target;
+    }
+
+    /**
+     * 이 목표를 보내야 하는가. 보내야 하면 기억해 두고 {@code true}.
+     *
+     * <p>중복 발행을 여기 한 곳에서 막는다 — 호출부마다 비교하면 한 군데만 빠뜨려도
+     * 그 경로에서 차량이 버벅인다.
+     */
+    public boolean shouldSendGoal(String goalKey) {
+        if (goalKey == null || goalKey.equals(lastGoal)) {
+            return false;
+        }
+        lastGoal = goalKey;
+        return true;
+    }
+
+    /** 정체 감시 후 목표를 다시 보내게 한다. */
+    public void forgetGoal() {
+        lastGoal = null;
+    }
+
+    /** 작업 단계가 시작된 지 {@code limitMs} 를 넘겼는가. */
+    public boolean workTimedOut(long nowMs, long limitMs) {
+        return nowMs - workStartedAtMs > limitMs;
+    }
+
+    /**
+     * 작업 단계에 들어온 지 {@code minMs} 이상 지났는가 — <b>너무 빨리 다음으로 넘어가는 것</b>을 막는다.
+     *
+     * <p>{@link #workTimedOut} 의 반대편이다. 그쪽은 "너무 오래 걸리면 포기"이고, 이쪽은
+     * "아직 시작도 안 했는데 끝났다고 보지 않기"다. 둘 다 필요한 이유:
+     * 차량 상태로만 완료를 판정하면, 지시를 보낸 직후 차량이 아직 이전 상태(IDLE 등)일 때
+     * <b>"조건 불일치 = 완료"로 읽혀 즉시 넘어간다.</b>
+     */
+    public boolean workSettled(long nowMs, long minMs) {
+        return nowMs - workStartedAtMs >= minMs;
+    }
+
+    /**
+     * 위치를 갱신하고 <b>정체 여부</b>를 돌려준다.
+     *
+     * <p>정체로 판정되면 마지막 이동 시각을 지금으로 밀어 둔다 — 안 그러면 다음 tick 마다
+     * 계속 정체로 잡혀 목표가 초당 두 번씩 재전송된다.
+     *
+     * @param moveThresholdM 이보다 많이 움직였으면 "움직였다"로 본다
+     * @param stallMs        이 시간 동안 움직이지 않으면 정체
+     */
+    public boolean updateAndCheckStall(
+            double x, double y, long nowMs, double moveThresholdM, long stallMs) {
+
+        if (Double.isNaN(lastX) || Math.hypot(x - lastX, y - lastY) > moveThresholdM) {
+            lastX = x;
+            lastY = y;
+            lastMovedAtMs = nowMs;
+            return false;
+        }
+        if (nowMs - lastMovedAtMs > stallMs) {
+            lastMovedAtMs = nowMs;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 정체 감시 시각만 미룬다.
+     *
+     * <p>관제나 사용자가 세워 둔 동안 쓴다. 안 그러면 <b>해제 직후 정체로 오판</b>해
+     * 목표를 재전송한다(규격 §10 함정 7번).
+     */
+    public void touchStallTimer(long nowMs) {
+        lastMovedAtMs = nowMs;
+    }
+}

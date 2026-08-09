@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
  * 보내는 것은 {@code TrafficControlScheduler} 이며 그쪽이 {@code enabled=true} 를 요구한다.
  */
 @Configuration
-@EnableConfigurationProperties(TrafficControlProperties.class)
+@EnableConfigurationProperties({
+        TrafficControlProperties.class, LoopTrackProperties.class, CycleProperties.class})
 public class TrafficControlConfig {
 }

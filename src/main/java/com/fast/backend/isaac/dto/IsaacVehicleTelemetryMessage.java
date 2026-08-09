@@ -43,7 +43,19 @@ public record IsaacVehicleTelemetryMessage(
         String state,
         String taskId,
         Double battery,
-        Cargo cargo
+        Cargo cargo,
+        /**
+         * 차량이 절차(정렬·도킹·적재)를 수행 중인가 — <b>단계 전환은 이 값으로 판정한다</b>.
+         *
+         * <p>{@code state} 로는 안 된다. 정렬이 끝나도 {@code state} 는 화물을 받을 때까지
+         * {@code LOADING} 을 유지하므로 "정렬이 끝났는지"를 구별할 수 없다.
+         *
+         * <p><b>시뮬(sim02·sim03)만 보낸다.</b> 실물(fk01)은 C팀 구현 전까지 이 필드가 없어
+         * {@code null} 이고, 그때는 최소 대기 시간만으로 판정해야 한다.
+         */
+        Boolean busy,
+        /** 지금 수행 중인 절차 이름({@code align} {@code fork} {@code dock} {@code place} …). */
+        String step
 ) {
 
     /** 기존 호출부 호환용 생성자. 신규 cargo 객체가 없으면 null로 둔다. */
@@ -58,7 +70,25 @@ public record IsaacVehicleTelemetryMessage(
             String state,
             String taskId,
             Double battery) {
-        this(vehicleId, ts, pose, velocity, forkHeight, loaded, cargoId, state, taskId, battery, null);
+        this(vehicleId, ts, pose, velocity, forkHeight, loaded, cargoId, state, taskId, battery,
+                null, null, null);
+    }
+
+    /** {@code busy}/{@code step} 이전 호출부 호환. */
+    public IsaacVehicleTelemetryMessage(
+            String vehicleId,
+            Long ts,
+            Pose pose,
+            Velocity velocity,
+            Double forkHeight,
+            Boolean loaded,
+            String cargoId,
+            String state,
+            String taskId,
+            Double battery,
+            Cargo cargo) {
+        this(vehicleId, ts, pose, velocity, forkHeight, loaded, cargoId, state, taskId, battery,
+                cargo, null, null);
     }
 
     /** @param yaw <b>radian</b>. 기존 위치 계약은 degree 이므로 서비스에서 변환한다 */

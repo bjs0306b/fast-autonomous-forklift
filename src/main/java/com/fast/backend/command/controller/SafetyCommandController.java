@@ -41,6 +41,18 @@ public class SafetyCommandController {
                 .body(ApiResponse.success(safetyCommandService.emergencyStop(vehicleId)));
     }
 
+    /**
+     * 정지 해제. 정지 두 종류(STOP·EMERGENCY_STOP)를 모두 푼다.
+     *
+     * <p>세우는 길만 있고 푸는 길이 없으면 관제 화면에서 한 번 세운 차를 다시 살릴 수 없다.
+     */
+    @PostMapping("/{vehicleId}/commands/resume")
+    public ResponseEntity<ApiResponse<VehicleCommandResponse>> resume(
+            @PathVariable String vehicleId) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(safetyCommandService.resume(vehicleId)));
+    }
+
     @PostMapping("/commands/emergency-stop-all")
     public ResponseEntity<ApiResponse<EmergencyStopAllResponse>> emergencyStopAll() {
         return ResponseEntity.status(HttpStatus.CREATED)
