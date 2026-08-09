@@ -56,6 +56,12 @@ share/forklift_teleop/config/fastdds_remote.xml
         <type>UDPv4</type>
         <interfaceWhiteList>
           <address>70.12.247.81</address>
+          <!-- ⚠️ **루프백을 빼면 오린 자기 도구가 못 붙는다.** 화이트리스트는
+               "이 인터페이스만 쓴다" 는 뜻이라, 랜 주소만 적으면 127.0.0.1 이
+               막혀 goto.py · set_pose.py 같은 같은 기기 안의 도구가 전부
+               조용히 아무것도 못 받는다(2026-08-09 실측: 8초에 0건).
+               원격을 열자고 로컬을 닫으면 안 된다. -->
+          <address>127.0.0.1</address>
         </interfaceWhiteList>
       </transport_descriptor>
     </transport_descriptors>

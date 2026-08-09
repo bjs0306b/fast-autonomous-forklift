@@ -80,9 +80,22 @@ def generate_launch_description() -> LaunchDescription:
     arguments = [
         # Shared memory off for everything this launch starts; see
         # config/fastdds_no_shm.xml.
+        #
+        # ⚠️ 이미 걸려 있는 값을 **덮어쓰지 않는다.** 종전에는 무조건 덮어써서,
+        #    원격 RViz 용으로 다른 프로파일을 export 해도 launch 가 조용히
+        #    되돌려 놓았다. 무엇이 적용됐는지는 밖에서 안 보이므로 "설정을
+        #    바꿨는데 아무 변화가 없다" 로만 나타난다.
+        #
+        #    원격에서 볼 때는 fastdds_remote.xml 을 쓴다 -- 오린이 랜 주소만
+        #    광고하게 해서, 노트북이 도커·VPN 주소로 답하려다 실패하는 것을
+        #    막는다. RELIABLE 토픽만 안 오고 /scan(BEST_EFFORT)은 오는 증상이
+        #    정확히 그것이었다.
         SetEnvironmentVariable(
             "FASTRTPS_DEFAULT_PROFILES_FILE",
-            os.path.join(teleop_share, "config", "fastdds_no_shm.xml"),
+            os.environ.get(
+                "FASTRTPS_DEFAULT_PROFILES_FILE",
+                os.path.join(teleop_share, "config", "fastdds_no_shm.xml"),
+            ),
         ),
         DeclareLaunchArgument(
             "nav2_params_file",

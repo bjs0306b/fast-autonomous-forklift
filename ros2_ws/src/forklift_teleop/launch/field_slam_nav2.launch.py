@@ -56,9 +56,16 @@ def generate_launch_description() -> LaunchDescription:
         # 2026-08-07 that swallowed an action goal response while the vehicle
         # drove off, and made a live obstacle guard look dead. See
         # config/fastdds_no_shm.xml.
+        # ⚠️ 이미 걸려 있는 값을 **덮어쓰지 않는다.** 종전에는 무조건 덮어써서,
+        #    원격 RViz 용으로 다른 프로파일을 export 해도 launch 가 조용히
+        #    되돌려 놓았다. 무엇이 적용됐는지는 밖에서 안 보이므로 "설정을
+        #    바꿨는데 아무 변화가 없다" 로만 나타난다.
         SetEnvironmentVariable(
             "FASTRTPS_DEFAULT_PROFILES_FILE",
-            os.path.join(teleop_share, "config", "fastdds_no_shm.xml"),
+            os.environ.get(
+                "FASTRTPS_DEFAULT_PROFILES_FILE",
+                os.path.join(teleop_share, "config", "fastdds_no_shm.xml"),
+            ),
         ),
         DeclareLaunchArgument(
             "nav2_params_file",
