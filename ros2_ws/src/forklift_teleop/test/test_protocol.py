@@ -94,3 +94,22 @@ class ProtocolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_리프트_스텝을_실어_보낼_수_있다() -> None:
+    """포크 높이 조정용. 기본 이동량(19200)은 호밍 기준의 16배라 못 쓴다."""
+    frame = encode_lift_command(7, "UP", 1200)
+    assert b"LIFT,7,UP,1200" in frame
+
+
+def test_리프트_스텝은_UP_DOWN에만_붙는다() -> None:
+    """HOME 은 리밋까지 가는 동작이라 이동량 개념이 없다."""
+    import pytest
+    with pytest.raises(ValueError):
+        encode_lift_command(7, "HOME", 1200)
+
+
+def test_리프트_스텝은_양수여야_한다() -> None:
+    import pytest
+    with pytest.raises(ValueError):
+        encode_lift_command(7, "UP", 0)

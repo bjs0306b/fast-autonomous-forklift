@@ -142,7 +142,41 @@ class UartTeleopBridge(Node):
         self._last_twist_time = time.monotonic()
 
     def _on_fork_command(self, message: String) -> None:
-        action = message.data.strip().upper()
+        # "UP" 또는 "UP 1200" — 두 번째 낱말은 이동량(스텝)이다.
+        #
+        # 기본 이동량은 19200스텝이라 호밍 기준 높이(1200)의 16배다. 화물을 드는
+        # 데는 맞지만 **포크 높이를 파렛트 구멍에 맞출 때는 못 쓴다** — 그래서
+        # 2026-08-07 까지는 몇 mm 를 옮기려고 매번 펌웨어를 다시 플래시했다.
+        parts = message.data.strip().upper().split()
+        action = parts[0] if parts else ""
+        steps = None
+
+        if len(parts) > 2:
+            self.get_logger().warning(
+                f"Rejected fork command {message.data!r}; expected ACTION [STEPS]"
+            )
+            return
+
+        if len(parts) == 2:
+            if action not in {"UP", "DOWN"}:
+                self.get_logger().warning(
+                    f"Rejected fork command {message.data!r}; "
+                    "steps only apply to UP or DOWN"
+                )
+                return
+            try:
+                steps = int(parts[1])
+            except ValueError:
+                self.get_logger().warning(
+                    f"Rejected fork command {message.data!r}; steps must be a number"
+                )
+                return
+            if steps <= 0:
+                self.get_logger().warning(
+                    f"Rejected fork command {message.data!r}; steps must be positive"
+                )
+                return
+
         if action not in {"UP", "DOWN", "HOME", "INITIALIZE", "STOP"}:
             self.get_logger().warning(
                 f"Rejected fork command {message.data!r}; "
@@ -152,7 +186,7 @@ class UartTeleopBridge(Node):
         if len(self._pending_lift_commands) == self._pending_lift_commands.maxlen:
             self.get_logger().warning("Fork command queue is full")
             return
-        self._pending_lift_commands.append(action)
+        self._pending_lift_commands.append((action, steps))
         if action == "INITIALIZE":
             self._initializing_fork = True
 
@@ -269,9 +303,9 @@ class UartTeleopBridge(Node):
         try:
             assert self._serial is not None
             if self._pending_lift_commands:
-                lift_action = self._pending_lift_commands.popleft()
+                lift_action, lift_steps = self._pending_lift_commands.popleft()
                 self._serial.write(
-                    encode_lift_command(self._sequence, lift_action)
+                    encode_lift_command(self._sequence, lift_action, lift_steps)
                 )
                 self.get_logger().info(
                     f"Sent fork command: sequence={self._sequence}, "

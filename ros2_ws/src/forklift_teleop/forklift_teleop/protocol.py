@@ -90,7 +90,8 @@ def encode_command(sequence: int, drive_percent: int, steering_cdeg: int) -> byt
     return frame_body(f"CMD,{sequence},{drive_percent},{steering_cdeg}")
 
 
-def encode_lift_command(sequence: int, action: str) -> bytes:
+def encode_lift_command(sequence: int, action: str,
+                        steps: int | None = None) -> bytes:
     if not 0 <= sequence <= 0xFFFFFFFF:
         raise ValueError("sequence must fit uint32")
     normalized_action = action.strip().upper()
@@ -98,7 +99,17 @@ def encode_lift_command(sequence: int, action: str) -> bytes:
         raise ValueError(
             "lift action must be UP, DOWN, HOME, INITIALIZE, or STOP"
         )
-    return frame_body(f"LIFT,{sequence},{normalized_action}")
+    if steps is None:
+        return frame_body(f"LIFT,{sequence},{normalized_action}")
+
+    # 선택 필드 — UP/DOWN 의 이동량(스텝). 없으면 펌웨어 기본값(19200)이다.
+    # ⚠️ 기본값은 호밍 기준 높이의 16배라 **미세 조정에 못 쓴다.** 높이를 몇 mm
+    # 옮기려고 펌웨어를 다시 플래시하지 않으려면 여기에 스텝을 실어 보낸다.
+    if not isinstance(steps, int) or steps <= 0:
+        raise ValueError("lift steps must be a positive integer")
+    if normalized_action not in ("UP", "DOWN"):
+        raise ValueError("lift steps only apply to UP or DOWN")
+    return frame_body(f"LIFT,{sequence},{normalized_action},{steps}")
 
 
 def _decode_frame_body(frame: bytes, kind: str) -> str:

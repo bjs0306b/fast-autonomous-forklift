@@ -17,6 +17,17 @@
  */
 #define MOTOR_INIT_RETRY_COUNT          5U
 #define MOTOR_INIT_RETRY_DELAY_MS       500U
+
+/*
+ * ToF(VL53L8CX) 초기화 재시도. `vl53l8cx_pair.c` 가 쓴다.
+ *
+ * ⚠️ 이 두 값은 원래 **젯슨의 로컬 config.h 에만** 있었고, 2026-08-07 에 노트북
+ * 사본을 젯슨으로 복사하면서 덮어써 사라졌다(빌드가 undeclared 로 깨졌다). 여기
+ * 값은 모터 쪽 재시도(5회/500ms)를 따라 복원한 것이라 **원래 값과 다를 수 있다.**
+ * 담당자가 확인해 고칠 것.
+ */
+#define TOF_INIT_RETRY_COUNT            5U
+#define TOF_INIT_RETRY_DELAY_MS         500U
 #define MOTOR_RECOVERY_PERIOD_MS        5000U
 
 /*
@@ -47,6 +58,14 @@
 #define STEPPER_MOTOR_TASK_PRIORITY       5U
 
 #define STEPPER_MOTOR_START_RATE_SPS      200U
+/*
+ * 동작 후 드라이버를 켜둘 것인가(유지 토크). 1 이면 켜둔다.
+ *
+ * 0 이면 포크가 중력으로 내려앉는다 — 2026-08-07 에 높이를 맞춰도 몇 분 뒤 달라졌다.
+ * 1 은 대기 전류를 쓰므로 드라이버가 따뜻해진다.
+ */
+#define STEPPER_MOTOR_HOLD_AFTER_MOTION   1
+
 #define STEPPER_MOTOR_DEFAULT_RATE_SPS    5000U
 #define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  10000U
 #define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  19200U
@@ -54,7 +73,25 @@
 #define STEPPER_MOTOR_HOMING_ACCEL_SPS2   600U
 #define STEPPER_MOTOR_HOMING_MAX_STEPS    300000U
 #define STEPPER_MOTOR_HOME_BACKOFF_DELAY_MS 500U
-#define STEPPER_MOTOR_HOME_BACKOFF_STEPS  1600U
+/*
+ * 호밍 뒤 하한에서 올라오는 양 = **포크의 기준 높이**다. 미니어처 파렛트는 총높이
+ * 14mm(상판 2 + 구멍 10 + 하판 2)라 여기서 몇 mm만 어긋나도 포크가 구멍이 아니라
+ * 상판이나 하판을 민다.
+ *
+ * 1600 -> 1200 -> 7500 -> **6500** (2026-08-07). 앞의 값들은 눈대중이었고, 6500 은 하한에서
+ * 스텝을 실어 올려가며 **실물로 맞춘 값**이다(`/fork/command` 에 "UP 7500" 뒤
+ * "DOWN 1000").
+ *
+ * ⚠️ **이 상수는 부팅 호밍에서만 쓰인다.** `/fork/command` 의 `HOME` 은 하한까지만
+ * 내려가고 거기서 멈춘다(백오프 없음) — 그래서 손으로 맞출 때는 `HOME` 뒤에
+ * "UP 6500" 을 따로 보내야 같은 높이가 된다. 2026-08-07 에 이걸 모르고 HOME 만
+ * 걸어놓고 "높이가 맞다" 고 판단했다.
+ *
+ * ⚠️ 이 상수를 고치기 전까지는 몇 mm 를 옮기려고 매번 재플래시했다. 지금은 프레임에
+ * 스텝을 실을 수 있으므로, 다시 맞출 때는 하한(HOME 직후 DOWN)에서 "UP <스텝>" 으로
+ * 찾은 뒤 그 숫자를 여기 적는다.
+ */
+#define STEPPER_MOTOR_HOME_BACKOFF_STEPS  6500U
 #define STEPPER_MOTOR_HOME_BACKOFF_RATE_SPS 500U
 #define STEPPER_MOTOR_HOME_BACKOFF_ACCEL_SPS2 300U
 #define STEPPER_MOTOR_LIMIT_DEBOUNCE_MS   20U
