@@ -33,6 +33,8 @@ import java.util.Map;
  * @param reverseDist     적재 후 후진 거리. 차량이 쓰는 값이고 백엔드는 전달만 한다
  * @param placementEnabled 화물 높이로 층을 고를지. 꺼 두면 {@code racks} 배정표 순서대로 돈다
  * @param cargoHeightScale telemetry 의 화물 높이(시뮬)를 실물 m 로 바꾸는 배수. 기본 0.1
+ * @param cargoHeightRandomMinM 두 번째 주기부터 무작위로 뽑을 화물 높이의 하한(실물 m)
+ * @param cargoHeightRandomMaxM 그 상한. 층 임계를 걸치게 잡아야 0층·1층이 섞여 나온다
  */
 @ConfigurationProperties(prefix = "traffic.cycle")
 public record CycleProperties(
@@ -51,7 +53,9 @@ public record CycleProperties(
         Double reverseDist,
         Map<String, Station> home,
         Boolean placementEnabled,
-        Double cargoHeightScale
+        Double cargoHeightScale,
+        Double cargoHeightRandomMinM,
+        Double cargoHeightRandomMaxM
 ) {
 
     /** 규격 §1 "스테이션". BAY(16.5, 5.0, yaw 0=동), EXIT(15.5, 4.0, yaw 1.5708=북). */
@@ -85,6 +89,14 @@ public record CycleProperties(
         if (placementEnabled == null) placementEnabled = false;
         // 시뮬 단위 → 실물 m. 좌표계가 실물의 10 배다(seed-rack-slots.sql §1).
         if (cargoHeightScale == null || cargoHeightScale <= 0) cargoHeightScale = 0.1;
+        if (cargoHeightRandomMinM == null || cargoHeightRandomMinM <= 0) cargoHeightRandomMinM = 0.07;
+        if (cargoHeightRandomMaxM == null || cargoHeightRandomMaxM <= 0) cargoHeightRandomMaxM = 0.14;
+        if (cargoHeightRandomMinM > cargoHeightRandomMaxM) {
+            // 뒤집힌 범위를 그냥 두면 랜덤이 음수 폭을 갖는다. 기동 시점에 잡는다.
+            throw new IllegalArgumentException(
+                    "traffic.cycle.cargo-height-random-min-m 은 max 이하여야 합니다: "
+                            + cargoHeightRandomMinM + " > " + cargoHeightRandomMaxM);
+        }
     }
 
     /**
