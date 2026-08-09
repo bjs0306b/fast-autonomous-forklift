@@ -5,12 +5,25 @@
 `NEXT_PUBLIC_AI_MEASUREMENT_STREAM_URL`). 그래서 **화면 코드를 건드리지 않고** 이 서버만
 띄우면 영상이 붙는다. WebRTC/RTSP 로 가면 화면을 iframe 으로 바꿔야 해서 더 크게 번진다.
 
-    # 젯슨에서
+    # 젯슨에서 — 영상만
     python3 scripts/onboard_camera_stream.py --camera 0 --port 8878
+
+    # 검출 오버레이까지(스테이션 송출과 같은 형식). PYTHONPATH 가 필요하다
+    PYTHONPATH=src python3 scripts/onboard_camera_stream.py --camera 0 --port 8878 \\
+        --rotate180 --engine ~/trt_test/onboard_s640_ep116_fp16.engine \\
+        --plugin ~/mmdeploy/build_trt/lib/libmmdeploy_tensorrt_ops.so
 
     # 확인
     curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8878/health
     #  브라우저: http://<젯슨IP>:8878/stream
+
+## 검출 오버레이는 이 프로세스가 직접 추론한다 (8877 로 보내지 않는다)
+
+8877(`onboard_infer_server.py`)은 **스테이션 엔진**(box·pallet @800)을 물고 있다.
+온보드 화면에 필요한 것은 `pallet`·`hole` 2클래스라 클래스 구성이 아예 다르다. 그래서
+프레임을 그쪽으로 보내지 않고 여기서 온보드 엔진을 따로 연다 — 같은 GPU 에 엔진 두 개가
+올라가지만 온보드 엔진은 23MB 라 여유가 있다(VS Code Remote 가 붙어 있으면 얘기가
+다르다: `docs/deploy/jetson-inference-service.md` 의 CUDA OOM 실측 참고).
 
 ## ⚠️ 카메라는 한 프로세스만 잡는다 — 추론 스크립트와 동시에 못 쓴다
 
@@ -51,6 +64,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 
+# 그리기는 스테이션 송출과 **같은 함수**를 쓴다(`station/livestream.py`). 상자 색·패널
+# 배치가 두 화면에서 갈리면 관제 화면에서 카메라를 바꿀 때마다 다른 규약을 읽게 된다.
+# 이 import 때문에 `PYTHONPATH` 에 `ai/src` 가 필요하다 — 젯슨은 추론 서버가 이미 같은
+# 경로를 요구하므로 새로 생기는 제약이 아니다.
+from station.livestream import Overlay, draw_detections, draw_panel
+
 BOUNDARY = "frame"
 
 _frame_lock = threading.Lock()
@@ -61,6 +80,19 @@ _latest_seq = 0
 _capture_alive = False
 _capture_error: str | None = None
 _camera_label = ""
+
+_raw_lock = threading.Lock()
+_raw_frame = None
+_raw_seq = 0
+"""추론에 넘길 **회전·반전까지 끝난** 원본 프레임.
+
+인코딩 전 프레임을 따로 들고 있는 이유는, 추론이 오버레이가 그려진 그림을 보면 안
+되기 때문이다(자기가 그린 상자를 다시 입력으로 받는다). 회전은 이미 적용한 뒤라
+`TrtDetector(rotate180=...)` 를 또 켜면 **두 번 돌아 검출이 0 이 된다.**
+"""
+
+_infer_state = {"enabled": False, "ready": False, "error": None, "ms": None, "frames": 0}
+"""추론 상태. `/health` 가 이 값을 그대로 보고한다 — 조용히 안 도는 것을 막는다."""
 
 _stop = threading.Event()
 """종료 신호.
@@ -79,9 +111,14 @@ _stop = threading.Event()
 
 
 def _capture_loop(index: int, width: int, height: int, fps: float,
-                  quality: int, rotate180: bool, flip_h: bool, flip_v: bool) -> None:
-    """카메라를 계속 읽어 최신 JPEG 한 장을 갱신한다."""
+                  quality: int, rotate180: bool, flip_h: bool, flip_v: bool,
+                  overlay: Overlay | None = None) -> None:
+    """카메라를 계속 읽어 최신 JPEG 한 장을 갱신한다.
+
+    `overlay` 를 주면 추론 스레드가 올려둔 검출 상자·패널을 얹어서 인코딩한다.
+    """
     global _latest_jpeg, _latest_seq, _capture_alive, _capture_error, _camera_label
+    global _raw_frame, _raw_seq
 
     # CAP_DSHOW 를 쓰지 않는다 — 그건 Windows(DirectShow) 전용이고 여기는 리눅스다.
     # 스테이션 노트북 코드(serve.py)와 다른 부분이니 복사해 오지 말 것.
@@ -130,6 +167,18 @@ def _capture_loop(index: int, width: int, height: int, fps: float,
             if flip_v:
                 frame = cv2.flip(frame, 0)
 
+            if overlay is not None:
+                # 추론이 볼 프레임은 오버레이 **전** 그림이다.
+                with _raw_lock:
+                    _raw_frame = frame
+                    _raw_seq += 1
+                dets = overlay.read()
+                lines = overlay.read_lines()
+                if dets:
+                    frame = draw_detections(frame, dets)
+                if lines:
+                    frame = draw_panel(frame, lines)
+
             ok, buf = cv2.imencode(".jpg", frame, encode_params)
             if not ok:
                 continue
@@ -147,6 +196,81 @@ def _capture_loop(index: int, width: int, height: int, fps: float,
         # 여기까지 반드시 와야 카메라가 반납된다(위 _stop 주석 참고).
         cap.release()
         print("카메라를 반납했습니다.", flush=True)
+
+
+def _summarize(dets: list, elapsed_ms: float) -> list:
+    """상단 패널 문구 — 스테이션 송출과 같은 `(문구, BGR)` 규약."""
+    white, grey, red = (240, 240, 240), (180, 180, 180), (80, 80, 240)
+    n_pallet = sum(1 for d in dets if getattr(d, "label", "") == "pallet")
+    n_hole = sum(1 for d in dets if getattr(d, "label", "") == "hole")
+    lines = [(f"onboard: pallet {n_pallet} / hole {n_hole}", white if n_pallet else red)]
+    if n_pallet and n_hole < 2:
+        # 구멍이 둘 다 보여야 포크 정렬이 오차를 낸다. 하나뿐이면 화면상 이유가 드러나야
+        # "왜 정렬이 시작 안 되나"를 카메라 앞에서 바로 가를 수 있다.
+        lines.append(("hole < 2 — 정렬 오차 산출 불가", red))
+    lines.append((f"infer {elapsed_ms:.0f} ms  ({1000 / elapsed_ms:.1f} fps)"
+                  if elapsed_ms > 0 else "infer -", grey))
+    return lines
+
+
+def _infer_loop(engine: str, plugin: str, input_size: int, score: float,
+                fps: float, geometry_filter: bool, overlay: Overlay) -> None:
+    """최신 프레임을 주기적으로 추론해 오버레이를 갱신한다.
+
+    ⚠️ **`TrtDetector` 를 이 스레드 안에서 만든다.** `pycuda.autoinit` 이 만드는 CUDA
+    컨텍스트는 **생성 스레드에 묶이고**, 다른 스레드에서 쓰면 예외가 아니라
+    `invalid resource handle` 로 **검출 0 개**가 조용히 나간다(`onboard_infer_server.py`
+    주석의 실측). 그래서 detector 를 밖에서 만들어 넘기지 않는다 — 그러면
+    `station.livestream.InferenceThread` 를 그대로 못 쓰고 이 루프를 따로 둔다.
+
+    프레임마다 돌리지 않는다. 표시용이라 3fps 면 충분하고, 남는 시간은 포크 정렬
+    노드가 쓴다(같은 보드에서 돈다).
+    """
+    try:
+        from perception.trt_detector import TrtDetector
+        detector = TrtDetector(engine, plugin, input_size=input_size,
+                               score_threshold=score, class_names=("pallet", "hole"),
+                               # 회전은 캡처 쪽에서 이미 했다(위 `_raw_frame` 주석).
+                               rotate180=False, geometry_filter=geometry_filter)
+    except Exception as e:
+        _infer_state["error"] = f"{type(e).__name__}: {e}"
+        overlay.fail(_infer_state["error"])
+        print(f"[infer] ❌ 엔진 로드 실패 — {e}", file=sys.stderr, flush=True)
+        return
+
+    _infer_state["ready"] = True
+    print(f"[infer] 준비됨 — {engine} @{input_size}, {fps}fps 로 갱신", flush=True)
+
+    interval = 1.0 / fps if fps > 0 else 0.0
+    seen = -1
+    while not _stop.is_set():
+        started = time.monotonic()
+        with _raw_lock:
+            frame, seq = _raw_frame, _raw_seq
+        if frame is None or seq == seen:
+            if _stop.wait(0.05):
+                break
+            continue
+        seen = seq
+        try:
+            t0 = time.perf_counter()
+            dets = detector.detect(frame)
+            elapsed = (time.perf_counter() - t0) * 1000.0
+            overlay.publish(dets, _summarize(dets, elapsed))
+            _infer_state["ms"] = round(elapsed, 1)
+            _infer_state["frames"] += 1
+            _infer_state["error"] = None
+        except Exception as e:
+            # 조용히 빈 화면으로 넘어가지 않는다 — /health 와 stderr 양쪽에 남긴다.
+            _infer_state["error"] = f"{type(e).__name__}: {e}"
+            overlay.fail(_infer_state["error"])
+            print(f"[infer] ⚠️ 추론 실패: {e}", file=sys.stderr, flush=True)
+            if _stop.wait(1.0):
+                break
+        if interval:
+            remain = interval - (time.monotonic() - started)
+            if remain > 0:
+                _stop.wait(remain)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -176,6 +300,7 @@ class Handler(BaseHTTPRequestHandler):
             "camera": _camera_label,
             "frames": _latest_seq,
             "error": _capture_error,
+            "infer": _infer_state,
         }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -264,12 +389,33 @@ def main(argv=None) -> int:
     #    좌우가 실제와 반대가 되어 관제 화면에서 방향을 오판하게 만든다.
     ap.add_argument("--flip-h", action="store_true", help="좌우 반전(회전 적용 뒤)")
     ap.add_argument("--flip-v", action="store_true", help="상하 반전(회전 적용 뒤)")
+    # 추론 오버레이. --engine 을 주면 켜진다.
+    #
+    # ⚠️ **엔진은 온보드 2클래스(pallet·hole)를 쓴다.** 8877 추론 서버가 쓰는
+    #    스테이션 엔진(box·pallet @800)을 여기 넣으면 클래스가 달라 화면이 거짓말한다.
+    ap.add_argument("--engine",
+                    help="온보드 TRT 엔진 (예: ~/trt_test/onboard_s640_ep116_fp16.engine). "
+                         "주면 검출 상자·패널을 송출 영상에 그린다")
+    ap.add_argument("--plugin",
+                    default="~/mmdeploy/build_trt/lib/libmmdeploy_tensorrt_ops.so",
+                    help="mmdeploy TRT 플러그인 (.so)")
+    ap.add_argument("--input-size", type=int, default=640, help="엔진 입력 한 변")
+    ap.add_argument("--score", type=float, default=0.4,
+                    help="검출 임계. pallet 은 코드가 0.7 로 따로 올린다"
+                         "(trt_detector.DEFAULT_CLASS_THRESHOLDS)")
+    ap.add_argument("--infer-fps", type=float, default=3.0,
+                    help="추론 갱신 주기 상한. 표시용이라 카메라 fps 만큼 돌릴 이유가 없다")
+    ap.add_argument("--no-geometry-filter", action="store_true",
+                    help="hole 기하 필터를 끈다(디버그 전용 — 창밖 오탐이 그대로 나온다)")
     a = ap.parse_args(argv)
+
+    overlay = Overlay() if a.engine else None
+    _infer_state["enabled"] = bool(a.engine)
 
     worker = threading.Thread(
         target=_capture_loop,
         args=(a.camera, a.width, a.height, a.fps, a.quality,
-              a.rotate180, a.flip_h, a.flip_v),
+              a.rotate180, a.flip_h, a.flip_v, overlay),
         daemon=True,
     )
     worker.start()
@@ -304,6 +450,32 @@ def main(argv=None) -> int:
               file=sys.stderr, flush=True)
         return 1
 
+    infer_worker = None
+    if overlay is not None:
+        infer_worker = threading.Thread(
+            target=_infer_loop,
+            args=(a.engine, a.plugin, a.input_size, a.score, a.infer_fps,
+                  not a.no_geometry_filter, overlay),
+            name="onboard-stream-infer", daemon=True,
+        )
+        infer_worker.start()
+        # 엔진 로드는 수 초 걸린다. 여기서 결과를 한 번 보고 실패면 **서버를 열기 전에**
+        # 죽는다 — "주소는 사는데 상자가 영영 안 나오는" 상태를 만들지 않기 위해서다.
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            if _infer_state["ready"] or _infer_state["error"]:
+                break
+            time.sleep(0.2)
+        if _infer_state["error"]:
+            _stop.set()
+            worker.join(timeout=3.0)
+            print(f"추론 엔진을 못 띄워 종료합니다: {_infer_state['error']}",
+                  file=sys.stderr, flush=True)
+            return 1
+        if not _infer_state["ready"]:
+            print("⚠️ 30초 안에 엔진이 준비되지 않았다 — 영상만 먼저 내보낸다",
+                  file=sys.stderr, flush=True)
+
     server = ThreadingHTTPServer((a.host, a.port), Handler)
     server.daemon_threads = True
     print(f"MJPEG 스트림: http://{a.host}:{a.port}/stream  (health: /health)", flush=True)
@@ -318,6 +490,10 @@ def main(argv=None) -> int:
         # (_stop 주석의 실측 참고). join 타임아웃은 read 한 번이 끝나기를 기다리는
         # 시간이라 짧아도 충분하다.
         _stop.set()
+        if infer_worker is not None:
+            # 카메라보다 먼저 세운다 — 추론이 도는 중에 캡처가 프레임 공급을 끊으면
+            # 마지막 한 바퀴가 헛돌 뿐이지만, 반대로 두면 TRT 가 CUDA 를 붙든 채 남는다.
+            infer_worker.join(timeout=5.0)
         worker.join(timeout=3.0)
         if worker.is_alive():
             # 여기 오면 read 가 3초 넘게 안 돌아온 것이다. 알리고 나간다 —
