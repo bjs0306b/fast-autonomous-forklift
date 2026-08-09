@@ -1,6 +1,7 @@
 package com.fast.backend.isaac.service;
 
 import com.fast.backend.isaac.dto.IsaacVehicleTelemetryMessage;
+import com.fast.backend.traffic.service.VehicleProcedureRegistry;
 import com.fast.backend.vehicle.location.VehicleLocationIngestion;
 import com.fast.backend.vehicle.location.VehicleLocationIngestionService;
 import com.fast.backend.vehicle.domain.VehicleStatus;
@@ -55,14 +56,17 @@ public class IsaacVehicleTelemetryService {
     private final VehicleIdAliasResolver aliasResolver;
     private final VehicleLocationIngestionService ingestionService;
     private final VehicleStatusService statusService;
+    private final VehicleProcedureRegistry procedureRegistry;
 
     public IsaacVehicleTelemetryService(
             VehicleIdAliasResolver aliasResolver,
             VehicleLocationIngestionService ingestionService,
-            VehicleStatusService statusService) {
+            VehicleStatusService statusService,
+            VehicleProcedureRegistry procedureRegistry) {
         this.aliasResolver = aliasResolver;
         this.ingestionService = ingestionService;
         this.statusService = statusService;
+        this.procedureRegistry = procedureRegistry;
     }
 
     /**
@@ -88,6 +92,10 @@ public class IsaacVehicleTelemetryService {
             String vehicleId = normalized.get();
             log.debug("Isaac telemetry received: original={}, normalized={}, ts={}",
                     rawVehicleId, vehicleId, message.ts());
+
+            // 절차 수행 여부(busy/step). 주기 상태기계의 ALIGN_BAY 전환이 이 값을 본다.
+            // 시뮬만 보내므로 없으면 기록하지 않는다 — "false" 와 "모른다"는 다르다.
+            procedureRegistry.update(vehicleId, message.busy(), message.step());
 
             OffsetDateTime messageAt = toMessageAt(message.ts());
             String reportedCargoId = resolveReportedCargoId(message);

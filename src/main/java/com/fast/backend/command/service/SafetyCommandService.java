@@ -33,6 +33,7 @@ public class SafetyCommandService {
 
     private static final String STOP = "STOP";
     private static final String EMERGENCY_STOP = "EMERGENCY_STOP";
+    private static final String RESUME = "RESUME";
 
     private final VehicleMapper vehicleMapper;
     private final VehicleCommandService vehicleCommandService;
@@ -54,6 +55,20 @@ public class SafetyCommandService {
 
     public VehicleCommandResponse emergencyStop(String vehicleId) {
         return issueSafety(vehicleId, EMERGENCY_STOP);
+    }
+
+    /**
+     * 정지 해제. 정지 계열과 <b>같은 경로로</b> 내보낸다.
+     *
+     * <p>재개를 여기 두는 이유: 화면에서 세운 차는 화면에서 풀 수 있어야 한다. 정지만 전용
+     * 엔드포인트로 두고 재개는 범용 명령 API 로 미루면, 관제 화면이 차를 세운 뒤 스스로 살릴
+     * 방법이 없어 브로커에 직접 쏘는 수밖에 없다.
+     *
+     * <p>차량 쪽은 정지 중에 받은 {@code task} 를 무시하므로(F팀 규격 §4), 재개가 먼저 나가지
+     * 않으면 이후 목표가 조용히 버려진다.
+     */
+    public VehicleCommandResponse resume(String vehicleId) {
+        return issueSafety(vehicleId, RESUME);
     }
 
     private VehicleCommandResponse issueSafety(String vehicleId, String command) {

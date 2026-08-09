@@ -10,8 +10,8 @@ import { VEHICLE_STATUS_COLOR, VEHICLE_STATUS_LABEL } from "./vehicle-status"
  *
  * 차량 상세 상단에 들어가는 선택 차량 핵심 요약.
  *
- * 표시 순서는 <b>차량 ID → 차량 상태 → 물건 높이 → 적재 여부</b>로 고정한다. 화물 ID 는 적재 여부 아래
- * 보조 정보다.
+ * 표시 순서는 <b>차량 ID → 차량 상태 → 물건 높이 → 포크 높이 → 적재 여부</b>로 고정한다.
+ * 화물 ID 는 적재 여부 아래 보조 정보다.
  *
  * `VehicleDetailPanel` 안에서 정밀 좌표·작업·제어 영역보다 먼저 렌더링한다.
  *
@@ -44,7 +44,7 @@ export function SelectedVehicleInfoPanel({
  */
 function EmptySelection() {
   return (
-    <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 xl:grid-cols-4">
+    <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       <InfoField label="차량 ID">
         <span className="font-mono text-xs font-semibold text-slate-500">-</span>
         <span className="mt-0.5 block text-[10px] text-slate-500">-</span>
@@ -55,10 +55,13 @@ function EmptySelection() {
       <InfoField label="물건 높이">
         <span className="text-xs text-slate-500">-</span>
       </InfoField>
+      <InfoField label="포크 높이 (M)">
+        <span className="text-xs text-slate-500">-</span>
+      </InfoField>
       <InfoField label="적재 여부">
         <span className="text-xs text-slate-500">-</span>
       </InfoField>
-      <dd className="text-xs text-slate-400 sm:col-span-2 xl:col-span-4">
+      <dd className="text-xs text-slate-400 sm:col-span-2 lg:col-span-3 xl:col-span-5">
         미니맵에서 차량을 선택해 주세요.
       </dd>
     </dl>
@@ -73,7 +76,7 @@ function SelectedVehicleFields({ vehicle }: { vehicle: DashboardVehicle }) {
   const cargoHeightSource = vehicle.cargoHeight != null ? "AI 측정" : "Isaac 전체 높이"
 
   return (
-    <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 xl:grid-cols-4">
+    <dl className="grid grid-cols-1 gap-1.5 rounded-md bg-white/5 p-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {/* 1. 차량 ID */}
       <InfoField label="차량 ID">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -130,16 +133,6 @@ function SelectedVehicleFields({ vehicle }: { vehicle: DashboardVehicle }) {
               <span className="ml-1 text-[10px] font-normal text-slate-400">m</span>
             </span>
             <span className="mt-1 block text-[9px] text-slate-500">{cargoHeightSource}</span>
-            {vehicle.targetForkHeight != null ? (
-              <span className="mt-1 block font-mono text-[10px] text-sky-300">
-                목표 포크 {vehicle.targetForkHeight.toFixed(2)} m
-              </span>
-            ) : null}
-            {vehicle.actualForkHeight != null ? (
-              <span className="mt-0.5 block font-mono text-[10px] text-emerald-300">
-                현재 포크 {vehicle.actualForkHeight.toFixed(2)} m
-              </span>
-            ) : null}
           </>
         ) : (
           <span className="text-xs text-slate-400">측정 정보 없음</span>

@@ -8,10 +8,27 @@ import { MonitoringSlider } from "@/components/monitoring/MonitoringSlider"
 import { MiniMap } from "@/components/monitoring/MiniMap"
 import { VehicleDetailPanel } from "@/components/monitoring/VehicleDetailPanel"
 import { GlobalEmergencyStopBar } from "@/components/monitoring/GlobalEmergencyStopBar"
+import { OperationControlBar } from "@/components/monitoring/OperationControlBar"
 import { CommandNotice, type CommandNoticeState } from "@/components/monitoring/CommandNotice"
 import { useMonitoringDashboard } from "@/hooks/useMonitoringDashboard"
 import { useMonitoringSocket } from "@/hooks/useMonitoringSocket"
-import { emergencyStopAll, emergencyStopVehicle, stopVehicle } from "@/lib/api/commandApi"
+import {
+  emergencyStopAll,
+  emergencyStopVehicle,
+  resumeVehicle,
+  stopVehicle,
+} from "@/lib/api/commandApi"
+import {
+  fetchOperationState,
+  resetOperation,
+  resumeOperation,
+  startOperation,
+  stopOperation,
+  fetchControlVehicles,
+  startVehicleInOperation,
+  type ControlVehicleView,
+  type OperationStateResponse,
+} from "@/lib/api/operationApi"
 import { AI_MEASUREMENT_STREAM_URL } from "@/lib/config/aiMeasurement"
 import { useIsaacSimStream } from "@/components/monitoring/IsaacSimStream"
 import type { RealtimeConnectionStatus, SelectedVehicleSummary } from "@/types/monitoring"
@@ -47,7 +64,7 @@ export default function MonitoringPage() {
   // --- FR-503 비상정지 상태 ---
   // 차량별 진행 중 명령(중복 클릭 방지). 차량 A 요청 중에도 차량 B 는 독립적으로 사용 가능하다.
   const [pendingCommandByVehicleId, setPendingCommandByVehicleId] = useState<
-    Record<string, "STOP" | "EMERGENCY_STOP" | null>
+    Record<string, "STOP" | "EMERGENCY_STOP" | "RESUME" | "START" | null>
   >({})
   const [globalEmergencyStopPending, setGlobalEmergencyStopPending] = useState(false)
   const [notice, setNotice] = useState<CommandNoticeState | null>(null)
@@ -196,6 +213,82 @@ export default function MonitoringPage() {
     [pendingCommandByVehicleId, safeSet],
   )
 
+  /**
+   * 선택 차량 출발 — 미니맵에서 고른 차 한 대만 내보낸다.
+   *
+   * [운행 시작]과 다르다. 그쪽은 규칙 0 이 3초 간격으로 전 차량을 내보내고, 이쪽은
+   * 고른 차만 나간다(백엔드가 자동 합류를 켜지 않는다).
+   *
+   * 응답이 운행 상태이므로 그대로 반영한다 — 아직 시작 전이었다면 이 호출로 주행 중이 된다.
+   */
+  const handleStartVehicle = useCallback(
+    async (vehicleId: string) => {
+      if (pendingCommandByVehicleId[vehicleId]) return
+
+      setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: "START" }))
+      setNotice(null)
+      try {
+        const next = await startVehicleInOperation(vehicleId)
+        safeSet(setOperation, next)
+        safeSet(setNotice, {
+          tone: "success",
+          message: `${vehicleId} 출발 명령을 보냈습니다.`,
+          detail: "실제 이동은 차량 위치로 확인됩니다.",
+        })
+      } catch (error) {
+        // 끊긴 차량이거나 이미 출발한 차량이면 백엔드가 409 로 막는다 — 이유를 그대로 보여준다.
+        safeSet(setNotice, {
+          tone: "error",
+          message: `${vehicleId} 출발에 실패했습니다.`,
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        safeSet(setPendingCommandByVehicleId, (prev) => ({ ...prev, [vehicleId]: null }))
+      }
+    },
+    [pendingCommandByVehicleId, safeSet],
+  )
+
+  /**
+   * 선택 차량 재개.
+   *
+   * 정지와 같은 pending 맵을 쓴다 — 같은 차량에 정지와 재개가 동시에 나가면 어느 쪽이
+   * 나중에 도착하는지에 따라 결과가 달라진다.
+   */
+  const handleResumeVehicle = useCallback(
+    async (vehicleId: string) => {
+      if (pendingCommandByVehicleId[vehicleId]) return
+
+      setPendingCommandByVehicleId((prev) => ({ ...prev, [vehicleId]: "RESUME" }))
+      setNotice(null)
+      try {
+        const response = await resumeVehicle(vehicleId)
+        if (response.status === "PUBLISHED") {
+          safeSet(setNotice, {
+            tone: "success",
+            message: `${vehicleId} 재개 명령을 전송했습니다.`,
+            detail: `commandId ${response.commandId} · 실제 상태는 차량 상태 이벤트로 갱신됩니다.`,
+          })
+        } else {
+          safeSet(setNotice, {
+            tone: "error",
+            message: `${vehicleId} 재개 명령 발행에 실패했습니다.`,
+            detail: response.resultMessage ?? "MQTT 브로커로 명령을 발행하지 못했습니다.",
+          })
+        }
+      } catch (error) {
+        safeSet(setNotice, {
+          tone: "error",
+          message: `${vehicleId} 재개 명령 요청에 실패했습니다.`,
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        safeSet(setPendingCommandByVehicleId, (prev) => ({ ...prev, [vehicleId]: null }))
+      }
+    },
+    [pendingCommandByVehicleId],
+  )
+
   /** 선택 차량 일반 정지. 발행 성공 뒤에도 상태는 WebSocket 수신 전까지 그대로 둔다. */
   const handleStopVehicle = useCallback(
     async (vehicleId: string) => {
@@ -247,6 +340,82 @@ export default function MonitoringPage() {
    * 부분 실패(일부 차량만 발행 성공)를 전체 성공으로 표시하지 않는다.
    * 대상 수의 실제 응답 필드명은 totalCount 가 아니라 requestedCount 다.
    */
+  // ── 운행 제어 (F팀 backend-control-impl §0.6) ─────────────────────────────
+  //
+  // 차량은 스스로 출발하지 않는다. 백엔드가 첫 목표를 보내야 움직이므로 **시작을 누르는 것이
+  // 곧 첫 목표를 주는 것**이다. 시작해도 세 대가 한꺼번에 나가지 않고 백엔드가 3초 간격으로
+  // 한 대씩 합류시키므로(실물 우선), 그동안 "합류 중 (1/3)" 이 보인다.
+  const [operation, setOperation] = useState<OperationStateResponse | null>(null)
+  const [operationPending, setOperationPending] = useState(false)
+  /** 차량별 주기 상태. 관제가 꺼져 있으면 빈 배열이라 화면이 지금과 똑같이 유지된다. */
+  const [controlVehicles, setControlVehicles] = useState<ControlVehicleView[]>([])
+
+  /** 선택된 차량의 주기 상태. 관제 대상이 아니면 null 이고 관련 칸이 숨는다. */
+  const selectedControl = useMemo(
+    () => controlVehicles.find((v) => v.id === selectedVehicleId) ?? null,
+    [controlVehicles, selectedVehicleId],
+  )
+
+
+  // 합류 진행은 백엔드 tick 이 만드는 변화라 조작 없이도 바뀐다. 그래서 주기적으로 다시 읽는다.
+  // 1초면 3초 간격 합류를 놓치지 않으면서 부담도 없다.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        // 두 조회를 한 번에 — 따로 돌리면 버튼 상태와 차량 단계가 서로 다른 시점 값이 된다.
+        const [state, vehicles] = await Promise.all([
+          fetchOperationState(),
+          fetchControlVehicles(),
+        ])
+        if (!cancelled) {
+          setOperation(state)
+          setControlVehicles(vehicles)
+        }
+      } catch {
+        // 조회 실패로 화면을 깨뜨리지 않는다. 버튼은 operation=null 이라 모두 잠긴 채 남는다.
+      }
+    }
+    void load()
+    const timer = window.setInterval(() => void load(), 1000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  /**
+   * 운행 조작 공통 처리.
+   *
+   * 다섯 조작이 모두 같은 응답(OperationStateResponse)을 주므로 성공 시 그대로 반영한다 —
+   * 다시 조회할 필요가 없어 버튼이 즉시 바뀐다.
+   */
+  const runOperation = useCallback(
+    async (
+      action: () => Promise<OperationStateResponse>,
+      successMessage: string,
+    ) => {
+      if (operationPending) return
+      setOperationPending(true)
+      setNotice(null)
+      try {
+        const next = await action()
+        safeSet(setOperation, next)
+        safeSet(setNotice, { tone: "success", message: successMessage })
+      } catch (error) {
+        // 백엔드가 상태 전이를 막은 경우(409)도 여기로 온다 — 사용자에게 이유를 그대로 보여준다.
+        safeSet(setNotice, {
+          tone: "error",
+          message: "운행 제어 실패",
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        safeSet(setOperationPending, false)
+      }
+    },
+    [operationPending],
+  )
+
   const handleGlobalEmergencyStop = useCallback(async () => {
     // 확인 창을 두지 않는다(prompt79). 대상은 여전히 **현재 활성 차량 전체**이며,
     // 활성 차량이 0대면 요청 자체를 보내지 않는다(버튼도 disabled 다).
@@ -319,6 +488,16 @@ export default function MonitoringPage() {
             <DashboardErrorBanner message={errorMessage} onRetry={() => void loadDashboard()} />
           ) : null}
           <CommandNotice notice={notice} onDismiss={() => setNotice(null)} />
+          <OperationControlBar
+            operation={operation}
+            pending={operationPending}
+            onStart={() =>
+              void runOperation(startOperation, "운행을 시작했습니다. 차량이 순서대로 합류합니다.")
+            }
+            onPause={() => void runOperation(stopOperation, "전체 일시정지 명령을 보냈습니다.")}
+            onResume={() => void runOperation(resumeOperation, "운행을 재개했습니다.")}
+            onReset={() => void runOperation(resetOperation, "운행을 종료했습니다.")}
+          />
           <GlobalEmergencyStopBar
             onTriggerAll={() => void handleGlobalEmergencyStop()}
             activeVehicleCount={activeVehicleCount}
@@ -332,7 +511,9 @@ export default function MonitoringPage() {
         <div className="h-full w-1/2 shrink-0 overflow-y-auto pb-5 lg:overflow-hidden lg:pb-1" aria-label="디지털 트윈 통합 관제 화면">
           {/* AI 측정 영상 전용 컬럼은 없앴다 — Isaac Sim 영상 안쪽 오른쪽 위 PIP 로 들어간다.
               남는 축은 "중심 영상 : 차량 관제" 둘뿐이다. */}
-          <div className="grid min-h-full min-w-0 grid-cols-1 gap-2 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.42fr)] 2xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.34fr)]">
+          {/* 오른쪽(차량 관제) 폭을 넓혔다 — 단계·목표·주기 칸이 늘어 기존 폭에서는 값이
+              말줄임표로 잘렸다. 영상은 16:9 라 가로를 줄여도 세로가 함께 줄 뿐 잘리지 않는다. */}
+          <div className="grid min-h-full min-w-0 grid-cols-1 gap-2 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.6fr)] 2xl:grid-cols-[minmax(0,1fr)_minmax(460px,0.5fr)]">
             <div className="flex min-h-[480px] min-w-0 flex-col lg:min-h-0">
               <MainRealtimeMonitoringView
                 streamStatus={streamStatus}
@@ -369,7 +550,10 @@ export default function MonitoringPage() {
               realtimeStatus={realtimeStatus}
               loadState={loadState}
               loadDashboard={loadDashboard}
+              selectedControl={selectedControl}
+              handleStartVehicle={handleStartVehicle}
               handleStopVehicle={handleStopVehicle}
+              handleResumeVehicle={handleResumeVehicle}
               handleEmergencyStopVehicle={handleEmergencyStopVehicle}
               pendingCommandByVehicleId={pendingCommandByVehicleId}
             />
@@ -407,7 +591,10 @@ function VehicleControlPanel({
   realtimeStatus,
   loadState,
   loadDashboard,
+  selectedControl,
+  handleStartVehicle,
   handleStopVehicle,
+  handleResumeVehicle,
   handleEmergencyStopVehicle,
   pendingCommandByVehicleId,
 }: {
@@ -418,9 +605,12 @@ function VehicleControlPanel({
   realtimeStatus: RealtimeConnectionStatus
   loadState: ReturnType<typeof useMonitoringDashboard>["loadState"]
   loadDashboard: () => Promise<void>
+  selectedControl: ControlVehicleView | null
+  handleStartVehicle: (id: string) => Promise<void>
   handleStopVehicle: (id: string) => Promise<void>
+  handleResumeVehicle: (id: string) => Promise<void>
   handleEmergencyStopVehicle: (id: string) => Promise<void>
-  pendingCommandByVehicleId: Record<string, "STOP" | "EMERGENCY_STOP" | null>
+  pendingCommandByVehicleId: Record<string, "STOP" | "EMERGENCY_STOP" | "RESUME" | "START" | null>
 }) {
   return (
     // 컬럼이 하나 줄어 세로 여유가 생겼다 — 고정 min-h 를 낮춰 패널 자체가 화면 높이를
@@ -435,9 +625,14 @@ function VehicleControlPanel({
       <div className="min-h-0 flex-1 overflow-hidden border-t border-slate-700">
         <VehicleDetailPanel
           vehicle={selectedVehicle}
+          control={selectedControl}
+          onStart={(id) => void handleStartVehicle(id)}
           onStop={(id) => void handleStopVehicle(id)}
+          onResume={(id) => void handleResumeVehicle(id)}
           onEmergencyStop={(id) => void handleEmergencyStopVehicle(id)}
           stopPending={selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "STOP" : false}
+          resumePending={selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "RESUME" : false}
+          startPending={selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "START" : false}
           emergencyStopPending={selectedVehicleId ? pendingCommandByVehicleId[selectedVehicleId] === "EMERGENCY_STOP" : false}
           className="h-full min-h-0 rounded-none border-0 bg-transparent"
         />

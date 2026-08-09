@@ -80,3 +80,24 @@ cors:
 
 websocket:
   allowed-origin-patterns: ${WEBSOCKET_ALLOWED_ORIGIN_PATTERNS:*}
+
+# =============================================================================
+# 교통 관제 — 로컬 개발용
+# =============================================================================
+# application.yml 의 기본값은 traffic.vehicles 가 비어 있다. 그러면 관제가 어떤 차량도
+# 대상으로 삼지 않고, 관제 화면의 [출발] 버튼도 "관제 대상 아님"으로 숨는다.
+#
+# 로컬에서는 시뮬 차량을 대상으로 둔다. F팀이 ID 를 sim01→sim02, sim02→sim03 으로 바꿨지만
+# 지금 로컬 DB·시뮬에는 SIM-F01 이 떠 있어서 셋을 모두 넣는다 — 없는 ID 가 목록에 있어도
+# 해가 없다(telemetry 가 안 오면 그냥 "연결 끊김"으로 보인다).
+#
+# 실물(REAL-F01)은 넣지 않았다 — "명령이 끊기면 스스로 정지"하는 워치독이 확인되기
+# 전까지는 자동 제어 대상에서 뺀다.
+#
+# ⚠️ enabled 는 여전히 false 다. 목록에 있어도 스위치를 켜야 실제 명령이 나간다.
+#    켜기 전에 F팀에 데모를 꺼 달라고 할 것 — 둘 다 목표를 보내면 서로 밀어낸다.
+traffic:
+  enabled: ${TRAFFIC_ENABLED:false}
+  vehicles: ${TRAFFIC_VEHICLES:SIM-F01,SIM-F02,SIM-F03}
+  cycle:
+    enabled: ${TRAFFIC_CYCLE_ENABLED:false}

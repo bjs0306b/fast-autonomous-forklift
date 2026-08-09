@@ -48,6 +48,25 @@ export async function emergencyStopVehicle(
 }
 
 /**
+ * 선택 차량 1대 정지 해제.
+ *
+ * `POST /api/vehicles/{vehicleId}/commands/resume`
+ *
+ * 일반 정지와 비상정지를 모두 푼다. **차량은 정지 중에 받은 목적지 지시를 무시하므로**
+ * (F팀 규격 §4), 이 호출이 먼저 성공해야 이후 이동 명령이 먹는다.
+ */
+export async function resumeVehicle(
+  vehicleId: string,
+  signal?: AbortSignal,
+): Promise<VehicleCommandResponse> {
+  return postJson<VehicleCommandResponse>(
+    `/api/vehicles/${encodeURIComponent(vehicleId)}/commands/resume`,
+    undefined,
+    signal,
+  )
+}
+
+/**
  * 활성 차량 전체 비상정지.
  *
  * `POST /api/vehicles/commands/emergency-stop-all`

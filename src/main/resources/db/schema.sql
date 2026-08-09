@@ -2,18 +2,23 @@
 -- 기준 문서: docs/backend-api/optimal-placement.md
 -- 길이와 지도 좌표는 m, 방향은 [0, 360) 범위의 degree를 사용한다.
 -- 신규 데이터베이스 생성용 파일이며 운영 데이터 마이그레이션은 범위에서 제외한다.
+--
+-- ⚠️ 모든 테이블에 utf8mb4 를 명시한다. 빠뜨리면 DB 기본 문자셋(대개 latin1)으로 만들어져
+--    한글이 '?' 로 저장된다 — JDBC URL 에 characterEncoding=UTF-8 이 있어도 소용없다.
+--    컬럼이 담지 못하는 문자는 MySQL 이 '?' 로 바꿔 넣고, 그 뒤에는 복원할 수 없다.
+--    (실제로 겪었다: 차량 이름이 '????? ??? 1?' 로 나왔다. db/fix-charset-utf8mb4.sql 참고)
 
 CREATE TABLE IF NOT EXISTS cargo (
     cargo_id   BIGINT      NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '백엔드가 자동 생성하는 화물 고유 식별자',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '화물 등록 시각'
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS station_session (
     session_id VARCHAR(100) NOT NULL PRIMARY KEY COMMENT '측정 세션 식별자',
     cargo_id   BIGINT       NOT NULL COMMENT '측정 대상 화물 식별자',
     CONSTRAINT fk_station_session_cargo
         FOREIGN KEY (cargo_id) REFERENCES cargo (cargo_id)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS station_state (
     singleton_id      INT          NOT NULL PRIMARY KEY COMMENT '단일 행을 보장하는 고정값 1',
@@ -26,7 +31,7 @@ CREATE TABLE IF NOT EXISTS station_state (
     ),
     CONSTRAINT fk_station_state_session
         FOREIGN KEY (active_session_id) REFERENCES station_session (session_id)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 INSERT INTO station_state (singleton_id, active_session_id, acquired_at)
 SELECT 1, NULL, NULL
@@ -59,7 +64,7 @@ CREATE TABLE IF NOT EXISTS station_measurement (
         CHECK (overhang_ratio IS NULL OR overhang_ratio >= 0),
     CONSTRAINT fk_station_measurement_session
         FOREIGN KEY (session_id) REFERENCES station_session (session_id)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vehicle (
     vehicle_id VARCHAR(50)  NOT NULL PRIMARY KEY COMMENT '차량 고유 식별자',
@@ -67,7 +72,7 @@ CREATE TABLE IF NOT EXISTS vehicle (
     active     BOOLEAN      NOT NULL DEFAULT TRUE COMMENT '차량 사용 가능 여부',
     created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '차량 등록 시각',
     updated_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '차량 정보 수정 시각'
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vehicle_current_status (
     vehicle_id      VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '상태 대상 차량 식별자',
@@ -85,7 +90,7 @@ CREATE TABLE IF NOT EXISTS vehicle_current_status (
     CONSTRAINT chk_vehicle_status_heading CHECK (heading IS NULL OR (heading >= 0 AND heading < 360)),
     CONSTRAINT fk_vehicle_current_status_vehicle
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS storage_slot (
     slot_code           VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '적재 위치 식별자',
@@ -112,7 +117,7 @@ CREATE TABLE IF NOT EXISTS storage_slot (
         FOREIGN KEY (stored_cargo_id) REFERENCES cargo (cargo_id),
     INDEX idx_storage_slot_status (status),
     INDEX idx_storage_slot_reserved_task (reserved_task_id)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS transport_task (
     id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '운반 작업 내부 식별자',
@@ -178,7 +183,7 @@ CREATE TABLE IF NOT EXISTS transport_task (
     INDEX idx_transport_task_vehicle (vehicle_id),
     INDEX idx_transport_task_cargo_status (cargo_id, status),
     INDEX idx_transport_task_slot (destination_slot_code)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- storage_slot과 transport_task의 상호 생성 순환을 피하려고 reserved_task_id에는 FK를 두지 않는다.
 -- 예약 상태 변경은 애플리케이션의 조건부 UPDATE로 동시성을 보호한다.
@@ -205,7 +210,7 @@ CREATE TABLE IF NOT EXISTS vehicle_command (
     INDEX idx_vehicle_command_task (task_id),
     INDEX idx_vehicle_command_vehicle (vehicle_id),
     INDEX idx_vehicle_command_status (status)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 교통 관제 정지/재개 이벤트 (FR-502-1a)
 --
@@ -234,4 +239,4 @@ CREATE TABLE IF NOT EXISTS traffic_control_event (
         FOREIGN KEY (vehicle_id) REFERENCES vehicle (vehicle_id),
     INDEX idx_traffic_event_vehicle (vehicle_id, occurred_at),
     INDEX idx_traffic_event_occurred (occurred_at)
-);
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
