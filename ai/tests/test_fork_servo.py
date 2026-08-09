@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from control.fork_servo import (
+    _SPAN_PX_AT_1MM,
     ALIGN_ENTER_MM,
     CRUISE_SPEED,
     ALIGN_ENTER_PX,
@@ -38,7 +39,16 @@ ALIGN_ENTER_PX 260→95) 같은 값이 조용히 **다른 단계**를 뜻하게 
 줬지만, 고정값을 튜닝 대상 상수와 비교하면 언제든 되풀이된다."""
 
 
-def err(lateral=0.0, yaw=0.0, approach=APPROACH_PX, distance_mm=None) -> AlignError:
+def err(lateral=0.0, yaw=0.0, approach=None, distance_mm=None) -> AlignError:
+    """시험용 오차 하나.
+
+    ⚠️ **거리를 주면 폭은 그 거리에서 나올 값으로 맞춘다.** 실물에서는 둘 다 같은
+    검출에서 나오므로 서로 모순일 수 없고, 제어기는 그 모순을 **검출 오류로 보고
+    버린다**(`_implausible`). 따로 주면 시험이 실물에 없는 입력을 만들게 된다.
+    """
+    if approach is None:
+        approach = (_SPAN_PX_AT_1MM / distance_mm
+                    if distance_mm else APPROACH_PX)
     return AlignError(lateral_ratio=lateral, yaw_signal=yaw, approach_px=approach,
                       distance_mm=distance_mm)
 
@@ -433,8 +443,12 @@ def test_reset하면_다시_시도할_수_있다() -> None:
 def test_거리가_있으면_mm_임계를_쓴다() -> None:
     """캘리 후에는 실제 거리로 판단한다 — 픽셀 값은 무시한다."""
     servo = ForkServo()
-    # 폭(px)으로는 아직 멀지만, 실제 거리는 이미 진입 범위다
-    cmd = decide(servo, err(approach=10.0, distance_mm=INSERT_ENTER_MM - 10),
+    # 폭(px)으로는 아직 멀지만, 실제 거리는 이미 진입 범위다.
+    # ⚠️ 폭을 아무 값이나 주면 안 된다 — 거리와 너무 어긋나면 제어기가 **검출
+    # 오류로 보고 버린다**(`_implausible`). 예측 폭의 절반이면 게이트는 통과하되
+    # px 임계(295)에는 못 미쳐, mm 이 우선인지 그대로 가른다.
+    cmd = decide(servo, err(approach=_SPAN_PX_AT_1MM / (INSERT_ENTER_MM - 10) * 0.5,
+                            distance_mm=INSERT_ENTER_MM - 10),
                  far=err(distance_mm=ALIGN_ENTER_MM + 50))
     assert cmd.phase is Phase.INSERT
 
@@ -445,11 +459,13 @@ def test_부등호_방향이_반대다() -> None:
     한쪽을 뒤집어 쓰면 '멀수록 진입'이 돼 파렛트를 향해 돌진한다.
     """
     servo = ForkServo()
+    # 폭은 **크게** 줘도 게이트에 안 걸린다(작을 때만 모순으로 본다).
     far = servo.step(err(approach=9999.0, distance_mm=ALIGN_ENTER_MM + 500), DT)
     assert far.phase is Phase.APPROACH, "거리가 멀면 폭이 커도 접근 단계여야 한다"
 
     servo.reset()
-    near = servo.step(err(approach=1.0, distance_mm=ALIGN_ENTER_MM - 10), DT)
+    near = servo.step(err(approach=_SPAN_PX_AT_1MM / (ALIGN_ENTER_MM - 10) * 0.5,
+                          distance_mm=ALIGN_ENTER_MM - 10), DT)
     assert near.phase is Phase.ALIGN, "거리가 가까우면 폭이 작아도 정렬 단계여야 한다"
 
 
@@ -681,3 +697,29 @@ def test_복귀에도_못_찾으면_끝낸다() -> None:
             break
     assert cmd.phase is Phase.ABORT
     assert servo.episode.outcome == "lost_while_retreating"
+
+
+# --- 검출 위생 게이트 (2026-08-07, 30회차) ---
+
+def test_말이_안_되는_요각은_못_본_것으로_친다() -> None:
+    """진입면이 보이는데 요각 -88° 는 나올 수 없다 — 구멍 짝을 잘못 묶은 것이다.
+
+    30회차에서 **정면 파렛트**인데 이런 프레임이 섞여 재접근을 6번 유발했다.
+    """
+    servo = ForkServo()
+    servo.step(err(distance_mm=ALIGN_ENTER_MM + 200), DT)
+    bad = AlignError(lateral_ratio=74.6, yaw_signal=-0.17,
+                     approach_px=_SPAN_PX_AT_1MM / 139.0, yaw_deg=-88.1,
+                     distance_mm=139.0)
+    cmd = servo.step(bad, DT)
+    assert cmd.phase is not Phase.RETREAT, "쓰레기 검출로 물러나면 안 된다"
+
+
+def test_폭과_거리가_모순이면_못_본_것으로_친다() -> None:
+    """둘 다 같은 검출에서 나오므로 어긋날 수 없다 — 어긋나면 다른 물체다."""
+    servo = ForkServo()
+    servo.step(err(distance_mm=ALIGN_ENTER_MM + 200), DT)
+    bad = AlignError(lateral_ratio=0.0, yaw_signal=0.0, approach_px=14.0,
+                     yaw_deg=0.0, distance_mm=139.0)
+    cmd = servo.step(bad, DT)
+    assert cmd.phase is not Phase.INSERT

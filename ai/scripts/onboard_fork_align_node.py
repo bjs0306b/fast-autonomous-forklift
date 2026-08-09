@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from pathlib import Path
 
@@ -63,6 +64,98 @@ FOCAL_PX = 1277.7
 """가로 초점거리(px). 체커보드 캘리브레이션 값 — `docs/ai/measurement/camera-calibration.md`.
 
 거리·요각 계산에 쓴다. 안 주면 화면 폭(px) 기준 상대값으로만 돌아간다."""
+
+
+
+
+REAR_SECTOR_DEG = (75.0, 105.0)
+"""후방으로 보는 `laser_frame` 각도 구간(도).
+
+⚠️ **라이다가 90° 돌아 달려 있다** — 0° 가 차체 앞이 아니라 왼쪽(base_link +Y)을
+가리킨다(`lidar_odometry.launch.py` 의 `LIDAR_ROTATION`). 그래서 차체 뒤(180°)는
+laser 기준 **+90°** 다.
+
+2026-08-07 실측으로 확인했다: 뒤에만 벽이 있는 상태에서 laser +60~+120° 만 0.40m 로
+나오고 나머지는 0.8~1.7m 였다. 부호를 추측하면 **가드가 엉뚱한 쪽을 보고도 조용히
+정상처럼 동작한다.**
+
+⚠️ 구간을 60~120 에서 **75~105 으로 좁혔다**(08-07). 넓게 두면 옆에 있는 물체까지
+후방으로 세어 정상 후진을 자주 끊었다 — 실주행 한 판에서 5번 걸렸는데 실제로는
+부딪힐 거리가 아니었다."""
+
+
+def _rear_min_range(msg) -> float | None:
+    """스캔 한 장에서 **뒤쪽 최소거리**(m). 유효한 점이 없으면 None.
+
+    ⚠️ None 을 0 이나 큰 값으로 바꾸지 말 것 — 0 이면 영영 못 물러나고, 큰 값이면
+    가드가 없는 것과 같다. 모르면 모른다고 해야 호출자가 정할 수 있다.
+    """
+    import math
+    lo, hi = REAR_SECTOR_DEG
+    best = None
+    for i, r in enumerate(msg.ranges):
+        if not (msg.range_min < r < msg.range_max):
+            continue
+        if math.isinf(r) or math.isnan(r):
+            continue
+        deg = math.degrees(msg.angle_min + i * msg.angle_increment)
+        deg = (deg + 180.0) % 360.0 - 180.0
+        if lo <= deg <= hi and (best is None or r < best):
+            best = r
+    return best
+
+
+
+def _engagement_problem(error, servo, lateral_max: float) -> str | None:
+    """들어올려도 되나 — **문제가 있으면 그 이유**, 없으면 None.
+
+    진입은 개루프라 "갔다" 와 "들어갔다" 가 다르다. 마지막으로 본 자세가 진입 허용
+    범위 밖이면 포크가 구멍이 아니라 파렛트 옆·앞에 걸쳐 있을 수 있고, 그 상태로
+    들면 화물이 쏟아진다(2026-08-07 실제로 박스가 엎어졌다).
+    """
+    if error is None:
+        return "마지막 자세를 못 봤다"
+    if abs(error.lateral_ratio) > lateral_max:
+        return (f"좌우 오차 {error.lateral_ratio:+.2f} "
+                f"(들기 허용 {lateral_max:.2f})")
+    if (error.yaw_deg is not None
+            and abs(error.yaw_deg) > servo.yaw_deg_tolerance):
+        return f"요각 {error.yaw_deg:+.1f}° (허용 {servo.yaw_deg_tolerance:.0f}°)"
+    return None
+
+
+def _lift_fork(node, rclpy, publisher, string_cls, status, timeout_s: float) -> bool:
+    """진입이 끝난 뒤 포크를 들어올린다. 성공하면 True.
+
+    ⚠️ **`/fork/status` 를 기다린다 — 명령만 던지고 끝내면 안 된다.** 상승은 시간이
+    걸리고, 노드가 먼저 죽으면 올라가는 중인지 걸렸는지 아무도 모른다. 브리지는
+    `RUNNING` 을 거쳐 `DONE` 을 준다(`unmanned_mission` 과 같은 규약).
+    """
+    import json
+    print("포크 상승 명령(UP)", flush=True)
+    status.clear()
+    publisher.publish(string_cls(data="UP"))
+    deadline = time.monotonic() + timeout_s
+    seen_running = False
+    while rclpy.ok() and time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.1)
+        while status:
+            raw = status.pop(0)
+            try:
+                state = str(json.loads(raw).get("state", "")).upper()
+            except (ValueError, AttributeError):
+                continue
+            if state == "RUNNING":
+                seen_running = True
+            elif state == "ERROR":
+                print(f"❌ 포크 상승 실패: {raw}", flush=True)
+                return False
+            elif state == "DONE" and seen_running:
+                print("포크 상승 완료", flush=True)
+                return True
+    print("⚠️ 포크 상승이 시간 안에 안 끝났다 — STOP 을 보낸다", flush=True)
+    publisher.publish(string_cls(data="STOP"))
+    return False
 
 
 def main(argv=None) -> int:
@@ -120,6 +213,14 @@ def main(argv=None) -> int:
     ap.add_argument("--yaw-deg-tolerance", type=float, default=None,
                     help="진입을 허가할 요각 상한(도, 기본 10). ⚠️ 이게 없던 동안 "
                          "요각 -58.5° 인 채로 진입이 허가돼 포크가 비스듬히 스쳤다")
+    ap.add_argument("--contact-guard", type=float, default=None,
+                    help="이 거리(mm) 안쪽에서 요각이 허용치를 넘으면 진입 거리까지 "
+                         "가지 않고 **닿기 전에 물러난다**(기본 320, 0 이면 끔). "
+                         "포크 끝이 카메라보다 90mm 앞이라 비스듬하면 파렛트를 친다")
+    ap.add_argument("--retreat-step-max", type=float, default=None,
+                    help="후진 한 걸음 상한(mm, 기본 120). 파렛트가 크게 돌아 있으면 "
+                         "짧은 걸음으로는 같은 자리로 돌아와 각이 안 준다 — 크게 주면 "
+                         "다른 방위에서 접근한다. ⚠️ 뒤 공간이 그만큼 필요하다")
     ap.add_argument("--stall-window", type=float, default=None,
                     help="이 시간(초) 동안 거리가 안 변하면 '멎었다'로 중단한다 "
                          "(기본 3.0). 0 이면 끈다 — 차를 손으로 밀며 시험할 때만")
@@ -132,10 +233,42 @@ def main(argv=None) -> int:
                          "기다린다. ⚠️ 구독자가 없으면 명령이 허공으로 가는데 "
                          "로그는 정상으로 찍힌다 — 그래서 여기서 먼저 끊는다")
     ap.add_argument("--max-seconds", type=float, default=60.0)
+    ap.add_argument("--odom-topic", default="/odometry/filtered",
+                    help="주행거리를 재는 오도메트리(nav_msgs/Odometry). 빈 문자열이면 끔. "
+                         "⚠️ **이게 있으면 속도 상수를 안 쓴다** — 진입·후진이 시간이 "
+                         "아니라 실제 이동거리로 끝난다. 바닥이 바뀌어도 다시 잴 것이 "
+                         "없다. 라이다 오도메트리(rf2o)+EKF 로 나온다")
+    ap.add_argument("--encoder-topic", default="/wheel/twist",
+                    help="구동 바퀴 엔코더 속도 토픽. 여기서 **실제 이동거리**를 적분해 "
+                         "개루프 진입·후진을 거리로 닫는다. 빈 문자열이면 끔(시간×속도상수 "
+                         "추정으로 되돌아간다 — 그 상수는 바닥마다 2배 넘게 흔들린다)")
+    ap.add_argument("--rear-guard-m", type=float, default=0.22,
+                    help="후진 중 뒤가 이 거리(m)보다 가까우면 **후진을 멈춘다**. "
+                         "0 이면 끔. 상단 라이다(/scan)를 쓴다 — 카메라·전방 ToF 는 "
+                         "뒤를 못 본다. ⚠️ /scan 이 없으면 가드가 없는 것과 같다")
+    ap.add_argument("--scan-topic", default="/scan",
+                    help="후방 가드가 쓰는 LaserScan 토픽")
+    ap.add_argument("--lift-lateral-max", type=float, default=0.35,
+                    help="이 좌우 오차 이내일 때만 포크를 든다(기본 0.35 ≈ 20mm). "
+                         "⚠️ **진입 허용치와 같게 두지 말 것** — 진입은 '들어갈 수 "
+                         "있다', 들기는 '제대로 물렸다' 로 기준이 다르다. 같게 뒀다가 "
+                         "lat +0.67 인 채로 들어 박스가 무너졌다(2026-08-07)")
+    ap.add_argument("--lift-after-insert", action="store_true",
+                    help="진입에 성공하면 포크를 들어올린다(/fork/command 에 UP). "
+                         "⚠️ 진입이 얕으면 화물이 미끄러진다 — 물림을 눈으로 확인한 "
+                         "뒤 쓰는 것이 안전하다")
+    ap.add_argument("--lift-timeout-s", type=float, default=15.0,
+                    help="포크 상승 완료(/fork/status DONE)를 기다리는 시간(초)")
     ap.add_argument("--save-dir", type=Path, help="ABORT/DONE 시 마지막 프레임 저장")
     a = ap.parse_args(argv)
 
     publisher = node = rclpy = None
+    fork_publisher = fork_string_cls = None
+    fork_status: list[str] = []
+    # 후방 가드가 본 뒤쪽 최소거리(m). None 이면 아직 스캔이 없다.
+    rear_min: list[float | None] = [None]
+    # 엔코더 누적 주행거리(m, 단조증가). None 이면 엔코더가 없다.
+    travel = {"m": None, "t": None, "live": False, "xy": None}
     if not a.dry_run:
         import rclpy as _rclpy
         from geometry_msgs.msg import Twist
@@ -144,6 +277,69 @@ def main(argv=None) -> int:
         node = rclpy.create_node("fork_align")
         publisher = node.create_publisher(Twist, a.cmd_topic, 10)
         twist_cls = Twist
+        if a.odom_topic:
+            from nav_msgs.msg import Odometry
+
+            def _on_odom(msg) -> None:
+                # 위치 변화량의 크기를 쌓는다. **회전만 해도 조금 쌓이지만**, 우리가
+                # 재는 구간(직선 진입·직선 후진)에서는 거의 순수 병진이다.
+                p = msg.pose.pose.position
+                prev = travel["xy"]
+                travel["xy"] = (p.x, p.y)
+                if prev is None:
+                    return
+                d = math.hypot(p.x - prev[0], p.y - prev[1])
+                if d > 0.0:
+                    travel["live"] = True
+                travel["m"] = (travel["m"] or 0.0) + d
+
+            node.create_subscription(Odometry, a.odom_topic, _on_odom, 10)
+            print(f"오도메트리: {a.odom_topic}", flush=True)
+        elif a.encoder_topic:
+            from geometry_msgs.msg import TwistWithCovarianceStamped
+
+            def _on_encoder(msg) -> None:
+                # ⚠️ **0 만 오는 엔코더는 없는 것으로 친다.** 2026-08-07 실물에서
+                # 차가 움직이는 동안에도 `/wheel/twist` 가 계속 0.0 이었다(배선·펌웨어
+                # 문제). 그대로 적분하면 "이동거리 0" 이 계속 참이라 진입·후진이
+                # **한 프레임 만에 끝난 것처럼** 보이지 않고 조용히 시간 추정으로
+                # 떨어지는데, 로그만 봐서는 어느 쪽이 동작 중인지 알 수 없다.
+                # **부호를 버리고 크기만 쌓는다.** 앞뒤 어느 쪽이든 "얼마나 움직였나"
+                # 만 필요하고, 진입·후진은 각자 시작점을 따로 기억한다.
+                now = time.monotonic()
+                prev = travel["t"]
+                travel["t"] = now
+                if prev is None:
+                    return
+                v = abs(float(msg.twist.twist.linear.x))
+                if v > 0.0:
+                    travel["live"] = True
+                if not travel["live"]:
+                    return
+                travel["m"] = (travel["m"] or 0.0) + v * (now - prev)
+
+            node.create_subscription(TwistWithCovarianceStamped, a.encoder_topic,
+                                     _on_encoder, 10)
+            print(f"엔코더: {a.encoder_topic}", flush=True)
+        if a.rear_guard_m > 0.0:
+            from sensor_msgs.msg import LaserScan
+            from rclpy.qos import qos_profile_sensor_data
+
+            def _on_scan(msg) -> None:
+                rear_min[0] = _rear_min_range(msg)
+
+            # ⚠️ **센서 QoS 라야 받는다.** 기본(RELIABLE)으로 구독하면 드라이버가
+            # BEST_EFFORT 로 내보내 **한 장도 안 온다** — 에러가 아니라 조용한 침묵이라
+            # "가드가 도는 줄 알았는데 안 돌았다" 가 된다.
+            node.create_subscription(LaserScan, a.scan_topic, _on_scan,
+                                     qos_profile_sensor_data)
+            print(f"후방 가드: {a.scan_topic} · {a.rear_guard_m:.2f}m", flush=True)
+        if a.lift_after_insert:
+            from std_msgs.msg import String
+            fork_publisher = node.create_publisher(String, "/fork/command", 10)
+            node.create_subscription(String, "/fork/status",
+                                     lambda m: fork_status.append(m.data), 10)
+            fork_string_cls = String
 
         # ⚠️ **구독자가 없으면 명령이 허공으로 간다 — 그런데 로그는 정상으로 찍힌다.**
         # 2026-08-05 에 이 실패를 세 번 만났다(브리지 사망 · UART 링크 이상 ·
@@ -202,6 +398,10 @@ def main(argv=None) -> int:
         servo_kwargs["yaw_deg_tolerance"] = a.yaw_deg_tolerance
     if a.stall_window is not None:
         servo_kwargs["stall_window_s"] = a.stall_window
+    if a.contact_guard is not None:
+        servo_kwargs["contact_guard_mm"] = a.contact_guard
+    if a.retreat_step_max is not None:
+        servo_kwargs["retreat_max_step_mm"] = a.retreat_step_max
     servo = ForkServo(**servo_kwargs)
     smoother = YawSmoother(a.yaw_window)
     if servo_kwargs:
@@ -214,6 +414,15 @@ def main(argv=None) -> int:
     def publish(linear_x: float, angular_z: float) -> None:
         if publisher is None:
             return
+        # ── 후방 가드 ────────────────────────────────────────────────────
+        # **뒤로 갈 때만** 본다. 앞은 카메라가 보고 있고, 뒤는 이것 말고 아무도 안 본다.
+        if a.rear_guard_m > 0.0 and linear_x < 0.0:
+            back = rear_min[0]
+            if back is not None and back < a.rear_guard_m:
+                print(f"    ⛔ 후방 {back:.2f}m — 후진 중지(임계 {a.rear_guard_m:.2f}m)",
+                      flush=True)
+                linear_x = 0.0
+                angular_z = 0.0
         msg = twist_cls()
         msg.linear.x = float(linear_x)
         msg.angular.z = float(angular_z)
@@ -226,6 +435,7 @@ def main(argv=None) -> int:
     last = started
     frames = 0
     reported_retreats = 0
+    last_error: list = [None]
     last_frame = None
     try:
         while True:
@@ -238,6 +448,13 @@ def main(argv=None) -> int:
             dt, last = now - last, now
             frames += 1
 
+            # ⚠️ **구독 콜백은 여기서만 돈다.** 이걸 안 부르면 `/scan`(후방 가드)·
+            # `/odometry`(거리 폐루프) 가 **한 번도 실행되지 않는다** — 구독은 걸려
+            # 있으니 로그도 정상으로 찍히고, 가드가 조용히 없는 상태가 된다.
+            # 2026-08-07 에 그 상태로 여러 판을 돌렸다.
+            if node is not None:
+                rclpy.spin_once(node, timeout_sec=0.0)
+
             target = tracker.update(detector.detect(frame))
             error = None
             if target is not None:
@@ -248,7 +465,9 @@ def main(argv=None) -> int:
             # 제어도 로그도 **평활된 값**을 본다. 생값과 섞어 쓰면 나중에 로그를
             # 보고 "제어가 무엇을 봤나" 를 되짚을 수 없다.
             error = smoother.update(error)
-            cmd = servo.step(error, dt)
+            if error is not None:
+                last_error[0] = error
+            cmd = servo.step(error, dt, travel_m=travel["m"])
             publish(cmd.linear_x, cmd.angular_z)
 
             if error is None:
@@ -287,6 +506,17 @@ def main(argv=None) -> int:
         # 그 사이에 파렛트를 들이받기 충분하다).
         publish(0.0, 0.0)
         cap.release()
+        # ⚠️ **노드를 파괴하기 전에** 올린다 — 뒤에서 부르면 발행할 통로가 없다.
+        if fork_publisher is not None and servo.phase is Phase.DONE:
+            # ⚠️ **물림이 확인될 때만 든다.** `done` 은 "계획한 거리를 갔다" 는 뜻이지
+            # "구멍에 들어갔다" 는 뜻이 아니다. 2026-08-07 에 진입 직전 lat 이 +0.59
+            # (허용치 0.45)인 채로 done 이 찍혔고, 그대로 들어올려 **박스가 다 엎어졌다.**
+            bad = _engagement_problem(last_error[0], servo, a.lift_lateral_max)
+            if bad:
+                print(f"⛔ 포크를 들지 않는다 — {bad}", flush=True)
+            else:
+                _lift_fork(node, rclpy, fork_publisher, fork_string_cls,
+                           fork_status, a.lift_timeout_s)
         if node is not None:
             node.destroy_node()
             rclpy.shutdown()
