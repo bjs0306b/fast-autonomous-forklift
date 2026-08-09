@@ -12,8 +12,31 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def _camera_index_default() -> int:
+    """카메라 인덱스. `STATION_CAMERA_INDEX` 로 덮어쓴다.
+
+    ⚠️ **이 값은 PC 를 옮기거나 USB 를 다시 꽂으면 바뀐다.** 실측 이력:
+    2026-07-22 에는 1 이 USB 카메라였는데, 2026-08-09 에 다시 재보니 **0 이 USB,
+    1 이 노트북 내장 캠**이었다. 그동안 코드 기본값이 1 -> 0 -> 1 로 왔다 갔다 했고
+    그때마다 "왜 내장 캠이 켜지지" 를 다시 알아냈다.
+
+    값을 또 뒤집는 대신 환경변수로 뺀다 — **코드를 고치지 않고 그 자리에서** 맞춘다.
+    어느 인덱스가 어느 카메라인지는 `python -m station.serve --probe` 가 인덱스별로
+    사진을 저장하니 눈으로 가른다.
+    """
+    raw = os.environ.get("STATION_CAMERA_INDEX", "").strip()
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"STATION_CAMERA_INDEX={raw!r} — 정수여야 한다 (--probe 로 확인)") from None
 
 # `ai/` 루트. 이 파일이 `ai/src/station/config.py` 이므로 parents[2] 가 `ai/` 다.
 # 모델·데이터 경로를 여기 기준으로 잡아 **실행 위치와 무관하게** 동작시킨다.
@@ -39,13 +62,10 @@ class StationConfig:
     station_id: str = "station-1"
 
     # --- 카메라 ---
-    # 이 PC에는 내장 캠과 BRIO가 함께 있어 인덱스가 섞일 수 있다. 실측(2026-07-22):
-    # index 1이 BRIO였음. 장치 구성이 바뀌면 `python -m station.serve --probe`로 재확인.
-    #
-    # ⚠️ 2026-08-06에 이 값이 **0으로 바뀐 채 주석만 1로 남아** 있었다(43fa010,
-    # "Refactor forklift teleop protocol" — 제목에 스테이션이 없어 안 보였다).
-    # 0은 내장 캠이라 측정이 엉뚱한 화면을 잰다. **주석과 값이 어긋나면 값을 의심할 것.**
-    camera_index: int = 1
+    # 이 PC에는 내장 캠과 USB 카메라가 함께 있어 인덱스가 섞인다.
+    # **2026-08-09 실측: 0 = USB 카메라, 1 = 내장 캠** (--probe 사진으로 확인).
+    # 07-22에는 반대였다 — 고정된 값이 아니므로 `STATION_CAMERA_INDEX`로 덮어쓴다.
+    camera_index: int = field(default_factory=_camera_index_default)
     frame_width: int = 1920    # 캘리브레이션 기준 해상도 — 바꾸면 fx/fy 무효
     frame_height: int = 1080
     warmup_frames: int = 25    # 자동 노출 안정화 전 프레임은 어둡다 (실측)

@@ -3,7 +3,9 @@
 import { useEffect } from "react"
 import { ArrowLeft, Expand, Loader2, RefreshCw, Video, VideoOff } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AI_MEASUREMENT_STREAM_KIND } from "@/lib/config/aiMeasurement"
 import { toBoxRects, type MeasurementBox } from "@/lib/monitoring/measurementBox"
+import { streamKind } from "@/lib/monitoring/streamKind"
 import { toTippingBadge } from "@/lib/monitoring/tippingLevel"
 
 export type AiVideoConnectionStatus = "CONNECTING" | "CONNECTED" | "DISCONNECTED" | "ERROR"
@@ -78,6 +80,8 @@ export function AiMeasurementVideo({
 
   const boxRects = toBoxRects(boxes, frameWidth, frameHeight)
   const tipping = toTippingBadge(tippingLevel)
+  // MJPEG 이냐 재생 페이지냐에 따라 그리는 요소가 다르다(streamKind.ts 주석 참고).
+  const kind = streamKind(streamUrl, AI_MEASUREMENT_STREAM_KIND)
   const status = STATUS_STYLE[connectionStatus]
   const showStream = active && Boolean(streamUrl)
 
@@ -166,7 +170,31 @@ export function AiMeasurementVideo({
           pip && "aspect-video flex-none",
         )}
       >
-        {showStream ? (
+        {showStream && kind === "mjpeg" ? (
+          /*
+           * MJPEG 송출(`multipart/x-mixed-replace`)은 **`<img>` 로 그린다.**
+           *
+           * ⚠️ **iframe 으로 그리면 화면은 나오는데 "연결 중"에서 영영 안 벗어난다**
+           *    (2026-08-09 실측). 스트림은 응답이 끝나지 않으므로 iframe 의 `load` 가
+           *    발생하지 않고, 아래 "연결 대기" 오버레이가 영상을 계속 덮는다.
+           *    `<img>` 는 첫 프레임에서 `load` 가 뜬다.
+           *
+           * `key={retryKey}` 로 다시 만들어야 재연결이 된다 — 같은 src 를 다시 넣는
+           * 것만으로는 브라우저가 요청을 새로 보내지 않는다.
+           */
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={retryKey}
+            src={streamUrl ?? undefined}
+            alt="화물·팔레트 AI 측정 카메라 실시간 영상"
+            className="absolute inset-0 size-full object-contain"
+            onLoad={() => {
+              onConnectionStatusChange("CONNECTED")
+              onFrameLoaded?.(new Date().toISOString())
+            }}
+            onError={() => onConnectionStatusChange("ERROR")}
+          />
+        ) : showStream ? (
           /*
            * MediaMTX 의 WebRTC 재생 페이지를 그대로 띄운다(Orin 카메라 → ffmpeg H.264 → RTSP →
            * MediaMTX → WebRTC/UDP). URL 이 없으면 요소 자체를 만들지 않는다.

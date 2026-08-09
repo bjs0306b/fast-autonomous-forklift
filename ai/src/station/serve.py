@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -30,6 +31,7 @@ _AI_ROOT = Path(__file__).resolve().parents[2]
 import cv2  # noqa: E402
 
 from perception.tfnova import Measurement, MeasurementUnreliable, TfNova  # noqa: E402
+from station import livestream  # noqa: E402
 from station.config import StationConfig  # noqa: E402
 from station.detector import OnnxDetector  # noqa: E402
 from station.pipeline import build_payload  # noqa: E402
@@ -248,6 +250,60 @@ def release_session(abandon: bool = False) -> int:
     return 0
 
 
+def run_stream_only(args) -> int:
+    """카메라 화면만 내보낸다 — MQTT 도 측정도 하지 않는다.
+
+    `--listen` 은 브로커 연결이 필수라 자격증명이 없으면 뜨지도 않는다. 그런데
+    "관제 화면에 측정 카메라가 보이는가"는 그와 **별개로 확인해야 하는 것**이라
+    이 모드를 둔다. 카메라·방화벽·주소를 측정 체인과 분리해서 가를 수 있다.
+
+    ⚠️ **이게 카메라를 쥐고 있으면 측정은 못 한다.** 시연 본편은
+    `--listen --publish --stream-port` 로 한 프로세스가 둘 다 한다.
+    """
+    cfg = StationConfig()
+    port = args.stream_port or livestream.DEFAULT_PORT
+    cap = cv2.VideoCapture(cfg.camera_index, capture_backend())
+    if not cap.isOpened():
+        print(f"카메라 index {cfg.camera_index} 안 열림 — 다른 창(라이브 뷰·측정)이 "
+              f"물고 있는지 확인 (--probe)", file=sys.stderr)
+        return 1
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
+    for _ in range(cfg.warmup_frames):
+        cap.read()
+
+    bus = livestream.FrameBus()
+    bus.describe(f"index {cfg.camera_index} {cfg.frame_width}x{cfg.frame_height}")
+    stop = threading.Event()
+    thread = livestream.CaptureThread(cap, bus, stop)
+    thread.start()
+    try:
+        server = livestream.start_server(bus, port=port, stream_width=args.stream_width)
+    except OSError as e:
+        print(f"❌ 포트 {port} 열기 실패 — {e}", file=sys.stderr)
+        stop.set()
+        thread.join(timeout=2.0)
+        cap.release()
+        return 1
+
+    print(f"송출 중 — http://<이 PC>:{port}/stream  (폭 {args.stream_width}px)")
+    print(f"  확인: http://127.0.0.1:{port}/health · /snapshot")
+    print("  ⚠️ 측정은 못 한다(카메라 배타). Ctrl-C로 종료", flush=True)
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n종료", flush=True)
+    finally:
+        # 캡처 스레드를 먼저 세운다 — read() 안에 있는 채로 release 하면 카메라가
+        # 깨끗이 반납되지 않아 다음 실행이 실패할 수 있다.
+        stop.set()
+        thread.join(timeout=2.0)
+        server.shutdown()
+        cap.release()
+    return 0
+
+
 def check_wiring(args) -> int:
     """시연 전 점검 — 측정하지 않고 연결만 확인한다 (`--check`).
 
@@ -386,6 +442,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-measurements", type=int, default=0,
                         help="--listen 전용. N건 측정 후 종료(0=무한). "
                              "리허설·검증용 — 한 번만 돌려보고 로그를 확인할 때 쓴다")
+    parser.add_argument("--stream-port", type=int, nargs="?",
+                        const=livestream.DEFAULT_PORT, default=None,
+                        help=f"--listen 전용. 측정 카메라 화면을 MJPEG 으로 송출한다"
+                             f"(기본 포트 {livestream.DEFAULT_PORT}). 관제 화면의 "
+                             f"'AI 측정 영상' 패널이 이 주소를 본다. "
+                             f"⚠️ 별도 송출 서버를 띄우면 카메라를 뺏겨 측정이 실패하므로 "
+                             f"여기서 함께 내보낸다")
+    parser.add_argument("--stream-width", type=int, default=livestream.DEFAULT_STREAM_WIDTH,
+                        help="송출 폭(px). 측정은 원본 해상도로 하고 화면만 줄인다")
+    parser.add_argument("--stream-only", action="store_true",
+                        help="송출만 한다 — MQTT·측정 없이 카메라 화면만 내보낸다. "
+                             "브로커 자격증명 없이 관제 화면을 띄워보거나 카메라를 "
+                             "확인할 때 쓴다. ⚠️ 이게 카메라를 쥐고 있으면 측정은 "
+                             "못 한다(시연 본편은 --listen --stream-port)")
     args = parser.parse_args(argv)
 
     if args.probe:
@@ -395,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
         return release_session(abandon=args.abandon)
     if args.check:
         return check_wiring(args)
+    if args.stream_only:
+        return run_stream_only(args)
     if not (args.once or args.listen):
         parser.error("--once(1회) 또는 --listen(상시 대기) 또는 --probe 를 지정하세요")
     if args.listen and not args.publish:
@@ -636,9 +708,40 @@ def main(argv: list[str] | None = None) -> int:
     for _ in range(cfg.warmup_frames):
         cap.read()
 
+    # **카메라를 쥔 쪽이 송출도 한다.** 별도 송출 서버를 띄우면 그쪽이 카메라를 물어
+    # 트리거가 와도 측정을 못 한다(윈도우·리눅스 둘 다 배타적). 그래서 캡처를 상시
+    # 스레드로 돌리고 측정·송출이 같은 프레임을 나눠 본다.
+    #
+    # 상시 캡처는 송출이 없어도 이득이다 — 열어둔 채 오래 쉬면 드라이버 버퍼에 낡은
+    # 프레임이 남아 첫 read() 가 몇 분 전 장면을 돌려줄 수 있다.
+    bus = livestream.FrameBus()
+    bus.describe(f"index {cfg.camera_index} {cfg.frame_width}x{cfg.frame_height}")
+    stop_capture = threading.Event()
+    capture_thread = livestream.CaptureThread(cap, bus, stop_capture)
+    capture_thread.start()
+
+    stream_server = None
+    if args.stream_port:
+        try:
+            stream_server = livestream.start_server(
+                bus, port=args.stream_port, stream_width=args.stream_width)
+            print(f"[listen] 송출 http://<이 PC>:{args.stream_port}/stream "
+                  f"(폭 {args.stream_width}px · /health 로 상태 확인)", flush=True)
+        except OSError as e:
+            # 포트가 이미 쓰이면 조용히 넘어가지 않는다 — 관제 화면이 "연결 대기"로
+            # 남는데 왜인지 알 길이 없다.
+            print(f"[listen] ❌ 송출 포트 {args.stream_port} 열기 실패 — {e}",
+                  file=sys.stderr)
+            stop_capture.set()
+            cap.release()
+            trigger.__exit__(None, None, None)
+            return 1
+
     def grab():
-        ok, f = cap.read()
-        return f if ok else None
+        # 같은 프레임을 두 번 돌려주면 정지 판정의 프레임 차가 0 이라 늘 "멎었다"가
+        # 된다 — 흔들리는 중에도 통과한다. 그래서 새 프레임을 기다린다.
+        frame, grab.seq = bus.next(getattr(grab, "seq", -1))
+        return frame
 
     print(f"상시 모드 — {args.topic} 대기 중. Ctrl-C로 종료", flush=True)
     measured: set[str] = set()
@@ -696,6 +799,12 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\n종료", flush=True)
     finally:
+        # 캡처 스레드를 먼저 세운다 — cap.read() 안에 들어가 있는 채로 release 하면
+        # 카메라가 깨끗이 반납되지 않아 다음 실행이 "열 수 없음"으로 실패할 수 있다.
+        stop_capture.set()
+        capture_thread.join(timeout=2.0)
+        if stream_server is not None:
+            stream_server.shutdown()
         cap.release()
     return 0
 
