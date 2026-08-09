@@ -1,7 +1,9 @@
 "use client"
 
-import { Ban, Loader2, OctagonAlert } from "lucide-react"
+import { Ban, CirclePlay, Rocket, Loader2, OctagonAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { ControlVehicleView } from "@/lib/api/operationApi"
+import { dispatchBlockReason, toCycleDisplay } from "@/lib/monitoring/cyclePhase"
 import { formatClockTime, formatNumber } from "@/lib/format"
 import { useNow } from "@/hooks/useNow"
 import {
@@ -28,17 +30,30 @@ import { SelectedVehicleInfoPanel } from "./SelectedVehicleInfoPanel"
  */
 export function VehicleDetailPanel({
   vehicle,
+  control,
+  onStart,
   onStop,
+  onResume,
   onEmergencyStop,
   stopPending = false,
+  resumePending = false,
+  startPending = false,
   emergencyStopPending = false,
   className,
 }: {
   vehicle: DashboardVehicle | null
+  /** 관제 주기 상태. 관제가 꺼져 있으면 null 이고 관련 칸이 전부 숨는다 */
+  control?: ControlVehicleView | null
+  onStart?: (vehicleId: string) => void
   onStop?: (vehicleId: string) => void
+  onResume?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
   /** 이 차량의 일반 정지 요청이 진행 중인지(중복 클릭 방지) */
   stopPending?: boolean
+  /** 이 차량의 재개 요청이 진행 중인지(중복 클릭 방지) */
+  resumePending?: boolean
+  /** 이 차량의 출발 요청이 진행 중인지(중복 클릭 방지) */
+  startPending?: boolean
   /** 이 차량의 비상정지 요청이 진행 중인지(중복 클릭 방지) */
   emergencyStopPending?: boolean
   className?: string
@@ -59,9 +74,14 @@ export function VehicleDetailPanel({
           갈아 끼우면 어떤 항목이 있는지조차 안 보여, 차량을 고른 뒤에야 화면 구조를 알게 된다. */}
       <VehicleDetailContent
         vehicle={vehicle}
+        control={control}
+        onStart={onStart}
         onStop={onStop}
+        onResume={onResume}
         onEmergencyStop={onEmergencyStop}
         stopPending={stopPending}
+        resumePending={resumePending}
+        startPending={startPending}
         emergencyStopPending={emergencyStopPending}
       />
     </section>
@@ -70,16 +90,26 @@ export function VehicleDetailPanel({
 
 function VehicleDetailContent({
   vehicle,
+  control,
+  onStart,
   onStop,
+  onResume,
   onEmergencyStop,
   stopPending,
+  resumePending,
+  startPending,
   emergencyStopPending,
 }: {
   /** null 이면 아직 아무 차량도 클릭하지 않은 상태다. 모든 값이 "-" 로 표시된다. */
   vehicle: DashboardVehicle | null
+  control?: ControlVehicleView | null
+  onStart?: (vehicleId: string) => void
   onStop?: (vehicleId: string) => void
+  onResume?: (vehicleId: string) => void
   onEmergencyStop?: (vehicleId: string) => void
   stopPending: boolean
+  resumePending: boolean
+  startPending: boolean
   emergencyStopPending: boolean
 }) {
   const loc = vehicle?.location
@@ -104,9 +134,15 @@ function VehicleDetailContent({
   const alreadyEstopped = vehicle?.status === "ESTOP"
   // 선택된 차량이 없으면 보낼 대상이 없다. 제어 버튼은 비활성이어야 한다 —
   // 활성인 채로 두면 "어느 차량을 세우는 건지" 모르는 명령이 나갈 수 있다.
-  const stopDisabled = !vehicle || stopPending || emergencyStopPending || !onStop
-  const estopDisabled =
-    !vehicle || alreadyEstopped || emergencyStopPending || stopPending || !onEmergencyStop
+  const busy = stopPending || emergencyStopPending || resumePending || startPending
+  // 버튼은 감추지 않는다 — 안 보이면 왜 없는지 알 수 없다. 비활성 + 이유 표시로 간다.
+  const startBlockReason = vehicle ? dispatchBlockReason(control) : "차량을 선택해 주세요"
+  const startDisabled = !vehicle || busy || !onStart || startBlockReason !== null
+  const stopDisabled = !vehicle || busy || !onStop
+  // 재개는 "지금 서 있는가"와 무관하게 열어 둔다. 차량이 HOLDING 을 아직 보고하지 않은
+  // 짧은 사이에 버튼이 잠기면, 정작 세워 놓고 못 푸는 순간이 생긴다.
+  const resumeDisabled = !vehicle || busy || !onResume
+  const estopDisabled = !vehicle || alreadyEstopped || busy || !onEmergencyStop
   const estopLabel = emergencyStopPending
     ? "명령 전송 중..."
     : alreadyEstopped
@@ -121,6 +157,10 @@ function VehicleDetailContent({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
         {/* ID · 상태 · 화물 높이 · 적재 여부를 반응형 핵심 그리드로 한 번만 표시한다. */}
         <SelectedVehicleInfoPanel vehicle={vehicle} />
+
+        {/* 관제 주기 상태. 관제가 꺼져 있으면(control=null) 아무것도 렌더링되지 않아
+            기존 화면이 그대로 유지된다. */}
+        <CycleStatusRow control={vehicle ? control : null} />
 
         {/* 실패 원인은 스크롤 영역 최상단에 둔다 — 작업자가 가장 먼저 봐야 할 정보다.
             실패가 없거나 차량 미선택이면 아무것도 렌더링되지 않아 기존 레이아웃이 그대로 유지된다. */}
@@ -168,7 +208,31 @@ function VehicleDetailContent({
       </div>
 
       {/* 제어 버튼은 스크롤 영역 밖의 고정 행이다. */}
+      {/* 정지 두 개 옆에 재개를 나란히 둔다 — 세우는 길만 있고 푸는 길이 없으면
+          관제 화면에서 한 번 세운 차를 브로커에 직접 쏘지 않고는 살릴 수 없다. */}
       <div className="mt-2 grid shrink-0 grid-cols-1 gap-1.5 border-t border-slate-800 pt-2 sm:grid-cols-2">
+        <button
+            type="button"
+            onClick={() => vehicle && onStart?.(vehicle.vehicleId)}
+            disabled={startDisabled}
+            aria-label={vehicle ? `${vehicle.vehicleId} 차량 출발` : "차량 출발 (차량 미선택)"}
+            aria-busy={startPending}
+            data-testid="selected-vehicle-start-button"
+            title={startBlockReason ?? undefined}
+            className={cn(
+              "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:outline-none",
+              startDisabled
+                ? "cursor-not-allowed border-slate-700 bg-slate-800/50 text-slate-500"
+                : "border-sky-500/50 bg-sky-950/40 text-sky-100 hover:bg-sky-900/50",
+            )}
+          >
+            {startPending ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Rocket className="size-4" aria-hidden="true" />
+            )}
+            {startPending ? "출발 명령 전송 중" : "출발"}
+          </button>
         <button
           type="button"
           onClick={() => vehicle && onStop?.(vehicle.vehicleId)}
@@ -189,6 +253,27 @@ function VehicleDetailContent({
             <Ban className="size-4" aria-hidden="true" />
           )}
           {stopPending ? "정지 명령 전송 중" : "일반 정지"}
+        </button>
+        <button
+          type="button"
+          onClick={() => vehicle && onResume?.(vehicle.vehicleId)}
+          disabled={resumeDisabled}
+          aria-label={vehicle ? `${vehicle.vehicleId} 차량 재개` : "차량 재개 (차량 미선택)"}
+          aria-busy={resumePending}
+          data-testid="selected-vehicle-resume-button"
+          className={cn(
+            "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:outline-none",
+            resumeDisabled
+              ? "cursor-not-allowed border-slate-700 bg-slate-800/50 text-slate-500"
+              : "border-emerald-500/50 bg-emerald-950/40 text-emerald-100 hover:bg-emerald-900/50",
+          )}
+        >
+          {resumePending ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <CirclePlay className="size-4" aria-hidden="true" />
+          )}
+          {resumePending ? "재개 명령 전송 중" : "재개"}
         </button>
         <button
           type="button"
@@ -248,6 +333,86 @@ const TONE_STYLE: Record<FieldTone, { container: string; value: string; badge: s
  * 그래서 여기서는 각 축을 `whitespace-nowrap` 으로 묶고 `flex-wrap` 으로 흘린다 — 칸이 넓으면
  * 한 줄에, 좁으면 X/Y 가 두 줄로 나뉘어 <b>어느 쪽도 잘리지 않는다.</b>
  */
+/**
+ * 관제 주기 상태 한 줄 — 단계 · 목표 · 처리량, 그리고 <b>멈춰 있으면 그 이유</b>.
+ *
+ * <p>이게 없으면 화면에서 멈춘 차가 전부 「대기」로 똑같이 보인다. 그런데 멈춘 이유는 셋이고
+ * 대응이 다르다 — 합류 순서를 기다리는 중(정상), 사람이 세운 것, 연결이 끊긴 것.
+ *
+ * <p>관제가 꺼져 있으면 아무것도 그리지 않는다. 빈 칸을 남기면 "값이 안 온다"로 읽힌다.
+ */
+function CycleStatusRow({ control }: { control?: ControlVehicleView | null }) {
+  const display = toCycleDisplay(control)
+  const hasAnything =
+    display.phaseLabel ||
+    display.target ||
+    display.cyclesLabel ||
+    display.standbyReason ||
+    display.stepLabel
+  if (!hasAnything) {
+    return null
+  }
+
+  return (
+    <div
+      className="rounded-md border border-slate-700 bg-slate-900/40 px-2 py-1.5"
+      data-testid="vehicle-cycle-status"
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {display.phaseLabel ? (
+          <span className="flex items-center gap-1">
+            <span className="text-slate-400">단계</span>
+            <span
+              className={cn(
+                "font-medium",
+                display.driving ? "text-emerald-200" : "text-slate-300",
+              )}
+              data-testid="vehicle-cycle-phase"
+            >
+              {display.phaseLabel}
+            </span>
+          </span>
+        ) : null}
+
+        {/* 절차는 단계 안에서 지금 뭘 하는지다 — "정렬 중" 단계에서 실제로 정렬이
+            돌고 있는지(align)를 구별해 준다. 시뮬만 보내므로 실물에서는 안 보인다. */}
+        {display.stepLabel ? (
+          <span
+            className="rounded bg-sky-500/15 px-1.5 py-0.5 font-medium text-sky-200"
+            data-testid="vehicle-cycle-step"
+          >
+            {display.stepLabel}
+          </span>
+        ) : null}
+
+        {display.target ? (
+          <span className="flex items-center gap-1">
+            <span className="text-slate-400">목표</span>
+            <span className="font-mono font-medium text-slate-200">{display.target}</span>
+          </span>
+        ) : null}
+
+        {display.cyclesLabel ? (
+          <span className="flex items-center gap-1">
+            <span className="text-slate-400">처리</span>
+            <span className="font-mono font-medium text-slate-200">{display.cyclesLabel}</span>
+          </span>
+        ) : null}
+
+        {/* 멈춘 이유는 가장 눈에 띄어야 한다 — 발표 중 뭔가 안 움직이면 제일 먼저 볼 값이다. */}
+        {display.standbyReason ? (
+          <span
+            className="rounded bg-amber-500/15 px-1.5 py-0.5 font-medium text-amber-200"
+            data-testid="vehicle-cycle-standby"
+          >
+            {display.standbyReason}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function PositionField({
   xText,
   yText,
