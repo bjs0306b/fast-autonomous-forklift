@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { ArrowLeft, Expand, Loader2, RefreshCw, Video, VideoOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AI_MEASUREMENT_STREAM_KIND } from "@/lib/config/aiMeasurement"
@@ -73,15 +73,48 @@ export function AiMeasurementVideo({
   onRetry?: () => void
   className?: string
 }) {
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  // MJPEG 이냐 재생 페이지냐에 따라 그리는 요소가 다르다(streamKind.ts 주석 참고).
+  // ⚠️ 아래 이펙트의 의존성 배열이 렌더 중에 읽으므로 **이펙트보다 먼저** 선언해야 한다.
+  const kind = streamKind(streamUrl, AI_MEASUREMENT_STREAM_KIND)
+
   useEffect(() => {
     if (!active) return
     onConnectionStatusChange(streamUrl ? "CONNECTING" : "DISCONNECTED")
   }, [active, onConnectionStatusChange, retryKey, streamUrl])
 
+  /*
+   * MJPEG 은 `onLoad` 만 믿으면 안 된다.
+   *
+   * ⚠️ **이미지가 React 가 핸들러를 붙이기 전에 이미 로드돼 있으면 `load` 이벤트가
+   *    이미 지나가 버려 영영 안 온다**(2026-08-09 실측: `<img>` 는 960x540 으로
+   *    그려져 있는데 패널은 "연결 중"에서 멈춰 있었다). 캐시된 프레임이나 빠른
+   *    로컬 네트워크에서 잘 일어난다.
+   *
+   * 그래서 이벤트 대신 **실제 상태**(`naturalWidth > 0`)를 확인한다. 한 번 보고
+   * 아직이면 짧은 주기로 다시 본다 — 이벤트가 오면 그쪽이 먼저 끝낸다.
+   */
+  useEffect(() => {
+    if (!active || !streamUrl || kind !== "mjpeg") return
+    if (connectionStatus === "CONNECTED") return
+
+    const check = () => {
+      const el = imgRef.current
+      if (!el || el.naturalWidth <= 0) return false
+      onConnectionStatusChange("CONNECTED")
+      onFrameLoaded?.(new Date().toISOString())
+      return true
+    }
+    if (check()) return
+    const timer = setInterval(() => {
+      if (check()) clearInterval(timer)
+    }, 500)
+    return () => clearInterval(timer)
+  }, [active, streamUrl, kind, connectionStatus, retryKey,
+      onConnectionStatusChange, onFrameLoaded])
+
   const boxRects = toBoxRects(boxes, frameWidth, frameHeight)
   const tipping = toTippingBadge(tippingLevel)
-  // MJPEG 이냐 재생 페이지냐에 따라 그리는 요소가 다르다(streamKind.ts 주석 참고).
-  const kind = streamKind(streamUrl, AI_MEASUREMENT_STREAM_KIND)
   const status = STATUS_STYLE[connectionStatus]
   const showStream = active && Boolean(streamUrl)
 
@@ -185,6 +218,7 @@ export function AiMeasurementVideo({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={retryKey}
+            ref={imgRef}
             src={streamUrl ?? undefined}
             alt="화물·팔레트 AI 측정 카메라 실시간 영상"
             className="absolute inset-0 size-full object-contain"
