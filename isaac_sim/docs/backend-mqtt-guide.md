@@ -203,6 +203,8 @@ QoS 는 명령류 **1**, telemetry 구독은 **0** 을 권합니다.
   "loaded": true,
   "cargoId": "C0007",
   "cargo":  { "id": "C0007", "w": 0.75, "d": 0.91, "h": 1.11 },
+  "busy": true,
+  "step": "dock",
   "state": "UNLOADING",
   "taskId": "T-1042",
   "battery": 100.0
@@ -222,6 +224,8 @@ QoS 는 명령류 **1**, telemetry 구독은 **0** 을 권합니다.
 | `cargoId` | string \| null | 화물 식별자 |
 | **`cargo`** | object \| null | **신규** — 화물 크기. 미소지 시 `null` |
 | `cargo.w` `d` `h` | float | 가로·세로·**전체 높이**(파레트 포함) |
+| **`busy`** | bool | **절차(정렬·도킹·적재) 수행 중인가.** 단계 전환은 이걸로 판정 |
+| **`step`** | string | 지금 수행 중인 절차 이름 (`align` `fork` `dock` `place` …) |
 | `state` | string | 아래 표 |
 | `taskId` | string \| null | 수행 중인 task |
 | `battery` | float | 0~100 |

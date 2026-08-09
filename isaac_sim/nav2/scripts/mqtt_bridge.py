@@ -524,6 +524,11 @@ class MqttBridge(Node):
                 # 싣고 있는 화물의 크기. 없으면 null.
                 # 좌표와 같은 눈금을 쓴다(POSE_SCALE).
                 "cargo": _scale_cargo(body.get("cargo")),
+                # 차량이 절차(정렬·도킹·적재)를 수행 중인가.
+                # 관제가 단계를 넘길 때 이걸 봐야 한다. state 만 보면
+                # 지시 직후 아직 반영되기 전이라 오판한다.
+                "busy": bool(body.get("mission", False)),
+                "step": body.get("step", ""),
                 "state": state,
                 "taskId": v["task_id"],
                 "battery": 100.0,
