@@ -530,9 +530,14 @@ export default function MonitoringPage() {
                     active={activeSlide === 0}
                     pip
                     retryKey={aiVideoRetryKey}
-                    boxes={lastMeasurement?.boxes}
-                    frameWidth={lastMeasurement?.frameWidth}
-                    frameHeight={lastMeasurement?.frameHeight}
+                    /*
+                     * 검출 상자는 **송출 영상에 이미 그려져 있다**(측정 PC 가 매 프레임
+                     * 추론해 얹는다). 여기서 또 그리면 같은 물체에 두 벌이 겹친다.
+                     *
+                     * 그리고 이쪽 좌표는 **측정 시점에 고정**이라 그 뒤 화물이 움직이면
+                     * 어긋난 자리에 남는다 — 영상은 지금 모습인데 상자만 과거다.
+                     * 되살리려면 측정 PC 의 `--stream-infer-fps 0` 과 함께 쓸 것.
+                     */
                     tippingLevel={lastMeasurement?.tippingLevel}
                     onConnectionStatusChange={setAiVideoStatus}
                     onFrameLoaded={setLastAiFrameReceivedAt}
@@ -569,9 +574,7 @@ export default function MonitoringPage() {
             fullscreen
             retryKey={aiVideoRetryKey}
             lastFrameReceivedAt={lastAiFrameReceivedAt}
-            boxes={lastMeasurement?.boxes}
-            frameWidth={lastMeasurement?.frameWidth}
-            frameHeight={lastMeasurement?.frameHeight}
+            /* 검출 상자를 안 넘기는 이유는 위 PIP 쪽 주석 참고(송출 영상에 이미 그려져 있다). */
             tippingLevel={lastMeasurement?.tippingLevel}
             onConnectionStatusChange={setAiVideoStatus}
             onFrameLoaded={setLastAiFrameReceivedAt}
