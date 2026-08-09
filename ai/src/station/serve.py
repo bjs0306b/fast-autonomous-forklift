@@ -496,10 +496,11 @@ def main(argv: list[str] | None = None) -> int:
                              f"여기서 함께 내보낸다")
     parser.add_argument("--stream-width", type=int, default=livestream.DEFAULT_STREAM_WIDTH,
                         help="송출 폭(px). 측정은 원본 해상도로 하고 화면만 줄인다")
-    parser.add_argument("--stream-infer-fps", type=float, default=3.0,
-                        help="송출 화면에 검출 상자를 그리는 주기(fps). 0이면 원본만 "
-                             "내보낸다. ⚠️ 표시 전용이고 백엔드로 안 간다 — 저장되는 "
-                             "측정은 트리거 시점 한 번뿐이다")
+    parser.add_argument("--stream-infer-fps", type=float, default=0.0,
+                        help="송출 화면에 검출 상자를 그리는 주기(fps). **기본 0(끔)** — "
+                             "관제 화면이 측정 결과로 상자를 이미 그리므로 켜면 두 벌이 "
+                             "겹쳐 보인다. 관제 화면 없이 카메라만 볼 때(--stream-only) "
+                             "쓴다. ⚠️ 켜도 표시 전용이고 백엔드로 가지 않는다")
     parser.add_argument("--stream-only", action="store_true",
                         help="송출만 한다 — MQTT·측정 없이 카메라 화면만 내보낸다. "
                              "브로커 자격증명 없이 관제 화면을 띄워보거나 카메라를 "
