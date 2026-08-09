@@ -171,6 +171,44 @@ Visualization Manager:
       Color: 255; 255; 0
       Alpha: 1
 
+    # 주행이 멈추면 이유가 최소 넷이다(가드·플래너·컨트롤러·브리지). 밖에서는
+    # 넷이 똑같이 "안 움직인다" 로 보이므로, debug_hud 가 차 위에 여섯 줄로
+    # 모아 띄운다. 원격 RViz 에서 이것 하나가 점군 전부보다 답을 많이 준다.
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 상태 HUD
+      Enabled: true
+      Topic:
+        Value: /debug/hud
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+
+    # 플래너가 낸 경로. 0점이면 플래너, 있는데 안 가면 컨트롤러다.
+    - Class: rviz_default_plugins/Path
+      Name: 전역 경로 /plan
+      Enabled: true
+      Topic:
+        Value: /plan
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Color: 0; 255; 0
+      Line Style: Lines
+      Alpha: 1
+
+    # 컨트롤러가 실제로 따라가는 궤적. 전역 경로와 크게 어긋나면 추종 실패다.
+    - Class: rviz_default_plugins/Path
+      Name: 지역 경로 /local_plan
+      Enabled: true
+      Topic:
+        Value: /local_plan
+        Depth: 1
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Color: 255; 0; 255
+      Line Style: Lines
+      Alpha: 1
+
     - Class: rviz_default_plugins/Odometry
       Name: EKF odometry
       Enabled: false
