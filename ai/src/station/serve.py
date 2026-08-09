@@ -170,6 +170,59 @@ def read_distance(cfg: StationConfig) -> Measurement | None:
         return None
 
 
+class DistanceSource:
+    """TF-Nova 를 **한 곳에서만** 열어 측정과 송출 패널이 나눠 쓴다.
+
+    ⚠️ **COM 포트는 배타적이다.** 송출 패널이 거리를 보여주려고 따로 열면, 트리거가
+    떨어진 순간 측정이 포트를 못 열어 실패한다(라이브 뷰와 측정을 동시에 못 돌리는
+    것과 같은 제약). 그래서 포트를 계속 쥐고 있는 주인을 하나 두고 잠금으로 나눈다.
+
+    센서가 없거나 못 열면 `None` 을 돌려준다 — 화면은 그 사실을 그대로 보여주고
+    (`status: unreliable`), 거리를 지어내지 않는다.
+    """
+
+    def __init__(self, cfg: StationConfig) -> None:
+        self._cfg = cfg
+        self._lock = threading.Lock()
+        self._sensor = None
+        self._failed = False
+
+    def _ensure(self):
+        if self._sensor is None and not self._failed:
+            try:
+                self._sensor = TfNova(self._cfg.tfnova_port).__enter__()
+                print(f"[거리계] {self._cfg.tfnova_port} 열림 — 측정·송출이 함께 쓴다",
+                      flush=True)
+            except Exception as e:
+                self._failed = True
+                print(f"[거리계] ⚠️ {self._cfg.tfnova_port} 못 엶({e}) — 거리 없이 간다",
+                      file=sys.stderr, flush=True)
+        return self._sensor
+
+    def measure(self, seconds: float | None = None) -> Measurement | None:
+        cfg = self._cfg
+        with self._lock:
+            sensor = self._ensure()
+            if sensor is None:
+                return None
+            try:
+                return sensor.measure(seconds if seconds is not None else cfg.tfnova_seconds,
+                                      scale=cfg.tfnova_scale,
+                                      offset_cm=cfg.tfnova_offset_cm)
+            except MeasurementUnreliable:
+                # 빔이 잠깐 빗나가는 건 흔하다. 패널은 그 사실을 보여주면 된다.
+                return None
+            except Exception as e:
+                print(f"[거리계] 오류 {e}", file=sys.stderr, flush=True)
+                return None
+
+    def close(self) -> None:
+        with self._lock:
+            if self._sensor is not None:
+                self._sensor.__exit__(None, None, None)
+                self._sensor = None
+
+
 def probe_cameras(max_index: int = 3) -> None:
     for idx in range(max_index):
         cap = cv2.VideoCapture(idx, capture_backend())
@@ -273,52 +326,55 @@ def make_detector(args, cfg: StationConfig):
     )
 
 
-def make_stream_summary(cfg: StationConfig):
+def make_stream_summary(cfg: StationConfig, distance_source: "DistanceSource | None" = None):
     """송출 패널 문구를 만드는 함수를 돌려준다.
 
-    **거리계가 없어도 되는 항목만 낸다** — 전복 등급·편하중·돌출은 파렛트 대비
-    비율이라 기하만으로 나온다. 반면 **치수(W/H)는 거리에 비례**하므로 여기서 내지
-    않는다. 예전에 라이브 뷰가 고정 150cm 로 치수를 그려 **틀린 값이 그럴듯하게**
-    보인 적이 있다(CLAUDE.md 측정 조건). 치수는 측정 때만 낸다.
-    """
-    from perception.load_balance import assess_load
-    from station import tipping as tipping_mod
+    **라이브 뷰(`annotate.py`)와 같은 줄을 같은 순서로** 그린다 — 발표에서 두 화면이
+    다르게 보이면 어느 쪽이 진짜인지 설명해야 한다.
 
+    ⚠️ **치수는 거리계 값이 있을 때만 나온다.** 거리에 비례하는 값이라, 없을 때 고정
+    150cm 같은 걸 끼워 넣으면 **틀린 치수가 그럴듯하게** 표시된다(CLAUDE.md 측정 조건에
+    적힌 실패 사례). 거리계가 없으면 `build_payload` 가 `unreliable` 로 내고 치수 줄이
+    통째로 빠진다 — 그 상태 그대로 보여준다.
+    """
     level_color = {"safe": (80, 200, 80), "warning": (0, 200, 255), "danger": (60, 60, 255)}
+    white, grey = (240, 240, 240), (190, 190, 190)
 
     def summarize(dets) -> list:
-        boxes = [d.box for d in dets
-                 if d.label == "box" and d.score >= cfg.threshold_for("box")]
-        pallets = [d for d in dets
-                   if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
-        lines = [(f"boxes {len(boxes)}   pallet {'yes' if pallets else 'no'}",
-                  (240, 240, 240))]
-        if not boxes or not pallets:
-            # 왜 나머지가 비었는지 화면에 남긴다 — 빈칸은 "안전"으로 오해된다.
-            lines.append(("tipping: N/A (박스 또는 파렛트 미검출)", (80, 80, 240)))
-            return lines
+        # 표시용이라 짧게 잰다 — 측정용 0.5초를 쓰면 송출 주기가 그만큼 느려진다.
+        distance = distance_source.measure(0.15) if distance_source else None
+        payload = build_payload(dets, distance, cfg, tilt_deg=None)
 
-        pallet = max(pallets, key=lambda d: d.score).box
-        tip = tipping_mod.assess_tipping(boxes, pallet)
+        lines = [(f"status: {payload['status']}", white)]
+        if payload.get("distance"):
+            lines.append((f"distance: {payload['distance']['front_cm']} cm", white))
+        else:
+            lines.append(("distance: 없음 (거리계 미연결·빔 빗나감)", (80, 80, 240)))
+        if payload.get("dimensions"):
+            d = payload["dimensions"]
+            lines.append((f"W {d['width_cm']} x H {d['height_cm']} cm"
+                          f"  (mini {d['miniature_width_mm']} x {d['miniature_height_mm']} mm)",
+                          white))
+        tip = payload.get("tipping") or {}
         if tip.get("assessable"):
             level = tip["level"]
             lines.append((f"TIPPING: {level.upper()}   offset {tip['support_offset']:.0%}"
-                          f"   overhang {tip['overhang']:.0%}",
-                          level_color.get(level, (240, 240, 240))))
-        try:
-            load = assess_load(boxes, pallet, threshold=cfg.eccentric_threshold)
-            state = "ECCENTRIC" if abs(load.ratio_x) > cfg.eccentric_threshold else "BALANCED"
-            lines.append((f"load: {state}  (ratio_x {load.ratio_x:+.3f})", (190, 190, 190)))
-        except Exception:
-            pass
-        # 치수는 거리계가 필요하다 — 여기서 지어내지 않고 그렇다고 알린다.
-        lines.append(("W/H: 측정 시 산출 (거리계 필요)", (170, 170, 170)))
+                          f" of pallet half-width   margin {tip['margin']:.0%}",
+                          level_color.get(level, white)))
+        else:
+            # 빈칸은 "안전"으로 오해된다 — 왜 못 냈는지 적는다.
+            lines.append((f"TIPPING: N/A ({tip.get('reason', '판정 불가')})", (80, 80, 240)))
+        if payload.get("load_balance"):
+            lb = payload["load_balance"]
+            state = ("ECCENTRIC " + "/".join(lb["direction"])) if lb["eccentric"] else "BALANCED"
+            lines.append((f"load: {state}  (ratio_x {lb['ratio_x']})", grey))
         return lines
 
     return summarize
 
 
-def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None):
+def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None,
+                         distance_source: "DistanceSource | None" = None):
     """송출 화면에 검출을 그리는 추론 스레드를 띄운다. 끄면 `None`.
 
     ⚠️ **표시 전용이다.** 저장되는 측정은 트리거 시점에 한 번만 재고, 이건 화면에
@@ -327,15 +383,26 @@ def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None):
     """
     if args.stream_infer_fps <= 0:
         return None, None
-    detector = detector or make_detector(args, cfg)
+
+    # ⚠️ **오버레이는 로컬 ONNX 로 돌린다 — 젯슨을 쓰지 않는다.**
+    # 젯슨은 포크 정렬 노드와 GPU 를 나눠 쓴다. 3fps 로 계속 추론 요청을 보내면
+    # 서로 밀려 **양쪽 다 타임아웃**한다(2026-08-09 실측: `[stream-infer] 추론 실패:
+    # timed out` 이 이어지고 포크 정렬도 느려진다). 저장되는 측정만 젯슨으로 보낸다.
+    #
+    # 판정이 갈릴 걱정은 없다 — 같은 exp8 모델·같은 임계이고, 클라이언트가 letterbox
+    # 까지 해서 보내므로 보드가 보는 픽셀과 로컬이 보는 픽셀이 같다(score 소수 4자리 일치).
+    detector = OnnxDetector(
+        cfg.model_path, cfg.input_size, cfg.score_threshold,
+        cfg.class_names, cfg.norm_mean, cfg.norm_std,
+        class_thresholds=cfg.class_score_thresholds,
+    )
     overlay = livestream.Overlay()
     thread = livestream.InferenceThread(bus, detector, overlay, stop,
                                         fps=args.stream_infer_fps,
-                                        summarize=make_stream_summary(cfg))
+                                        summarize=make_stream_summary(cfg, distance_source))
     thread.start()
-    where = args.infer_url or "로컬 ONNX"
-    print(f"[stream] 검출 오버레이 {args.stream_infer_fps}fps ({where}) — 표시 전용",
-          flush=True)
+    print(f"[stream] 검출 오버레이 {args.stream_infer_fps}fps (로컬 ONNX) — 표시 전용. "
+          f"측정은 {args.infer_url or '로컬'} 로 간다", flush=True)
     return overlay, thread
 
 
@@ -570,6 +637,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--listen 은 --publish 와 함께 씁니다")
 
     cfg = StationConfig()
+    # 상시 모드에서만 채운다 — 그때만 거리계를 계속 쥔다(`--once`는 열고 닫는다).
+    # dict 로 두는 이유: 아래 중첩 함수가 나중에 채워진 값을 읽어야 한다.
+    shared_distance: dict = {"source": None}
 
     def build_detector():
         return make_detector(args, cfg)
@@ -602,6 +672,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.distance is not None:
                 distance = Measurement(distance_cm=args.distance, std_cm=0.0,
                                        frames_used=0, frames_seen=0)
+            elif shared_distance["source"] is not None:
+                # 상시 모드는 거리계를 계속 쥐고 있다(송출 패널도 쓴다). 여기서 또 열면
+                # 포트가 배타적이라 실패한다 — 같은 주인에게 물어본다.
+                distance = shared_distance["source"].measure()
             else:
                 distance = read_distance(cfg)
 
@@ -796,11 +870,15 @@ def main(argv: list[str] | None = None) -> int:
     capture_thread = livestream.CaptureThread(cap, bus, stop_capture)
     capture_thread.start()
 
+    # 거리계도 카메라와 같다 — 한 곳이 쥐고 측정·송출이 나눠 쓴다(COM 포트 배타).
+    shared_distance["source"] = DistanceSource(cfg)
+
     stream_server = None
     if args.stream_port:
         # 측정용 추론기를 그대로 넘긴다 — 화면과 측정이 같은 모델·임계를 보게 한다.
         # 다른 것을 쓰면 화면에 잡히는데 측정은 못 잡는(또는 그 반대) 일이 생긴다.
-        overlay, _ = start_stream_overlay(args, cfg, bus, stop_capture, detector)
+        overlay, _ = start_stream_overlay(args, cfg, bus, stop_capture,
+                                          distance_source=shared_distance["source"])
         try:
             stream_server = livestream.start_server(
                 bus, port=args.stream_port, stream_width=args.stream_width,
@@ -885,6 +963,9 @@ def main(argv: list[str] | None = None) -> int:
         capture_thread.join(timeout=2.0)
         if stream_server is not None:
             stream_server.shutdown()
+        if shared_distance["source"] is not None:
+            # 포트를 놓아야 다음 실행이 잡는다.
+            shared_distance["source"].close()
         cap.release()
     return 0
 
