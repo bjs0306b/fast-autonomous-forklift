@@ -142,24 +142,36 @@ public class CycleControlService {
      */
     private void driveToBay(VehicleCycle cycle, VehicleMotion motion, long now) {
         cycle.setTarget("BAY");
+        CycleProperties.Station bay = cycleProperties.bay();
 
+        if (cycle.isApproaching()) {
+            boolean arrivedSignal = Boolean.TRUE.equals(arrivedSignals.remove(cycle.vehicleId()));
+            // 신호가 오지 않는 경우를 대비한 보조 판정. 신호가 정본이고 이쪽은 안전망이다.
+            boolean nearBay = distance(motion, bay.x(), bay.y()) <= cycleProperties.arriveTolM();
+            if (arrivedSignal || nearBay) {
+                log.info("주기 단계 전이 TO_BAY → ALIGN_BAY: vehicleId={}, 근거={}",
+                        cycle.vehicleId(), arrivedSignal ? "arrived 신호" : "좌표 도달");
+                cycle.advance(now);
+                return;
+            }
+            sendGoal(cycle, motion, now, bay.x(), bay.y(), bay.yaw(), "BAY");
+            return;
+        }
+
+        // 아직 순환 중 — 진입점이 멀면 모서리를 하나씩 돈다(규칙 1).
+        if (gapToEntry(motion, bay.x(), bay.y()) > cycleProperties.approachTriggerM()) {
+            driveLoop(cycle, motion, now);
+            return;
+        }
+        // 진입점에 닿았다. 규칙 3 — 바이는 한 대만 쓴다. 남이 쓰는 중이면 멈추지 않고 계속 돈다.
         if (bayOwner != null && !bayOwner.equals(cycle.vehicleId())) {
             driveLoop(cycle, motion, now);      // 대기 선회 — 차선에 서지 않는다
             return;
         }
+        // 예약은 <b>빠져나가는 순간</b>에만 한다. 멀리서 미리 잡으면 그 차가 순환로를 도는
+        // 내내 바이가 묶여, 바로 옆을 지나는 다른 차가 못 들어간다.
         bayOwner = cycle.vehicleId();
-
-        CycleProperties.Station bay = cycleProperties.bay();
-        boolean arrivedSignal = Boolean.TRUE.equals(arrivedSignals.remove(cycle.vehicleId()));
-        // 신호가 오지 않는 경우를 대비한 보조 판정. 신호가 정본이고 이쪽은 안전망이다.
-        boolean nearBay = distance(motion, bay.x(), bay.y()) <= cycleProperties.arriveTolM();
-
-        if (arrivedSignal || nearBay) {
-            log.info("주기 단계 전이 TO_BAY → ALIGN_BAY: vehicleId={}, 근거={}",
-                    cycle.vehicleId(), arrivedSignal ? "arrived 신호" : "좌표 도달");
-            cycle.advance(now);
-            return;
-        }
+        cycle.markApproaching();
         sendGoal(cycle, motion, now, bay.x(), bay.y(), bay.yaw(), "BAY");
     }
 
@@ -230,7 +242,13 @@ public class CycleControlService {
 
     // ── TO_EXIT ─────────────────────────────────────────────────────────────────
 
-    /** 바이 탈출. 여기서 바이를 반납해 다음 차가 들어올 수 있게 한다. */
+    /**
+     * 바이 탈출. 여기서 바이를 반납해 다음 차가 들어올 수 있게 한다.
+     *
+     * <p><b>여기만 순환로를 타지 않는다.</b> EXIT 는 바이 바로 뒤(약 1.8m)라, 규칙 1 대로
+     * 일방통행 순환로를 태우면 67m 를 한 바퀴 돌게 된다. 짧은 후진·정렬이므로 목표를 바로
+     * 준다 — 참조 구현({@code demo_loop2.py})도 이 단계만 같은 이유로 예외를 뒀다.
+     */
     private void driveToExit(VehicleCycle cycle, VehicleMotion motion, long now) {
         cycle.setTarget("EXIT");
         CycleProperties.Station exit = cycleProperties.exit();
@@ -267,13 +285,40 @@ public class CycleControlService {
             driveLoop(cycle, motion, now);
             return;
         }
-        if (distance(motion, approach.x(), approach.y()) <= cycleProperties.arriveTolM()) {
-            log.info("랙 접근점 도착: vehicleId={}, rack={}", cycle.vehicleId(), cycle.rackCode());
-            cycle.advance(now);
+        if (cycle.isApproaching()) {
+            if (distance(motion, approach.x(), approach.y()) <= cycleProperties.arriveTolM()) {
+                log.info("랙 접근점 도착: vehicleId={}, rack={}", cycle.vehicleId(), cycle.rackCode());
+                cycle.advance(now);
+                return;
+            }
+            sendGoal(cycle, motion, now,
+                    approach.x(), approach.y(), approach.yawRad(), "RACK:" + cycle.rackCode());
             return;
         }
+
+        // 규칙 1 — 랙 접근점이 가까워질 때까지는 순환로를 따라 돈다. 예전에는 여기서 곧바로
+        // 접근점 좌표를 목표로 줬는데, 그러면 Nav2 가 최단 경로를 잡아 창고 한가운데를
+        // 가로지른다. 통로가 아닌 곳에서 차들이 만나 서로를 막는다(2026-08-10 실측).
+        if (gapToEntry(motion, approach.x(), approach.y()) > cycleProperties.approachTriggerM()) {
+            driveLoop(cycle, motion, now);
+            return;
+        }
+        cycle.markApproaching();
         sendGoal(cycle, motion, now,
                 approach.x(), approach.y(), approach.yawRad(), "RACK:" + cycle.rackCode());
+    }
+
+    /**
+     * 스테이션 <b>진입점</b>까지 진행 방향으로 남은 호장(m).
+     *
+     * <p>진입점은 그 스테이션 좌표를 순환로에 투영한 지점이다 — 참조 구현
+     * ({@code demo_loop2.py} 의 {@code entry_s})과 같은 정의다. 별도 좌표를 설정으로 두지
+     * 않는 이유도 같다: 스테이션이 늘 때마다 진입점을 손으로 맞춰 적으면 어긋난다.
+     */
+    private double gapToEntry(VehicleMotion motion, double stationX, double stationY) {
+        double sMe = track.project(motion.x(), motion.y()).s();
+        double entryS = track.project(stationX, stationY).s();
+        return track.gap(sMe, entryS);
     }
 
     // ── RACK ────────────────────────────────────────────────────────────────────
@@ -355,6 +400,9 @@ public class CycleControlService {
         if (stalled) {
             log.warn("정체 감지 — 목표를 재전송한다: vehicleId={}, goal={}", cycle.vehicleId(), goalKey);
             cycle.forgetGoal();
+            // 진입하다 막힌 것일 수 있다. 순환로 주행부터 다시 판단하게 되돌린다 —
+            // 같은 목표만 계속 다시 쏘면 막힌 자리에서 못 벗어난다.
+            cycle.cancelApproach();
         }
         if (cycle.shouldSendGoal(goalKey) && !publisher.publishGoal(cycle.vehicleId(), x, y, yawRad)) {
             // 발행에 실패했으면 "보냈다"는 기억을 지운다 — 다음 tick 에 다시 시도된다.
