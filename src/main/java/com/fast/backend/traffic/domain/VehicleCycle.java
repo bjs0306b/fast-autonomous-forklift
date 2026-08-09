@@ -124,6 +124,20 @@ public final class VehicleCycle {
      * 적재에 실패할 때마다 "완료 주기"가 하나씩 늘어, 랙에 한 번도 못 간 차량이 8 주기를
      * 처리한 것으로 집계됐다(2026-08-10 실측). 실패는 실패로 세야 지표를 믿을 수 있다.
      */
+    /**
+     * 복귀를 시작한다 — 랙이 다 차서 놓을 자리가 없을 때.
+     *
+     * <p>주기 수는 건드리지 않는다. 여기까지 완료한 것은 그대로 완료다.
+     */
+    public void startReturning(long nowMs) {
+        phase = CyclePhase.RETURNING;
+        target = "HOME";
+        rackCode = null;
+        workStartedAtMs = nowMs;
+        lastGoal = null;
+        approaching = false;
+    }
+
     public void restartToBay(long nowMs) {
         phase = CyclePhase.TO_BAY;
         target = "BAY";

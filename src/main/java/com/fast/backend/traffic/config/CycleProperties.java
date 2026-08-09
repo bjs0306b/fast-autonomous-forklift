@@ -46,7 +46,8 @@ public record CycleProperties(
         Double cargoHeightM,
         Map<String, List<String>> racks,
         Map<String, Double> dockX,
-        Double reverseDist
+        Double reverseDist,
+        Map<String, Station> home
 ) {
 
     /** 규격 §1 "스테이션". BAY(16.5, 5.0, yaw 0=동), EXIT(15.5, 4.0, yaw 1.5708=북). */
@@ -76,6 +77,25 @@ public record CycleProperties(
         racks = racks == null ? Map.of() : Map.copyOf(racks);
         dockX = dockX == null || dockX.isEmpty() ? DEFAULT_DOCK_X : Map.copyOf(dockX);
         if (reverseDist == null || reverseDist <= 0) reverseDist = 2.0;
+        home = home == null ? Map.of() : Map.copyOf(home);
+    }
+
+    /**
+     * 이 차량의 복귀 지점(시작 위치). 없으면 빈 값.
+     *
+     * <p>비어 있으면 <b>복귀시키지 않는다.</b> 모르는 좌표로 보내느니 있던 자리에 세워 두는 편이
+     * 낫다 — 짐작한 지점이 통로 한가운데면 다른 차를 막는다.
+     */
+    public java.util.Optional<Station> homeFor(String vehicleId) {
+        if (vehicleId == null) {
+            return java.util.Optional.empty();
+        }
+        for (Map.Entry<String, Station> entry : home.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(vehicleId)) {
+                return java.util.Optional.ofNullable(entry.getValue());
+            }
+        }
+        return java.util.Optional.empty();
     }
 
     /**

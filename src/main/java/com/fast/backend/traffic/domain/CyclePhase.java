@@ -34,7 +34,18 @@ public enum CyclePhase {
     TO_RACK,
 
     /** 랙 적재({@code task ← PLACE_RACK}). {@code loaded == false} 여야 주기가 끝난다. */
-    RACK;
+    RACK,
+
+    /**
+     * 랙이 다 차서 시작 위치로 돌아가는 중.
+     *
+     * <p><b>주기 고리 밖이다.</b> {@code RACK → TO_BAY} 로 이어지는 순환과 달리 여기서는
+     * 되돌아오지 않는다 — 놓을 자리가 없어서 복귀하는 것이므로.
+     */
+    RETURNING,
+
+    /** 시작 위치에 도착해 멈춘 상태. 더 이상 목표를 보내지 않는다. */
+    PARKED;
 
     /**
      * 지금 <b>제자리에서 작업 중</b>인 단계인가.
@@ -51,7 +62,18 @@ public enum CyclePhase {
         return this == TO_BAY || this == ALIGN_BAY || this == LOAD;
     }
 
-    /** 주기의 다음 단계. {@link #RACK} 다음은 새 주기의 {@link #TO_BAY}. */
+    /** 복귀 계열인가 — 주기를 더 돌지 않는 단계. */
+    public boolean isHomebound() {
+        return this == RETURNING || this == PARKED;
+    }
+
+    /**
+     * 주기의 다음 단계. {@link #RACK} 다음은 새 주기의 {@link #TO_BAY}.
+     *
+     * <p>{@link #RETURNING} 다음은 {@link #PARKED} 이고, {@code PARKED} 는 자기 자신이다 —
+     * 복귀는 한 번 들어가면 나오지 않는다. 랙이 다시 비면 그때는 운행을 새로 시작하는 것이지
+     * 멈춰 있던 주기를 잇는 것이 아니다(그 사이 무슨 일이 있었는지 알 수 없다).
+     */
     public CyclePhase next() {
         return switch (this) {
             case TO_BAY -> ALIGN_BAY;
@@ -60,6 +82,8 @@ public enum CyclePhase {
             case TO_EXIT -> TO_RACK;
             case TO_RACK -> RACK;
             case RACK -> TO_BAY;
+            case RETURNING -> PARKED;
+            case PARKED -> PARKED;
         };
     }
 }

@@ -1,5 +1,6 @@
 package com.fast.backend.traffic.service;
 
+import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.traffic.config.CycleProperties;
 import com.fast.backend.traffic.config.LoopTrackProperties;
 import com.fast.backend.traffic.domain.CyclePhase;
@@ -41,6 +42,7 @@ class CycleControlServiceTest {
     private OperationService operationService;
     private RackApproachProvider rackApproaches;
     private VehicleProcedureRegistry procedureRegistry;
+    private StorageSlotMapper storageSlotMapper;
 
     @BeforeEach
     void setUp() {
@@ -48,6 +50,10 @@ class CycleControlServiceTest {
         operationService = mock(OperationService.class);
         rackApproaches = mock(RackApproachProvider.class);
         procedureRegistry = mock(VehicleProcedureRegistry.class);
+        storageSlotMapper = mock(StorageSlotMapper.class);
+        // 기본은 "아직 자리가 남았다" — 복귀 조건을 건드리지 않는다.
+        when(storageSlotMapper.countAll()).thenReturn(48);
+        when(storageSlotMapper.countEmpty()).thenReturn(47);
 
         when(operationService.state()).thenReturn(OperationState.RUNNING);
         when(operationService.isDrivable(anyString())).thenReturn(true);
@@ -60,7 +66,7 @@ class CycleControlServiceTest {
     private CycleControlService service() {
         return new CycleControlService(
                 cycleProps(), loopProps(), operationService,
-                publisher, rackApproaches, procedureRegistry);
+                publisher, rackApproaches, procedureRegistry, storageSlotMapper);
     }
 
     private static CycleProperties cycleProps() {
@@ -74,7 +80,8 @@ class CycleControlServiceTest {
                 0.15,
                 Map.of("SIM-F02", List.of("A001")),
                 Map.of("A", 2.60, "B", 11.95),
-                2.0);
+                2.0,
+                Map.of("SIM-F02", new CycleProperties.Station(4.0, 4.0, 0.0)));
     }
 
     private static LoopTrackProperties loopProps() {
@@ -173,9 +180,10 @@ class CycleControlServiceTest {
                 false, new CycleProperties.Station(BAY_X, BAY_Y, 0.0),
                 new CycleProperties.Station(15.5, 4.0, 1.5708),
                 1.5, 4.0, 7_000L, 12_000L, 40_000L, 90_000L, 0.15,
-                Map.of(), Map.of("A", 2.60), 2.0);
+                Map.of(), Map.of("A", 2.60), 2.0, Map.of());
         CycleControlService svc = new CycleControlService(
-                off, loopProps(), operationService, publisher, rackApproaches, procedureRegistry);
+                off, loopProps(), operationService, publisher, rackApproaches,
+                procedureRegistry, storageSlotMapper);
 
         svc.tick(List.of(at(5.0, 20.0)), Set.of());
 
@@ -207,6 +215,71 @@ class CycleControlServiceTest {
     void 모르는_랙_코드는_그대로() {
         assertThat(CycleControlService.toWireRackCode("RACK-A-01")).isEqualTo("RACK-A-01");
         assertThat(CycleControlService.toWireRackCode(null)).isNull();
+    }
+
+    // ── 복귀 ────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("랙이 다 차면 시작 위치로 복귀한다")
+    void 랙이_다_차면_복귀한다() {
+        when(storageSlotMapper.countEmpty()).thenReturn(0);
+        CycleControlService svc = service();
+
+        svc.tick(List.of(at(5.0, 20.0)), Set.of());
+
+        assertThat(svc.cycleFor("SIM-F02").phase()).isEqualTo(CyclePhase.RETURNING);
+        assertThat(svc.cycleFor("SIM-F02").target()).isEqualTo("HOME");
+    }
+
+    @Test
+    @DisplayName("복귀도 순환로를 따라 간다 — 멀면 모서리로 (규칙 1)")
+    void 복귀도_순환로를_탄다() {
+        when(storageSlotMapper.countEmpty()).thenReturn(0);
+        CycleControlService svc = service();
+
+        // 홈(4,4) 진입점까지 호장이 4.0 을 넘는 지점.
+        svc.tick(List.of(at(5.0, 20.0)), Set.of());
+
+        double[] goal = lastGoal();
+        assertThat(goal[0]).as("홈으로 직행하면 안 된다").isNotEqualTo(4.0);
+    }
+
+    @Test
+    @DisplayName("칸이 하나도 등록돼 있지 않으면 복귀하지 않는다 — 가득 찬 것이 아니다")
+    void 칸이_없으면_복귀하지_않는다() {
+        when(storageSlotMapper.countAll()).thenReturn(0);
+        when(storageSlotMapper.countEmpty()).thenReturn(0);
+        CycleControlService svc = service();
+
+        svc.tick(List.of(at(5.0, 20.0)), Set.of());
+
+        assertThat(svc.cycleFor("SIM-F02").phase()).isEqualTo(CyclePhase.TO_BAY);
+    }
+
+    @Test
+    @DisplayName("복귀 지점이 설정에 없으면 그 자리에 선다 — 짐작한 좌표로 보내지 않는다")
+    void 복귀_지점이_없으면_그_자리에_선다() {
+        when(storageSlotMapper.countEmpty()).thenReturn(0);
+        CycleControlService svc = service();
+
+        // SIM-F03 은 home 설정에 없다.
+        VehicleMotion f03 = new VehicleMotion("SIM-F03", 5.0, 20.0, 0.0, 1.0,
+                VehicleStatus.MOVING, false);
+        svc.tick(List.of(f03), Set.of());
+        svc.tick(List.of(f03), Set.of());
+
+        assertThat(svc.cycleFor("SIM-F03").phase()).isEqualTo(CyclePhase.PARKED);
+    }
+
+    @Test
+    @DisplayName("조회에 실패하면 복귀를 보류한다 — 모르는 상태에서 운행을 접지 않는다")
+    void 조회_실패는_복귀를_보류한다() {
+        when(storageSlotMapper.countAll()).thenThrow(new RuntimeException("DB 끊김"));
+        CycleControlService svc = service();
+
+        svc.tick(List.of(at(5.0, 20.0)), Set.of());
+
+        assertThat(svc.cycleFor("SIM-F02").phase()).isEqualTo(CyclePhase.TO_BAY);
     }
 
     @Test
