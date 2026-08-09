@@ -309,6 +309,33 @@ public class CycleControlService {
     }
 
     /**
+     * DB 의 선반 코드({@code A001})를 차량이 아는 이름({@code A1})으로 바꾼다.
+     *
+     * <p><b>왜 필요한가.</b> 두 체계가 다르다. 백엔드·DB 는 {@code storage_slot.slot_code} 를
+     * {@code A001} 형식으로 쓰고, 시뮬은 {@code RACK_SLOTS} 키를 {@code A1} 형식으로 만든다
+     * ({@code cargo_demo.py:321}). 규격 §7 의 페이로드 예시도 {@code "rack": "A1"} 이다.
+     *
+     * <p>맞추지 않으면 시뮬이 <b>조용히 실패한다</b> — {@code if rack not in RACK_SLOTS: return False}
+     * 라 예외도 응답도 없다. 차량은 화물을 든 채 가만히 있고, 백엔드는 {@code loaded} 가 안 바뀌니
+     * 90 초 뒤 타임아웃으로 주기를 재시작한다. 그것이 무한 반복됐다(2026-08-10 실측).
+     *
+     * <p>DB 코드를 {@code A1} 로 바꾸지 않는 이유: {@code slot_code} 는 여러 도메인(적재 위치 추천·
+     * 재고)이 쓰는 식별자다. 표기 차이는 <b>발행 경계에서만</b> 흡수한다.
+     *
+     * <p>형식이 다르면 그대로 돌려준다 — 짐작해서 바꾸면 어느 쪽도 아닌 이름이 나간다.
+     */
+    static String toWireRackCode(String slotCode) {
+        if (slotCode == null) {
+            return null;
+        }
+        java.util.regex.Matcher m = WIRE_RACK.matcher(slotCode);
+        return m.matches() ? m.group(1) + Integer.parseInt(m.group(2)) : slotCode;
+    }
+
+    private static final java.util.regex.Pattern WIRE_RACK =
+            java.util.regex.Pattern.compile("([A-Za-z]+)0*(\\d+)");
+
+    /**
      * 스테이션 <b>진입점</b>까지 진행 방향으로 남은 호장(m).
      *
      * <p>진입점은 그 스테이션 좌표를 순환로에 투영한 지점이다 — 참조 구현
@@ -353,7 +380,8 @@ public class CycleControlService {
      */
     private void sendPlaceRack(VehicleCycle cycle) {
         String rack = cycle.rackCode();
-        publisher.publishCargo(cycle.vehicleId(), CargoActionMessage.placeRack(rack));
+        String wireRack = toWireRackCode(rack);
+        publisher.publishCargo(cycle.vehicleId(), CargoActionMessage.placeRack(wireRack));
 
         var approach = rackApproaches.find(rack).orElse(null);
         Double dockX = cycleProperties.dockXFor(rack).orElse(null);
@@ -363,7 +391,7 @@ public class CycleControlService {
             return;
         }
         publisher.publishPlaceRack(
-                cycle.vehicleId(), rack, null,
+                cycle.vehicleId(), wireRack, null,
                 new PlaceRackTaskMessage.Waypoint(approach.x(), approach.y(), approach.yawRad()),
                 // 도킹은 접근점과 같은 y, 랙 쪽으로 파고든 x 다.
                 new PlaceRackTaskMessage.Waypoint(dockX, approach.y(), approach.yawRad()),
