@@ -302,6 +302,13 @@ def _boxes(payload: dict) -> list:
 
     `bbox_px` 가 4개짜리 리스트가 아닌 항목은 버린다 — 모양이 어긋난 값을 그대로
     보내면 받는 쪽이 화면에 이상한 사각형을 그리고, 원인을 여기까지 되짚기 어렵다.
+
+    ⚠️ **좌표 규격이 안팎으로 다르다.** 우리 측정 JSON 의 `bbox_px` 는
+    `[x, y, w, h]`(`pipeline._px`)인데, 전송 규격은 `[x1, y1, x2, y2]`
+    (백엔드 `MeasurementBox`, 프론트 `toBoxRect` 둘 다 좌상단·우하단으로 읽는다).
+    그대로 보내면 받는 쪽이 폭을 `w - x` 로 계산해 **음수**가 나오고, 프론트는 음수
+    폭을 걸러내므로 **에러 없이 사각형이 한 개도 안 그려진다** — 화면만 보면 아직
+    측정이 안 된 것처럼 보인다. 그래서 여기서 변환해 내보낸다.
     """
     boxes = payload.get("box_measurements") or []
     result = []
@@ -309,8 +316,9 @@ def _boxes(payload: dict) -> list:
         bbox = b.get("bbox_px")
         if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
             continue
+        x, y, w, h = (int(v) for v in bbox)
         result.append({
-            "bboxPx": [int(v) for v in bbox],
+            "bboxPx": [x, y, x + w, y + h],
             "score": b.get("score"),
         })
     return result

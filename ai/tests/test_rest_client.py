@@ -25,15 +25,21 @@ FULL = {
 }
 
 
-def test_필드_6개를_보낸다() -> None:
+def test_계약에_있는_필드만_보낸다() -> None:
     """`measuredAt`은 2026-08-02 백엔드 리팩터로 DTO에서 제거됐다.
 
     보내도 Spring이 조용히 버리지만(무해), 계약에 없는 필드를 계속 실어 보내면
     "이 값이 어딘가 쓰인다"고 오해하게 된다. 저장 시각은 서버 `createdAt`이다.
+
+    ⚠️ 이 테스트는 한때 이름과 본문이 **"6개"로 굳어 있었다.** 관제 화면용 4개
+    (`cargoWidth`·`frameWidth`·`frameHeight`·`boxes`)가 붙은 뒤에도 6개를 기대해
+    깨진 채 남아 있었다. **개수는 이름에 박지 않는다** — 늘어나는 게 정상인 값이다.
     """
     r = to_request(FULL, "sess-1")
-    assert set(r) == {"sessionId", "measurementId", "status", "cargoHeight",
-                      "tippingLevel", "overhangRatio"}
+    assert set(r) == {"sessionId", "measurementId", "status",
+                      "cargoHeight", "cargoWidth",
+                      "tippingLevel", "overhangRatio",
+                      "frameWidth", "frameHeight", "boxes"}
     assert "measuredAt" not in r
 
 
@@ -55,6 +61,29 @@ def test_높이는_화물만_쓴다_총높이가_아니다() -> None:
     r = to_request(FULL)
     assert r["cargoHeight"] == 0.723          # height_cm 72.3
     assert r["cargoHeight"] != 0.843          # total_height_cm 84.3 아님
+
+
+def test_상자_좌표를_xywh에서_xyxy로_바꿔_보낸다() -> None:
+    """우리 JSON은 `[x, y, w, h]`, 전송 규격은 `[x1, y1, x2, y2]`다.
+
+    백엔드 `MeasurementBox`·프론트 `toBoxRect` 둘 다 좌상단·우하단으로 읽는다.
+    변환 없이 보내면 받는 쪽이 폭을 `w - x`로 계산해 음수가 나오고, 프론트가 음수
+    폭을 걸러내므로 **에러 없이 사각형이 하나도 안 그려진다**.
+    """
+    r = to_request({**FULL, "box_measurements": [
+        {"bbox_px": [1078, 433, 422, 259], "score": 0.97},
+    ]})
+    assert r["boxes"] == [{"bboxPx": [1078, 433, 1500, 692], "score": 0.97}]
+
+
+def test_모양이_깨진_상자는_버린다() -> None:
+    """좌표가 4개가 아니면 그리는 쪽에서 원인을 되짚기 어렵다 — 여기서 막는다."""
+    r = to_request({**FULL, "box_measurements": [
+        {"bbox_px": [1, 2, 3], "score": 0.5},
+        {"bbox_px": None, "score": 0.5},
+        {"bbox_px": [10, 20, 30, 40], "score": 0.9},
+    ]})
+    assert r["boxes"] == [{"bboxPx": [10, 20, 40, 60], "score": 0.9}]
 
 
 def test_전복_필드_매핑() -> None:

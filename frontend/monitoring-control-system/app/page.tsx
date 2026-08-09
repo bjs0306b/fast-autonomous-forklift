@@ -533,6 +533,7 @@ export default function MonitoringPage() {
                     boxes={lastMeasurement?.boxes}
                     frameWidth={lastMeasurement?.frameWidth}
                     frameHeight={lastMeasurement?.frameHeight}
+                    tippingLevel={lastMeasurement?.tippingLevel}
                     onConnectionStatusChange={setAiVideoStatus}
                     onFrameLoaded={setLastAiFrameReceivedAt}
                     onOpenFullscreen={() => setActiveSlide(1)}
@@ -571,6 +572,7 @@ export default function MonitoringPage() {
             boxes={lastMeasurement?.boxes}
             frameWidth={lastMeasurement?.frameWidth}
             frameHeight={lastMeasurement?.frameHeight}
+            tippingLevel={lastMeasurement?.tippingLevel}
             onConnectionStatusChange={setAiVideoStatus}
             onFrameLoaded={setLastAiFrameReceivedAt}
             onCloseFullscreen={() => setActiveSlide(0)}

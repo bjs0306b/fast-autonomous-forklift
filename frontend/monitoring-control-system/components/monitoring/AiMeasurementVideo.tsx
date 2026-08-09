@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { ArrowLeft, Expand, Loader2, RefreshCw, Video, VideoOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toBoxRects, type MeasurementBox } from "@/lib/monitoring/measurementBox"
+import { toTippingBadge } from "@/lib/monitoring/tippingLevel"
 
 export type AiVideoConnectionStatus = "CONNECTING" | "CONNECTED" | "DISCONNECTED" | "ERROR"
 
@@ -25,6 +26,7 @@ export function AiMeasurementVideo({
   boxes,
   frameWidth,
   frameHeight,
+  tippingLevel,
   onConnectionStatusChange,
   onFrameLoaded,
   onOpenFullscreen,
@@ -54,6 +56,14 @@ export function AiMeasurementVideo({
   /** 위 픽셀 좌표의 기준 해상도. 없으면 환산할 수 없어 아무것도 그리지 않는다. */
   frameWidth?: number | null
   frameHeight?: number | null
+  /**
+   * 전복 위험 등급(`SAFE`/`WARNING`/`DANGER`). 영상 위에 배지로 얹는다.
+   *
+   * 종전에는 이 값이 **적재 부적합으로 실패했을 때만** 화면에 나왔다
+   * (`MeasurementFailureCard`). 그러면 정상 측정에서는 등급이 어디에도 안 보여
+   * "판정을 하긴 하는가"가 화면상 드러나지 않는다. 값이 없으면 배지를 그리지 않는다.
+   */
+  tippingLevel?: string | null
   onConnectionStatusChange: (status: AiVideoConnectionStatus) => void
   onFrameLoaded?: (receivedAt: string) => void
   onOpenFullscreen?: () => void
@@ -67,6 +77,7 @@ export function AiMeasurementVideo({
   }, [active, onConnectionStatusChange, retryKey, streamUrl])
 
   const boxRects = toBoxRects(boxes, frameWidth, frameHeight)
+  const tipping = toTippingBadge(tippingLevel)
   const status = STATUS_STYLE[connectionStatus]
   const showStream = active && Boolean(streamUrl)
 
@@ -210,6 +221,30 @@ export function AiMeasurementVideo({
                 ) : null}
               </div>
             ))}
+          </div>
+        ) : null}
+
+        {/*
+          전복 위험 배지.
+
+          검출 상자와 달리 **좌표가 필요 없다** — 화면 전체에 대한 판정이라 왼쪽 위에
+          고정한다. 상자 오버레이와 같은 절대배치 층에 두되 상자를 가리지 않도록
+          위쪽 여백만 차지한다.
+        */}
+        {showStream && tipping ? (
+          <div className="pointer-events-none absolute top-2 left-2 z-10">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] font-semibold shadow-lg shadow-black/50 backdrop-blur-sm",
+                pip && "px-1.5 py-0.5 text-[10px]",
+                tipping.className,
+              )}
+              data-testid="tipping-badge"
+              data-level={tipping.level}
+            >
+              <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+              전복 위험 {tipping.label}
+            </span>
           </div>
         ) : null}
 

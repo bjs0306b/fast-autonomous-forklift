@@ -1,3 +1,4 @@
+import { formatTippingLevel } from "@/lib/monitoring/tippingLevel"
 import type { DashboardFailure } from "@/types/monitoring"
 
 /**
@@ -101,18 +102,6 @@ const UNKNOWN_FAILURE: FailureText = {
 function formatPercent(ratio: number | null): string | null {
   if (ratio == null || !Number.isFinite(ratio)) return null
   return `${(ratio * 100).toFixed(1)}%`
-}
-
-/** 백엔드가 저장한 등급 문자열을 화면 문구로만 바꾼다. 모르는 값은 원문 그대로 보여 준다. */
-const TIPPING_LEVEL_LABEL: Record<string, string> = {
-  SAFE: "안전",
-  WARNING: "주의",
-  DANGER: "높음",
-}
-
-function formatTippingLevel(level: string | null): string | null {
-  if (!level) return null
-  return TIPPING_LEVEL_LABEL[level.toUpperCase()] ?? level
 }
 
 /**
