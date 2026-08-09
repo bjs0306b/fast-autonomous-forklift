@@ -835,3 +835,64 @@ class SustainFloorValidationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             TeleopLimits(min_sustain_drive_percent=12,
                          max_sustain_drive_percent=5).validate()
+
+
+class TurningRadiusConsistencyTest(unittest.TestCase):
+    """조향 상한이 세 곳에 흩어져 있고, 어긋나면 증상이 조용하다.
+
+        teleop.yaml   min_command_turning_radius_m      명령 곡률 상한
+        nav2_params   GridBased.minimum_turning_radius  계획 곡률
+        nav2_params   FollowPath.regulated_..._min_radius  감속 시작점
+
+    플래너가 명령 상한보다 급한 경로를 내면 **컨트롤러가 못 따라간다.** 차는
+    경로 위에서 헤매다 멎는데, 로그만 봐서는 플래너도 컨트롤러도 정상이다.
+    2026-08-09 이전에 실제로 그 상태였다 -- 플래너 0.18(38.7도) vs 명령
+    0.10(55.2도).
+
+    값은 tools/steer_limit.py 가 **라이다로 실제 이동을 재서** 정한다.
+    엔코더로는 이 경계가 안 보인다 -- 구동륜 회전을 재지 차체 이동을 안 잰다.
+    """
+
+    def _nav2(self):
+        path = (pathlib.Path(__file__).resolve().parents[3] / "nav2_params.yaml")
+        if not path.exists():
+            self.skipTest(f"nav2_params.yaml 을 찾지 못했다: {path}")
+        with path.open(encoding="utf-8") as handle:
+            return yaml.safe_load(handle)
+
+    def _teleop(self):
+        path = (pathlib.Path(__file__).resolve().parent.parent
+                / "config" / "teleop.yaml")
+        if not path.exists():
+            self.skipTest("config/teleop.yaml 을 찾지 못했다")
+        with path.open(encoding="utf-8") as handle:
+            return yaml.safe_load(handle)["uart_teleop_bridge"]["ros__parameters"]
+
+    def test_all_three_radii_agree(self):
+        nav2 = self._nav2()
+        command = self._teleop()["min_command_turning_radius_m"]
+        planner = (nav2["planner_server"]["ros__parameters"]
+                   ["GridBased"]["minimum_turning_radius"])
+        controller = (nav2["controller_server"]["ros__parameters"]
+                      ["FollowPath"]["regulated_linear_scaling_min_radius"])
+        self.assertEqual(command, planner,
+                         "플래너가 명령 상한보다 급한 경로를 낼 수 있다")
+        self.assertEqual(planner, controller,
+                         "감속 시작점이 계획 곡률과 어긋난다")
+
+    def test_the_cap_stays_inside_the_servo_envelope(self):
+        """명령 상한은 서보 물리 봉투 **안쪽**이어야 한다.
+
+        봉투(rear_steering_limit_deg)는 ALIGN 저속 정렬과 수동 조작이 쓰므로
+        좁히지 않는다. 좁히는 것은 주행 중 명령 곡률뿐이다.
+        """
+        params = self._teleop()
+        radius = params["min_command_turning_radius_m"]
+        wheelbase = params["wheelbase_m"]
+        commanded = math.degrees(math.atan(wheelbase / radius))
+        self.assertLess(commanded, params["rear_steering_limit_deg"])
+
+    def test_defaults_match_the_deployed_cap(self):
+        """TeleopLimits 기본값이 yaml 과 갈라지면 조용히 틀린 곡률을 쓴다."""
+        self.assertEqual(TeleopLimits().min_command_turning_radius_m,
+                         self._teleop()["min_command_turning_radius_m"])

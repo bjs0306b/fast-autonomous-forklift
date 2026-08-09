@@ -230,7 +230,8 @@ controller_server:
       # 이 반경보다 급한 곡선에서 감속이 시작된다. 플래너 최소반경과 같은
       # 값이어야 한다 — 크게 두면 계획된 모든 곡선에서 감속이 걸리고, 그
       # 속도는 실측 스톨 구간이라 차가 아예 멎는다.
-      regulated_linear_scaling_min_radius: 0.18
+      # 플래너 최소반경과 같은 값이어야 한다 (위 minimum_turning_radius 참고).
+      regulated_linear_scaling_min_radius: 0.25
       # 위 min_approach_linear_velocity 주석 참고 -- 여기도 올리지 말 것.
       # 위와 같은 이유. 곡률 규제도 0.078 아래로는 의미가 없다.
       regulated_linear_scaling_min_speed: 0.12
@@ -614,7 +615,17 @@ planner_server:
       #    2026-08-07: 순항 0.25 m/s · 각속도 0.75 rad/s 로 올리면서
       #    0.25/0.75 = 0.333 -> 0.35 로 맞춘다.
       #    기계 한계는 축거 0.144 / tan(36°) = 0.198 m 라 아직 여유가 있다.
-      minimum_turning_radius: 0.18
+      # ⚠️ 0.18 -> 0.25 (2026-08-09). **teleop.yaml 의
+      #    min_command_turning_radius_m 과 같아야 한다.**
+      #
+      #    tools/steer_limit.py 가 라이다로 실제 이동을 재서 30도(반경 0.249 m)
+      #    까지만 차가 실제로 간다는 것을 확인했다. 40도 이상은 엔코더가 0.34 m/s
+      #    를 찍는데 라이다 이동은 0.08 m 다 -- 바퀴만 돈다.
+      #
+      #    이 값이 명령 상한보다 작으면 **플래너가 컨트롤러가 못 따라갈 경로를
+      #    낸다.** 그러면 차는 경로 위에서 헤매다 멎고, 로그만 봐서는 플래너도
+      #    컨트롤러도 정상으로 보인다.
+      minimum_turning_radius: 0.25
       reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.2
