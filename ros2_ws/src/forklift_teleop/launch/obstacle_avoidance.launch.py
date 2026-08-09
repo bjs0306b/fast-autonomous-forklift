@@ -37,6 +37,15 @@ def generate_launch_description():
             name="unstick_node",
             output="screen",
         ),
+        # 주행이 멈추면 이유가 최소 넷이다(가드·플래너·컨트롤러·브리지). 밖에서
+        # 보면 넷이 똑같이 "안 움직인다" 로 보이므로, 흩어진 토픽을 차 위에 글자로
+        # 모아 둔다. 읽기만 하는 노드라 주행 경로에 끼어들지 않는다.
+        Node(
+            package="forklift_teleop",
+            executable="debug_hud",
+            name="debug_hud",
+            output="screen",
+        ),
         Node(
             package="forklift_teleop",
             executable="obstacle_avoidance",

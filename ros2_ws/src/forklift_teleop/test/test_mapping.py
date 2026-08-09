@@ -13,6 +13,7 @@ from forklift_teleop.mapping import (
     TeleopLimits,
     map_twist,
     steering_turn_ratio,
+    sustain_floor_percent,
     select_command,
 )
 
@@ -348,11 +349,54 @@ class SteeredStallKickTest(unittest.TestCase):
             max_stall_kick_sec=2.0,
         )
 
-    def test_stalled_and_steered_borrows_the_steered_figure(self):
+    def test_stalled_and_steered_first_straightens_instead_of_pushing_harder(self):
+        """듀티를 더 주기 전에 **긁는 저항 자체를 없앤다.**
+
+        전륜 구동 · 후륜 조향이라, 조향륜이 꺾인 채로는 구동륜이 그 저항까지
+        끌어야 한다. 실측으로 100% 를 줘도 못 떴으므로 듀티로는 상한이 있다.
+        """
         kick = self.kick()
         command = ActuatorCommand(drive_percent=35, steering_cdeg=13200)
         kick.apply(command, 0.0, 0.0)
-        self.assertEqual(kick.apply(command, 1.0, 0.0).drive_percent, 100)
+        result = kick.apply(command, 1.0, 0.0)
+        self.assertEqual(result.steering_cdeg, 9600)
+        self.assertEqual(result.drive_percent, 50)
+
+    def test_it_gives_up_straightening_and_pushes_harder(self):
+        """펴서도 못 뜨면 원래 조향으로 돌아가 센 듀티를 쓴다.
+
+        무한정 펴 두면 의도한 곡선 대신 직진을 계속하게 되고, 목업에서는
+        그대로 벽이다.
+        """
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=13200)
+        kick.apply(command, 0.0, 0.0)
+        kick.apply(command, 1.0, 0.0)          # 펴기 시작
+        result = kick.apply(command, 3.0, 0.0)  # 상한(1.5초) 넘김
+        self.assertEqual(result.steering_cdeg, 13200)
+        self.assertEqual(result.drive_percent, 100)
+
+    def test_it_hands_the_steering_back_once_the_wheels_roll(self):
+        """구르기 시작하면 곧바로 원래 곡률로 돌려준다.
+
+        구르는 중에는 조향륜이 굴러가며 방향을 바꾸므로 긁지 않는다 --
+        완전 조향으로도 잘 돈다는 것이 실측돼 있다.
+        """
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=13200)
+        kick.apply(command, 0.0, 0.0)
+        self.assertEqual(kick.apply(command, 1.0, 0.0).steering_cdeg, 9600)
+        self.assertEqual(kick.apply(command, 1.2, 0.20).steering_cdeg, 13200)
+
+    def test_without_an_encoder_it_never_straightens(self):
+        """구름을 볼 수 없으면 언제 돌려줄지도 모른다.
+
+        그 상태로 펴면 의도한 곡선 대신 직진이 이어진다 -- 못 도는 것보다 나쁘다.
+        """
+        kick = self.kick()
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=13200)
+        kick.apply(command, 0.0, None)
+        self.assertEqual(kick.apply(command, 1.0, None).steering_cdeg, 13200)
 
     def test_stalled_but_straight_keeps_the_ordinary_figure(self):
         kick = self.kick()
@@ -636,11 +680,17 @@ class CommandCurvatureLimitTest(unittest.TestCase):
         self.assertGreater(fast, slow)
 
     def test_speed_is_not_reduced_to_achieve_it(self):
-        """Slowing down would make the curvature worse, not better."""
+        """Slowing down would make the curvature worse, not better.
+
+        ⚠️ 종전에는 직진과 **같아야** 한다고 못 박았는데, steered_speed_boost 가
+           1.0(사실상 끔)이던 시절의 표현이다. 1.6 이 된 지금은 회전이 오히려
+           더 빠르다 -- 조향륜이 긁는 저항을 이기려는 것이므로 의도대로다.
+           지켜야 할 것은 처음부터 "느려지지 않는다" 였다.
+        """
         limits = self.limits()
         capped = map_twist(0.08, 0.35, limits)
         straight = map_twist(0.08, 0.0, limits)
-        self.assertEqual(capped.drive_percent, straight.drive_percent)
+        self.assertGreaterEqual(capped.drive_percent, straight.drive_percent)
 
     def test_gentle_turns_pass_through_untouched(self):
         limits = self.limits()
@@ -710,3 +760,49 @@ class SteeringSettleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SustainFloorTest(unittest.TestCase):
+    """구름을 유지하는 하한이 조향 깊이를 따라간다.
+
+    전륜 구동 · 후륜 조향이라, 조향륜이 꺾일수록 바닥을 옆으로 긁는 저항이
+    커지고 구동륜이 그만큼 더 밀어야 구름이 유지된다. 직진에서 잰 12% 를
+    회전에도 그대로 쓰면 굴러가던 차가 도로 선다.
+    """
+
+    def limits(self):
+        return TeleopLimits(min_sustain_drive_percent=12,
+                            max_sustain_drive_percent=22)
+
+    def test_straight_keeps_the_measured_floor(self):
+        """직선과 파렛 진입은 종전 값이어야 한다 -- 진입 깊이가 여기 묶여 있다."""
+        self.assertEqual(
+            sustain_floor_percent(0.20, 0.0, self.limits()), 12)
+
+    def test_a_deep_turn_raises_the_floor(self):
+        deep = sustain_floor_percent(0.20, 2.4, self.limits())
+        self.assertGreater(deep, 12)
+        self.assertLessEqual(deep, 22)
+
+    def test_deeper_never_asks_for_less(self):
+        limits = self.limits()
+        floors = [sustain_floor_percent(0.20, w, limits)
+                  for w in (0.0, 0.4, 0.9, 1.6, 2.4)]
+        self.assertEqual(floors, sorted(floors))
+
+    def test_a_stopped_command_is_not_a_turn(self):
+        self.assertEqual(
+            sustain_floor_percent(0.0, 2.4, self.limits()), 12)
+
+
+class SustainFloorValidationTest(unittest.TestCase):
+    def test_the_steered_floor_cannot_exceed_the_starting_floor(self):
+        """넘으면 '유지' 가 아니라 '출발' 값이 되어 버린다."""
+        with self.assertRaises(ValueError):
+            TeleopLimits(min_sustain_drive_percent=12,
+                         max_sustain_drive_percent=99).validate()
+
+    def test_it_cannot_fall_below_the_straight_floor(self):
+        with self.assertRaises(ValueError):
+            TeleopLimits(min_sustain_drive_percent=12,
+                         max_sustain_drive_percent=5).validate()

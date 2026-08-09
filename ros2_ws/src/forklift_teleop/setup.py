@@ -46,6 +46,7 @@ setup(
             "mode_marker = forklift_teleop.mode_marker:main",
             "mission_runner = forklift_teleop.mission_runner:main",
             "pivot_node = forklift_teleop.pivot_node:main",
+            "debug_hud = forklift_teleop.debug_hud:main",
             "map_odom_publisher = "
             "forklift_teleop.map_odom_publisher:main",
         ],

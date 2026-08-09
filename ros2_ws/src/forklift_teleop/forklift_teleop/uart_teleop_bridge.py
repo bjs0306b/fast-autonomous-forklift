@@ -14,6 +14,7 @@ import serial
 from std_msgs.msg import String
 
 from forklift_teleop.mapping import (
+    sustain_floor_percent,
     ActuatorCommand,
     SpeedController,
     StartupKick,
@@ -54,6 +55,10 @@ class UartTeleopBridge(Node):
         self.declare_parameter("stall_speed_mps", 0.01)
         self.declare_parameter("max_stall_kick_sec", 2.0)
         self.declare_parameter("stall_kick_rest_sec", 1.0)
+        # 꺾인 채로 못 뜰 때 조향을 펴고 출발할지. 끄면 종전처럼 듀티만 올린다.
+        self.declare_parameter("straighten_to_start", True)
+        self.declare_parameter("straighten_max_sec", 1.5)
+        self.declare_parameter("straighten_release_mps", 0.05)
         self.declare_parameter("speed_control_enabled", True)
         self.declare_parameter("speed_percent_per_mps_second", 500.0)
         self.declare_parameter("speed_max_bias_percent", 40)
@@ -80,6 +85,8 @@ class UartTeleopBridge(Node):
         self.declare_parameter("min_drive_percent", _d.min_drive_percent)
         self.declare_parameter("min_sustain_drive_percent",
                                _d.min_sustain_drive_percent)
+        self.declare_parameter("max_sustain_drive_percent",
+                               _d.max_sustain_drive_percent)
         self.declare_parameter("max_drive_percent", _d.max_drive_percent)
         self.declare_parameter("max_start_drive_percent",
                                _d.max_start_drive_percent)
@@ -122,6 +129,9 @@ class UartTeleopBridge(Node):
             ),
             min_sustain_drive_percent=int(
                 self.get_parameter("min_sustain_drive_percent").value
+            ),
+            max_sustain_drive_percent=int(
+                self.get_parameter("max_sustain_drive_percent").value
             ),
             max_drive_percent_reverse=int(
                 self.get_parameter("max_drive_percent_reverse").value
@@ -222,6 +232,15 @@ class UartTeleopBridge(Node):
             ),
             stall_kick_rest_sec=float(
                 self.get_parameter("stall_kick_rest_sec").value
+            ),
+            straighten_to_start=bool(
+                self.get_parameter("straighten_to_start").value
+            ),
+            straighten_max_sec=float(
+                self.get_parameter("straighten_max_sec").value
+            ),
+            straighten_release_mps=float(
+                self.get_parameter("straighten_release_mps").value
             ),
         )
         # The encoder tells the kick whether the wheels actually turned. With
@@ -503,7 +522,12 @@ class UartTeleopBridge(Node):
         rolling = (self._measured_speed is not None
                    and abs(self._measured_speed)
                    > self._startup_kick.stall_speed_mps)
-        floor = (self._limits.min_sustain_drive_percent if rolling
+        # 굴러가는 중의 하한은 조향 깊이에 따라 달라진다. 조향륜이 꺾일수록
+        # 바닥을 옆으로 긁는 저항이 커져, 직진에서 잰 12% 로는 굴러가던 차가
+        # 도로 선다. 중립이면 그대로 12% 라 직선과 파렛 진입은 안 바뀐다.
+        floor = (sustain_floor_percent(self._last_twist.linear.x,
+                                       self._last_twist.angular.z,
+                                       self._limits) if rolling
                  else self._limits.min_drive_percent)
         # Both bounds move together: while stalled the vehicle may go below
         # the cruising floor's reason for existing and above the cruising

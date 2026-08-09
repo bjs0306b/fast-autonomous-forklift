@@ -67,6 +67,27 @@ class StartupKick:
     # 창을 늘리는 대신 끊는 이유는 전류다. 계속 밀어 두면 멈춘 모터에 큰
     # 전류를 계속 넣게 된다. 쉬는 구간이 평균을 내려 준다.
     stall_kick_rest_sec: float = 1.0
+    # ⚠️ **꺾인 채로는 못 뜬다 -- 그러면 펴고 출발한다.**
+    #
+    # 이 차는 전륜 구동 · 후륜 조향이다. 조향륜(후륜)은 스스로 굴러갈 힘이
+    # 없고, 깊게 꺾일수록 진행 방향과 어긋나 바닥을 옆으로 긁는다. 구동륜
+    # (전륜)이 자기 마찰에 더해 그 저항까지 끌어야 하므로, **각도가 깊을수록
+    # 출발에 필요한 힘이 커진다.** 실측으로는 완전 조향에서 100% 를 줘도 못 떴다.
+    #
+    # 듀티를 더 올려 이기려는 것이 종전 방식인데 상한이 있다. 대신 순서를
+    # 바꾼다: 조향을 중립으로 펴서 긁는 저항을 없앤 채 출발하고, 엔코더가
+    # 구름을 확인하면 원래 곡률을 돌려준다. 구르는 중에는 조향륜이 굴러가며
+    # 방향을 바꾸므로 긁지 않는다 -- 완전 조향으로도 잘 돈다는 것이 실측돼 있다.
+    #
+    # ⚠️ 펴는 동안 차는 **의도한 곡선이 아니라 직진**한다. 그래서 시간 상한을
+    #    둔다. 그 안에 못 뜨면 원래 명령을 그대로 통과시켜, 가드와 탈출 후진이
+    #    맡게 한다 -- 여기서 무한정 밀면 벽으로 곧장 간다.
+    straighten_to_start: bool = True
+    straighten_max_sec: float = 1.5
+    # 이 속도를 넘으면 "굴러가고 있다" 로 보고 조향을 돌려준다. stall_speed_mps
+    # 보다 넉넉히 위에 둔다 -- 문턱을 막 넘은 순간에 놓으면 다시 멈춘다.
+    straighten_release_mps: float = 0.05
+    straightening_since: float = math.inf
     deadline: float = -math.inf
     stall_started: float = -math.inf
     straight_since: float = -math.inf
@@ -102,6 +123,49 @@ class StartupKick:
             self.straight_since = now
         return now - self.straight_since >= self.steering_settle_sec
 
+    def _straighten(
+        self,
+        command: ActuatorCommand,
+        now: float,
+        measured_speed_mps: Optional[float],
+        stalled: bool,
+    ) -> Optional[ActuatorCommand]:
+        """펴고 출발하는 구간이면 그 명령을, 아니면 None 을 돌려준다.
+
+        ⚠️ **엔코더가 없으면 아예 하지 않는다.** 구르기 시작한 것을 볼 수 없으면
+           언제 조향을 돌려줘야 할지도 모른다. 그 상태에서 펴 버리면 의도한
+           곡선 대신 직진을 계속하게 되고, 그건 못 도는 것보다 나쁘다.
+        """
+        if not self.straighten_to_start or measured_speed_mps is None:
+            return None
+        if self._steering_is_straight(command):
+            self.straightening_since = math.inf
+            return None
+
+        if abs(measured_speed_mps) >= self.straighten_release_mps:
+            # 굴러가고 있다. 조향을 돌려준다 -- 여기서부터는 꺾여도 돈다.
+            self.straightening_since = math.inf
+            return None
+
+        if self.straightening_since == math.inf:
+            if not stalled:
+                return None
+            self.straightening_since = now
+        elif now - self.straightening_since >= self.straighten_max_sec:
+            # 상한을 넘겼다. 펴서도 못 뜨는 것이므로 원래 명령을 통과시켜
+            # 가드와 탈출 후진에 넘긴다.
+            return None
+
+        percent = (self.forward_percent if command.drive_percent > 0
+                   else -self.reverse_percent)
+        return replace(
+            command,
+            steering_cdeg=self.steering_center_cdeg,
+            drive_percent=(max(command.drive_percent, percent)
+                           if command.drive_percent > 0
+                           else min(command.drive_percent, percent)),
+        )
+
     def apply(
         self,
         command: ActuatorCommand,
@@ -116,15 +180,30 @@ class StartupKick:
         if direction == 0:
             self.deadline = -math.inf
             self.stall_started = -math.inf
+            self.straightening_since = math.inf
             self.last_direction = 0
             return command
         if direction != self.last_direction:
             self.deadline = now + self.duration_sec
             self.stall_started = now
+            self.straightening_since = math.inf
         self.last_direction = direction
         stalled = (measured_speed_mps is not None
                    and abs(measured_speed_mps) < self.stall_speed_mps
                    and self._pushing(now))
+
+        # ⚠️ **조향 이력은 어느 분기로 가든 먼저 기록한다.** _steering_has_settled
+        #    는 판단이면서 동시에 "언제부터 곧았나" 를 적는다. 아래에서 일찍
+        #    돌아가며 이걸 건너뛰었더니, 꺾인 명령이 지나갔다는 사실이 안 남아
+        #    다음 직진 명령이 곧바로 할인(reverse_straight_percent)을 받았다 --
+        #    서보가 아직 꺾여 있는데 모자란 듀티를 주는 바로 그 실패다.
+        settled = self._steering_has_settled(command, now)
+
+        straightened = self._straighten(command, now, measured_speed_mps,
+                                        stalled)
+        if straightened is not None:
+            return straightened
+
         if stalled and direction > 0 and not self._steering_is_straight(command):
             # A forward start with the wheels turned is the same sideways
             # scrub that makes reverse expensive: the 50% that starts this
@@ -152,8 +231,7 @@ class StartupKick:
         # Reverse duty is negative, so the stronger command is the smaller one.
         percent = (
             self.reverse_straight_percent
-            if (self._steering_has_settled(command, now)
-                and self.reverse_straight_percent > 0)
+            if settled and self.reverse_straight_percent > 0
             else self.reverse_percent
         )
         return replace(
@@ -258,6 +336,14 @@ class TeleopLimits:
     # 출발은 SpeedController 의 적분과 StartupKick 이 맡으므로, 일단 구르고
     # 나면 여기까지 내려갈 수 있어야 한다.
     min_sustain_drive_percent: int = 12
+    # 조향륜이 완전히 꺾였을 때의 유지 하한. 위 12 는 조향륜이 **펴진** 직진에서
+    # 잰 값이다. 깊게 꺾이면 조향륜이 바닥을 옆으로 긁어 구름을 유지하는 데
+    # 필요한 힘 자체가 커지고, 12% 로는 굴러가던 차가 도로 선다.
+    #
+    # ⚠️ **전역으로 올리지 말 것.** 12 에는 파렛 진입 속도가 묶여 있다
+    #    (INSERT_SPEED 가 이 하한에 걸려 실제 진입 듀티를 정한다). 조향각에
+    #    비례해서만 올려야 직진·진입 구간이 종전 그대로 남는다.
+    max_sustain_drive_percent: int = 22
     max_drive_percent: int = 75
     # 정지마찰을 이기는 동안만 쓰는 상한. 위 값은 **순항** 상한이다.
     #
@@ -283,7 +369,9 @@ class TeleopLimits:
     #
     # 조향각 자체는 원래 명령한 곡률로 정하고 속도만 올리므로, 따라가는 호는
     # 그대로이고 그 위를 더 빨리 지날 뿐이다.
-    steered_speed_boost: float = 1.0
+    # 조향륜이 깊게 꺾일수록 목표 속도를 올린다. 중립이면 1.0 배라 직선은
+    # 그대로다. 근거와 실측은 config/teleop.yaml 에 있다.
+    steered_speed_boost: float = 1.6
     # ⚠️ **정지 상태에서 뒷바퀴가 완전히 누우면 못 출발한다** (2026-08-07 실측,
     #    100% 듀티까지 확인). 굴러가는 중이면 완전 조향으로도 잘 돈다 -- 안 되는
     #    것은 그 상태로 서 있다가 출발하는 것 하나뿐이다.
@@ -343,6 +431,15 @@ class TeleopLimits:
             raise ValueError(
                 "min_sustain_drive_percent must be between 0 and "
                 "min_drive_percent"
+            )
+        # 완전 조향 하한은 직진 하한 이상이어야 하고, 출발 하한을 넘으면
+        # "유지" 가 아니라 "출발" 값이 되어 버린다.
+        if not (self.min_sustain_drive_percent
+                <= self.max_sustain_drive_percent
+                <= self.min_drive_percent):
+            raise ValueError(
+                "max_sustain_drive_percent 는 min_sustain_drive_percent 와 "
+                "min_drive_percent 사이여야 한다"
             )
         if not (self.max_drive_percent <= self.max_start_drive_percent
                 <= 100):
@@ -493,6 +590,25 @@ def steering_turn_ratio(
     return _clamp(
         abs(rear_steering_angle(linear_x, angular_z, limits)) / limit, 0.0, 1.0
     )
+
+
+def sustain_floor_percent(
+    linear_x: float,
+    angular_z: float,
+    limits: "TeleopLimits",
+) -> int:
+    """구름을 유지하는 최소 듀티. 조향이 깊을수록 커진다.
+
+    전륜 구동 · 후륜 조향이라, 조향륜이 꺾일수록 바닥을 옆으로 긁는 저항이
+    커지고 구동륜이 그만큼 더 밀어야 구름이 유지된다. 직진에서 잰 하한을
+    그대로 쓰면 회전 중에 굴러가던 차가 도로 선다.
+
+    중립이면 min_sustain_drive_percent 그대로이므로 직선 구간과 파렛 진입은
+    종전 값을 유지한다 -- 그쪽에는 진입 깊이가 묶여 있어 바꾸면 안 된다.
+    """
+    ratio = steering_turn_ratio(linear_x, angular_z, limits)
+    span = limits.max_sustain_drive_percent - limits.min_sustain_drive_percent
+    return limits.min_sustain_drive_percent + int(round(span * ratio))
 
 
 def map_twist(
