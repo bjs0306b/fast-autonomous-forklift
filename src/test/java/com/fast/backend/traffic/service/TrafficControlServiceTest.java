@@ -287,6 +287,59 @@ class TrafficControlServiceTest {
     }
 
     @Test
+    @DisplayName("나를 세운 앞차의 위치가 끊기면, 내 위치가 멀쩡해도 재개하지 않는다")
+    void 앞차_위치가_끊기면_재개하지_않는다() {
+        location("FOLLOWER", 0, 0, 0, 2.0);
+        location("LEADER", 5, 0, 0, 0.0);
+        status("FOLLOWER", VehicleStatus.MOVING);
+        status("LEADER", VehicleStatus.IDLE);
+
+        TrafficControlService svc = service(props(true, "FOLLOWER", "LEADER"));
+        svc.tick();
+        assertThat(issuedCommands("FOLLOWER")).containsExactly("STOP");
+
+        // FOLLOWER 는 계속 신선하고, LEADER 만 끊긴다.
+        // 예전에는 이때 "위반 상대가 없다 = 안전" 으로 읽혀 RESUME 이 나갔다 — 앞차가 어디
+        // 있는지 모르는 채로 그쪽으로 다시 보내는 것이라 이 클래스의 안전 원칙과 정반대다.
+        snapshots.clear();
+        statuses.clear();
+        location("FOLLOWER", 0, 0, 0, 0.0);
+        status("FOLLOWER", VehicleStatus.HOLDING);
+
+        svc.tick();
+
+        assertThat(issuedCommands("FOLLOWER")).containsExactly("STOP");
+        assertThat(svc.heldVehicles()).containsKey("FOLLOWER");
+    }
+
+    @Test
+    @DisplayName("전체 일시정지·비상정지 중에는 거리가 벌어져도 재개하지 않는다")
+    void 전체_정지_중에는_재개하지_않는다() {
+        location("FOLLOWER", 0, 0, 0, 2.0);
+        location("LEADER", 5, 0, 0, 0.0);
+        status("FOLLOWER", VehicleStatus.MOVING);
+        status("LEADER", VehicleStatus.IDLE);
+
+        TrafficControlService svc = service(props(true, "FOLLOWER", "LEADER"));
+        svc.tick();
+        assertThat(issuedCommands("FOLLOWER")).containsExactly("STOP");
+
+        // 사람이 전체 비상정지를 눌렀다. 그 뒤 앞차가 멀어져 거리 조건은 충족된다.
+        when(operationService.state()).thenReturn(OperationState.ESTOPPED);
+        snapshots.clear();
+        statuses.clear();
+        location("FOLLOWER", 0, 0, 0, 0.0);
+        location("LEADER", 30, 0, 0, 0.0);
+        status("FOLLOWER", VehicleStatus.HOLDING);
+        status("LEADER", VehicleStatus.IDLE);
+
+        svc.tick();
+
+        // 사람이 세워 둔 것을 기계가 풀면 안 된다.
+        assertThat(issuedCommands("FOLLOWER")).containsExactly("STOP");
+    }
+
+    @Test
     @DisplayName("제어 대상이 아닌 차량에는 명령하지 않는다(관측만)")
     void 대상이_아니면_명령하지_않는다() {
         location("CONTROLLED", 0, 0, 0, 2.0);

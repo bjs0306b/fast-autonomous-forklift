@@ -2,7 +2,6 @@ package com.fast.backend.traffic.service;
 
 import com.fast.backend.traffic.config.CycleProperties;
 import com.fast.backend.traffic.config.LoopTrackProperties;
-import com.fast.backend.traffic.domain.CyclePhase;
 import com.fast.backend.traffic.domain.Track;
 import com.fast.backend.traffic.domain.VehicleCycle;
 import com.fast.backend.traffic.domain.VehicleMotion;
@@ -365,9 +364,7 @@ public class CycleControlService {
 
     /** 주기를 처음부터 다시. 실패 복구용이라 주기 수는 올리지 않는다. */
     private void restart(VehicleCycle cycle, long now) {
-        while (cycle.phase() != CyclePhase.TO_BAY) {
-            cycle.advance(now);
-        }
+        cycle.restartToBay(now);
     }
 
     private void releaseBay(String vehicleId) {
@@ -389,9 +386,22 @@ public class CycleControlService {
         return cycles.computeIfAbsent(vehicleId, id -> new VehicleCycle(id, now));
     }
 
+    /**
+     * 지금 화물을 싣고 있는가.
+     *
+     * <p><b>차량이 보고한 적재 여부를 먼저 본다.</b> 예전에는 {@code status} 로만 판정했는데,
+     * 시뮬은 적재를 마친 뒤에도 {@code IDLE} 을 보고한다. 그래서 실제로는 화물(C0009)을 싣고
+     * 있는데 {@link #load}) 가 그것을 못 알아보고 40 초 뒤 타임아웃 → 주기 재시작을 무한
+     * 반복했다. 랙에는 한 번도 못 가면서 완료 주기 수만 올라갔다(2026-08-10 실측 8주기).
+     *
+     * <p>{@code null} 은 "모른다"다 — 이 필드를 안 보내는 차량(실물)은 예전처럼 상태로 본다.
+     * {@code UNLOADING} 은 "내려놓는 중"이므로 아직 싣고 있다는 뜻이다.
+     */
     private static boolean isLoaded(VehicleMotion motion) {
-        // VehicleMotion 은 적재 여부를 직접 담지 않는다. 차량이 보고한 상태로 대신 본다 —
-        // UNLOADING 은 "내려놓는 중"이므로 아직 싣고 있다는 뜻이다.
+        Boolean reported = motion.loaded();
+        if (reported != null) {
+            return reported;
+        }
         return motion.status() == VehicleStatus.LOADING
                 || motion.status() == VehicleStatus.UNLOADING;
     }
