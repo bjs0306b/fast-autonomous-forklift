@@ -16,6 +16,9 @@ import java.util.Map;
  * @param bay             입고 바이 좌표·진입 방향
  * @param exit            바이 탈출점
  * @param arriveTolM      스테이션 도달 판정(m)
+ * @param approachTriggerM 스테이션 <b>진입점</b>까지 남은 호장이 이 값 이하가 되면 순환로를 벗어나
+ *                        목적지로 직행한다. 규격 {@code APPROACH_TRIGGER}=4.0 —
+ *                        그 전까지는 규칙 1(일방통행)에 따라 모서리를 하나씩 돈다
  * @param alignMinDwellMs 정렬 <b>최소</b> 대기(ms). 규격 {@code ALIGN_MIN_MS}=7000 —
  *                        정렬 자체가 최대 8초 걸리고, 지시 반영에도 200~400ms 가 든다
  * @param alignTimeoutMs  정렬 상한(ms). 규격 {@code ALIGN_MAX_MS}=12000 —
@@ -35,6 +38,7 @@ public record CycleProperties(
         Station bay,
         Station exit,
         Double arriveTolM,
+        Double approachTriggerM,
         Long alignMinDwellMs,
         Long alignTimeoutMs,
         Long loadTimeoutMs,
@@ -57,6 +61,7 @@ public record CycleProperties(
         if (bay == null) bay = DEFAULT_BAY;
         if (exit == null) exit = DEFAULT_EXIT;
         if (arriveTolM == null || arriveTolM <= 0) arriveTolM = 1.5;
+        if (approachTriggerM == null || approachTriggerM <= 0) approachTriggerM = 4.0;
         if (alignMinDwellMs == null || alignMinDwellMs < 0) alignMinDwellMs = 7_000L;
         if (alignTimeoutMs == null || alignTimeoutMs <= 0) alignTimeoutMs = 12_000L;
         if (alignMinDwellMs > alignTimeoutMs) {

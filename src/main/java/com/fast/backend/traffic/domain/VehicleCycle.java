@@ -34,6 +34,16 @@ public final class VehicleCycle {
     /** 작업 단계의 시작 시각(ms). 무한 대기를 막는 안전장치. */
     private volatile long workStartedAtMs;
 
+    /**
+     * 순환로를 벗어나 스테이션으로 직행하는 중인가 (규칙 1 — 일방통행).
+     *
+     * <p><b>왜 한 번 정하면 유지하는가.</b> 진입 판정은 "진입점까지 남은 호장"으로 하는데,
+     * 통로를 벗어나기 시작하면 투영 지점이 튀어 그 값이 다시 커진다. 매 tick 다시 재면
+     * 빠져나가다 말고 순환로로 돌아가기를 반복한다. 그래서 한 번 진입하면 단계가 끝날
+     * 때까지 붙잡는다.
+     */
+    private volatile boolean approaching;
+
     /** 정체 감시 — 마지막으로 "움직였다"고 인정한 위치와 시각. */
     private volatile double lastX;
     private volatile double lastY;
@@ -82,6 +92,28 @@ public final class VehicleCycle {
         workStartedAtMs = nowMs;
         // 단계가 바뀌면 목표도 바뀐다. 지우지 않으면 새 단계의 첫 목표가 "이미 보냈다"로 걸러진다.
         lastGoal = null;
+        approaching = false;    // 새 단계는 다시 순환로부터 시작한다
+    }
+
+    /** 지금 스테이션으로 직행 중인가. */
+    public boolean isApproaching() {
+        return approaching;
+    }
+
+    /** 순환로를 벗어나 스테이션으로 직행하기 시작한다. */
+    public void markApproaching() {
+        approaching = true;
+    }
+
+    /**
+     * 진입을 취소하고 순환로 주행으로 되돌린다.
+     *
+     * <p>정체가 감지됐을 때 쓴다 — 진입하다 막혔으면 경로를 다시 잡아야 한다.
+     * 참조 구현({@code demo_loop2.py})은 재전송 3 회마다 이걸 했는데, 여기서는 정체가
+     * 잡힐 때마다 한다. 정체 판정 자체가 20 초·0.3m 로 이미 보수적이라 더 세분할 이득이 없다.
+     */
+    public void cancelApproach() {
+        approaching = false;
     }
 
     /**
@@ -98,6 +130,7 @@ public final class VehicleCycle {
         rackCode = null;
         workStartedAtMs = nowMs;
         lastGoal = null;
+        approaching = false;
     }
 
     /** 랙을 배정한다. 같은 주기에 두 번 부르지 않도록 {@link #rackCode()} 로 확인하고 쓴다. */

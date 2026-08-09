@@ -97,6 +97,10 @@ traffic:
     bay: { x: 16.5, y: 5.0, yaw: 0.0 }
     exit: { x: 15.5, y: 4.0, yaw: 1.5708 }
     arrive-tol-m: ${TRAFFIC_CYCLE_ARRIVE_TOL_M:1.5}
+    # 규칙 1(일방통행). 스테이션 진입점까지 남은 호장이 이 값 이하가 되면 순환로를 벗어나
+    # 목적지로 직행하고, 그 전까지는 모서리를 하나씩 돈다. 이 값을 키우면 일찍 빠져나가
+    # 창고 가운데를 가로지르게 되므로 함부로 올리지 말 것 — 규격 APPROACH_TRIGGER 는 4.0 이다.
+    approach-trigger-m: ${TRAFFIC_CYCLE_APPROACH_TRIGGER_M:4.0}
     # 작업 단계 상한(ms). 무한 대기를 막는 안전장치이며, 단계 전이는 loaded 로 판정한다.
     # 정렬 판정 (규격 §5). state 가 아니라 telemetry 의 busy 로 판정한다 —
     # 정렬이 끝나도 state 는 LOADING 을 유지하므로 구별이 안 된다.
