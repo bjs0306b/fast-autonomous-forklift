@@ -148,7 +148,7 @@ mosquitto_pub $B -t 'fast/v1/vehicle/sim02/control' -m '{"command":"RESUME"}'
 
 ```bash
 mosquitto_pub $B -t 'fast/v1/vehicle/sim02/task' \
-  -m '{"taskId":"T-1","x":17.0,"y":5.0,"yaw":0.0}'
+  -m '{"taskId":"T-1","x":16.5,"y":5.0,"yaw":0.0}'
 ```
 
 좌표는 **시뮬 좌표**(0~20 × 0~30). 위 예시는 입고 바이입니다.
@@ -173,7 +173,7 @@ client.publish("fast/v1/vehicle/sim02/control",
 
 // 이동
 String task = """
-    {"taskId":"T-1","x":17.0,"y":5.0,"yaw":0.0}
+    {"taskId":"T-1","x":16.5,"y":5.0,"yaw":0.0}
     """;
 client.publish("fast/v1/vehicle/sim02/task",
         task.getBytes(StandardCharsets.UTF_8), 1, false);
@@ -260,7 +260,7 @@ QoS 는 명령류 **1**, telemetry 구독은 **0** 을 권합니다.
 ### 4.1 단순 이동
 
 ```json
-{ "taskId": "T-1042", "x": 17.0, "y": 5.0, "yaw": 0.0 }
+{ "taskId": "T-1042", "x": 16.5, "y": 5.0, "yaw": 0.0 }
 ```
 
 ### 4.2 집기 → 놓기
@@ -268,7 +268,7 @@ QoS 는 명령류 **1**, telemetry 구독은 **0** 을 권합니다.
 ```json
 {
   "taskId": "T-1043",
-  "pickup":  { "x": 17.0, "y": 5.0,  "yaw": 0.0,   "forkHeight": 0.0 },
+  "pickup":  { "x": 16.5, "y": 5.0,  "yaw": 0.0,   "forkHeight": 0.0 },
   "dropoff": { "x": 5.0,  "y": 9.3,  "yaw": 3.1416, "forkHeight": 1.325 }
 }
 ```
@@ -354,7 +354,10 @@ QoS 는 명령류 **1**, telemetry 구독은 **0** 을 권합니다.
 | **진입 간격** | 동시 출발 방지. 한 주기에 한 대씩 합류 허가 |
 | **정체 감시** | 20초간 진전 없으면 목표 재전송 |
 
-알고리즘 상세와 상태 전이는 [traffic-rules-spec.md](traffic-rules-spec.md)
+**구현 설계서가 따로 있습니다** — [backend-control-impl.md](backend-control-impl.md).
+데이터 모델·규칙별 Java 의사코드·검증 절차가 들어 있습니다.
+
+알고리즘 배경과 상태 전이는 [traffic-rules-spec.md](traffic-rules-spec.md)
 (13장, 조건표 포함)에 있습니다. 참조 구현은
 `nav2/scripts/demo_loop2.py` 와 `nav2/scripts/track.py` 입니다.
 
@@ -386,7 +389,7 @@ mosquitto_pub -h i15a304.p.ssafy.io -p 8883 -u <아이디> -P <비번> \
 
 # 목적지 주기
 mosquitto_pub ... -t 'fast/v1/vehicle/sim02/task' \
-  -m '{"taskId":"T-1","x":17.0,"y":5.0,"yaw":0.0}'
+  -m '{"taskId":"T-1","x":16.5,"y":5.0,"yaw":0.0}'
 ```
 
 F팀 시뮬이 켜져 있어야 반응합니다. 필요한 시각을 알려주면 맞춰 띄우겠습니다.

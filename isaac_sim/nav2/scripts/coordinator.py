@@ -19,7 +19,7 @@ from nav2_msgs.action import NavigateToPose
 from tf2_ros import Buffer, TransformListener
 
 # ---- 시나리오 좌표 (필요하면 여기만 고치면 됨) ----
-BAY = (17.0, 5.0)          # 짐 받는 칸
+BAY = (16.5, 5.0)          # 짐 받는 칸
 WAIT = (10.0, 5.0)         # B 가 기다릴 지점 (bay 앞)
 OCCUPANT = "SIM_F03"       # bay 를 선점하는 차량 A
 ARRIVER = "sim_f02"        # 도착하려는 차량 B (네임스페이스, 소문자)
