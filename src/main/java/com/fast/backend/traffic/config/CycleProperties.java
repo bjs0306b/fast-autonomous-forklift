@@ -31,6 +31,8 @@ import java.util.Map;
  *                        접근점(destination_x)과 달리 DB 에 두지 않았다 — 차량이 자체 수행하는
  *                        구간이라 백엔드가 "그리로 보내야 하는 것처럼" 읽히면 안 되기 때문이다
  * @param reverseDist     적재 후 후진 거리. 차량이 쓰는 값이고 백엔드는 전달만 한다
+ * @param placementEnabled 화물 높이로 층을 고를지. 꺼 두면 {@code racks} 배정표 순서대로 돈다
+ * @param cargoHeightScale telemetry 의 화물 높이(시뮬)를 실물 m 로 바꾸는 배수. 기본 0.1
  */
 @ConfigurationProperties(prefix = "traffic.cycle")
 public record CycleProperties(
@@ -47,7 +49,9 @@ public record CycleProperties(
         Map<String, List<String>> racks,
         Map<String, Double> dockX,
         Double reverseDist,
-        Map<String, Station> home
+        Map<String, Station> home,
+        Boolean placementEnabled,
+        Double cargoHeightScale
 ) {
 
     /** 규격 §1 "스테이션". BAY(16.5, 5.0, yaw 0=동), EXIT(15.5, 4.0, yaw 1.5708=북). */
@@ -78,6 +82,9 @@ public record CycleProperties(
         dockX = dockX == null || dockX.isEmpty() ? DEFAULT_DOCK_X : Map.copyOf(dockX);
         if (reverseDist == null || reverseDist <= 0) reverseDist = 2.0;
         home = home == null ? Map.of() : Map.copyOf(home);
+        if (placementEnabled == null) placementEnabled = false;
+        // 시뮬 단위 → 실물 m. 좌표계가 실물의 10 배다(seed-rack-slots.sql §1).
+        if (cargoHeightScale == null || cargoHeightScale <= 0) cargoHeightScale = 0.1;
     }
 
     /**

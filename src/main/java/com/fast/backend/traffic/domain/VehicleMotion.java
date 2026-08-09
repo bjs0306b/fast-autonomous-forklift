@@ -12,6 +12,9 @@ import com.fast.backend.vehicle.domain.VehicleStatus;
  * @param loaded     차량이 보고한 적재 여부. {@code null} 이면 <b>모른다</b>(이 필드를 안 보내는 차량).
  *                   {@code status} 로 대신 추정하지 않고 "모른다"를 그대로 넘긴다 — 쓰는 쪽이
  *                   폴백을 정해야 판단 근거가 한 곳에 남는다
+ * @param cargoHeight 차량이 보고한 화물 <b>전체</b> 높이. <b>팔레트가 포함</b>돼 있고 단위는
+ *                   <b>시뮬</b>이다({@code IsaacVehicleTelemetryMessage.Cargo} 주석).
+ *                   AI 가 잰 화물만의 높이와 다른 값이니 섞어 쓰지 말 것. {@code null} 은 모름
  */
 public record VehicleMotion(
         String vehicleId,
@@ -20,14 +23,22 @@ public record VehicleMotion(
         Double headingDeg,
         Double speedMps,
         VehicleStatus status,
-        Boolean loaded
+        Boolean loaded,
+        Double cargoHeight
 ) {
 
     /** 적재 여부를 모르는 채로 만든다. 그 값을 쓰지 않는 판단(차간 거리·구역)용이다. */
     public VehicleMotion(
             String vehicleId, double x, double y,
             Double headingDeg, Double speedMps, VehicleStatus status) {
-        this(vehicleId, x, y, headingDeg, speedMps, status, null);
+        this(vehicleId, x, y, headingDeg, speedMps, status, null, null);
+    }
+
+    /** 화물 높이를 모르는 채로 만든다(차간·구역 판정용). */
+    public VehicleMotion(
+            String vehicleId, double x, double y,
+            Double headingDeg, Double speedMps, VehicleStatus status, Boolean loaded) {
+        this(vehicleId, x, y, headingDeg, speedMps, status, loaded, null);
     }
 
     /** 지금 선반에서 하역·적재 작업 중인가. 이 상태면 그 자리를 점유한 것으로 본다. */
