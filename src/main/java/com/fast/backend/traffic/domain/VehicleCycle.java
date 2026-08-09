@@ -25,6 +25,14 @@ public final class VehicleCycle {
     private volatile int cycles;
 
     /**
+     * 이번 주기에 싣기로 한 화물 높이(<b>실물 m</b>, 팔레트 제외).
+     *
+     * <p>{@code LOAD} 에서 정해 차량에 지시하고, {@code TO_RACK} 에서 층을 고를 때 같은 값을 쓴다.
+     * 지시한 높이와 판정에 쓰는 높이가 갈리면 "10cm 를 실으라고 해 놓고 7cm 자리에 넣는" 일이 난다.
+     */
+    private volatile Double cargoHeightM;
+
+    /**
      * 마지막으로 보낸 목표. <b>같은 목표를 반복 발행하지 않기 위해</b> 쓴다.
      *
      * <p>규격 §10 함정 5번 — 매 tick 같은 목표를 보내면 차량이 목표를 계속 갈아타며 버벅인다.
@@ -77,6 +85,15 @@ public final class VehicleCycle {
         return cycles;
     }
 
+    /** 이번 주기의 화물 높이(실물 m). 아직 안 정했으면 {@code null}. */
+    public Double cargoHeightM() {
+        return cargoHeightM;
+    }
+
+    public void setCargoHeightM(Double value) {
+        this.cargoHeightM = value;
+    }
+
     public String lastGoal() {
         return lastGoal;
     }
@@ -88,6 +105,7 @@ public final class VehicleCycle {
         if (before == CyclePhase.RACK) {
             cycles++;
             rackCode = null;
+            cargoHeightM = null;    // 새 주기는 높이를 다시 정한다
         }
         workStartedAtMs = nowMs;
         // 단계가 바뀌면 목표도 바뀐다. 지우지 않으면 새 단계의 첫 목표가 "이미 보냈다"로 걸러진다.
@@ -136,6 +154,7 @@ public final class VehicleCycle {
         workStartedAtMs = nowMs;
         lastGoal = null;
         approaching = false;
+        cargoHeightM = null;
     }
 
     public void restartToBay(long nowMs) {
@@ -145,6 +164,7 @@ public final class VehicleCycle {
         workStartedAtMs = nowMs;
         lastGoal = null;
         approaching = false;
+        cargoHeightM = null;
     }
 
     /** 랙을 배정한다. 같은 주기에 두 번 부르지 않도록 {@link #rackCode()} 로 확인하고 쓴다. */

@@ -88,7 +88,7 @@ class CycleControlServiceTest {
                 2.0,
                 Map.of("SIM-F02", new CycleProperties.Station(4.0, 4.0, 0.0)),
                 false,   // 이 클래스는 주행 경로를 본다. 높이 배정은 PlacementServiceTest 가 맡는다
-                0.1);
+                0.1, 0.07, 0.14);
     }
 
     private static PlacementService placementService() {
@@ -191,7 +191,7 @@ class CycleControlServiceTest {
                 false, new CycleProperties.Station(BAY_X, BAY_Y, 0.0),
                 new CycleProperties.Station(15.5, 4.0, 1.5708),
                 1.5, 4.0, 7_000L, 12_000L, 40_000L, 90_000L, 0.15,
-                Map.of(), Map.of("A", 2.60), 2.0, Map.of(), false, 0.1);
+                Map.of(), Map.of("A", 2.60), 2.0, Map.of(), false, 0.1, 0.07, 0.14);
         CycleControlService svc = new CycleControlService(
                 off, loopProps(), operationService, publisher, rackApproaches,
                 procedureRegistry, storageSlotMapper, cargoMapper, placementService());

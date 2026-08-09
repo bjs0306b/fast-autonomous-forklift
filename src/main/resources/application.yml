@@ -118,7 +118,13 @@ traffic:
     load-timeout-ms: ${TRAFFIC_CYCLE_LOAD_TIMEOUT_MS:40000}
     place-timeout-ms: ${TRAFFIC_CYCLE_PLACE_TIMEOUT_MS:90000}
     # 바이에서 받을 화물 높이. 이 값만 실물 m 다(규격 §6).
+    # **첫 주기**에만 쓴다 — 시연에서 처음 나오는 상자는 실제 물건이고 카메라가 그 높이를 잰다.
     cargo-height-m: ${TRAFFIC_CYCLE_CARGO_HEIGHT_M:0.15}
+    # 두 번째 주기부터는 이 범위에서 무작위로 뽑는다(실물 m). 박스가 늘 같은 크기면 늘 같은
+    # 층에 쌓여 층 판정이 보이지 않는다. **층 임계를 사이에 두도록** 잡을 것 —
+    # 지금 0층 0.14 / 1층 0.2 기준 임계는 0.103 이라 0.07~0.14 면 반반쯤 갈린다.
+    cargo-height-random-min-m: ${TRAFFIC_CYCLE_CARGO_HEIGHT_RANDOM_MIN_M:0.07}
+    cargo-height-random-max-m: ${TRAFFIC_CYCLE_CARGO_HEIGHT_RANDOM_MAX_M:0.14}
     # 화물 높이로 층을 고른다. 켜면 아래 racks 배정표는 **폴백**이 된다 — 높이를 모르는
     # 차량(그 필드를 안 보내는 실물)이나 DB 조회 실패 때만 쓰인다.
     placement-enabled: ${TRAFFIC_CYCLE_PLACEMENT_ENABLED:true}

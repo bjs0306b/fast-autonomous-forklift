@@ -255,8 +255,9 @@ public class CycleControlService {
     private void load(VehicleCycle cycle, VehicleMotion motion, long now) {
         cycle.setTarget("LOAD");
         if (cycle.shouldSendGoal("load")) {
-            publisher.publishCargo(cycle.vehicleId(),
-                    CargoActionMessage.load(cycleProperties.cargoHeightM(), null));
+            double height = decideCargoHeight(cycle);
+            cycle.setCargoHeightM(height);
+            publisher.publishCargo(cycle.vehicleId(), CargoActionMessage.load(height, null));
         }
         if (isLoaded(motion)) {
             cycle.advance(now);
@@ -611,12 +612,22 @@ public class CycleControlService {
         if (!Boolean.TRUE.equals(cycleProperties.placementEnabled())) {
             return null;
         }
+        // 이번 주기에 싣기로 지시한 높이가 정본이다. telemetry 는 시뮬이 그 값을 반영하지
+        // 않을 때의 대비책일 뿐이다(2026-08-10 실측: 시뮬이 지시 높이를 무시하고 고정
+        // 크기 박스를 쓴다). 지시한 높이와 판정 높이가 갈리면 "10cm 를 실으라 해 놓고
+        // 7cm 자리에 넣는" 일이 난다.
+        Double ordered = cycle.cargoHeightM();
+        boolean fromOrder = ordered != null && ordered > 0;
         Double simHeight = motion.cargoHeight();
-        if (simHeight == null || simHeight <= 0) {
+        if (!fromOrder && (simHeight == null || simHeight <= 0)) {
             log.debug("화물 높이를 몰라 배정표로 고른다: vehicleId={}", cycle.vehicleId());
             return null;
         }
-        double totalHeight = simHeight * cycleProperties.cargoHeightScale();
+        // 지시 높이는 팔레트를 뺀 화물만의 높이이고, telemetry 는 팔레트를 포함한다.
+        // 진입점이 다른 이유가 이것이다.
+        double totalHeight = fromOrder
+                ? ordered + 0        // recommend 가 팔레트를 더한다
+                : simHeight * cycleProperties.cargoHeightScale();
         try {
             java.util.Set<String> taken = slotsOtherVehiclesAreHeadingTo(cycle.vehicleId());
             List<PlacementCandidate> candidates = new java.util.ArrayList<>();
@@ -629,16 +640,44 @@ public class CycleControlService {
                         row.getForkHeight(), row.getDestinationX(), row.getDestinationY(),
                         row.getDestinationHeading(), null, row.getStatus()));
             }
-            PlacementRecommendation pick =
-                    placementService.recommendByTotalHeight(totalHeight, candidates);
-            log.info("높이로 랙 선택: vehicleId={}, 화물높이={}(시뮬)={}m, rack={}, fork={}",
-                    cycle.vehicleId(), simHeight, totalHeight, pick.slotCode(), pick.forkHeight());
+            PlacementRecommendation pick = fromOrder
+                    ? placementService.recommend(totalHeight, null, candidates)
+                    : placementService.recommendByTotalHeight(totalHeight, candidates);
+            log.info("높이로 랙 선택: vehicleId={}, 화물높이={}m({}), rack={}, fork={}",
+                    cycle.vehicleId(), String.format("%.4f", totalHeight),
+                    fromOrder ? "지시" : "telemetry", pick.slotCode(), pick.forkHeight());
             return pick.slotCode();
         } catch (RuntimeException e) {
             log.warn("높이로 랙을 고르지 못해 배정표로 간다: vehicleId={}, 사유={}",
                     cycle.vehicleId(), e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 이번 주기에 실을 화물 높이를 정한다(실물 m, 팔레트 제외).
+     *
+     * <p><b>첫 주기는 설정값</b>({@code cargo-height-m}) 이다 — 시연에서 처음 나오는 상자는
+     * 실제 물건이고 그 높이를 카메라가 잰다. <b>두 번째부터는 범위 안에서 무작위로</b> 뽑는다.
+     * 그래야 층이 갈리는 장면이 나온다. 박스가 늘 같은 크기면 늘 같은 층에 쌓인다.
+     *
+     * <p>범위는 층 임계를 걸치게 잡아야 의미가 있다. 기본 0.07~0.14 는 임계 0.103 을 사이에
+     * 두므로 0층·1층이 대략 반반 나온다. 임계는 칸 높이에 따라 바뀌니 함께 조정할 것.
+     *
+     * <p><b>AI 측정값을 쓰지 않는 이유</b>: 측정 → 적재 위치 추천 흐름이 아직 운반 작업에
+     * 연결돼 있지 않아 주기가 그 값을 받을 길이 없다. 연결되면 첫 주기의 설정값 자리에
+     * 측정값을 넣으면 된다.
+     */
+    private double decideCargoHeight(VehicleCycle cycle) {
+        if (cycle.cycles() == 0) {
+            return cycleProperties.cargoHeightM();
+        }
+        double min = cycleProperties.cargoHeightRandomMinM();
+        double max = cycleProperties.cargoHeightRandomMaxM();
+        if (min >= max) {
+            return min;
+        }
+        return min + java.util.concurrent.ThreadLocalRandom.current().nextDouble() * (max - min);
     }
 
     /** 지금 다른 차가 향하고 있는 칸. 같은 자리를 두 대가 노리지 않게 한다. */
