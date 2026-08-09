@@ -105,8 +105,36 @@ class Spans:
         return f"{head}  —  {parts}"
 
 
+def capture_backend() -> int:
+    """이 OS 에서 쓸 OpenCV 캡처 백엔드.
+
+    ⚠️ **백엔드를 한 값으로 박으면 다른 OS 에서 카메라가 아예 안 열린다.**
+    2026-08-06 에 `CAP_DSHOW`(윈도우 전용)가 `CAP_V4L2`(리눅스 전용)로 바뀌면서
+    **측정 PC 에서 `--check` 가 "index 0 안 열림"으로 죽었다.** 인덱스를 고쳐도
+    소용없다 — 백엔드가 그 OS 에 없으면 어느 인덱스든 안 열린다.
+
+    스테이션 측정은 윈도우 노트북에서 돌고(카메라·TF-Nova 가 거기 붙어 있다),
+    같은 코드를 젯슨에서도 돌린다. 그래서 고르는 쪽이 아니라 **묻는 쪽**으로 둔다.
+
+    `STATION_CAMERA_BACKEND` 로 강제할 수 있다(`dshow`/`v4l2`/`any`). 자동 판단이
+    틀린 환경에서 코드를 고치지 않고 넘기기 위한 탈출구다.
+    """
+    forced = os.environ.get("STATION_CAMERA_BACKEND", "").strip().lower()
+    if forced:
+        table = {"dshow": cv2.CAP_DSHOW, "v4l2": cv2.CAP_V4L2, "any": cv2.CAP_ANY}
+        if forced not in table:
+            raise ValueError(
+                f"STATION_CAMERA_BACKEND={forced!r} — dshow/v4l2/any 중 하나여야 한다")
+        return table[forced]
+    if sys.platform.startswith("win"):
+        return cv2.CAP_DSHOW
+    if sys.platform.startswith("linux"):
+        return cv2.CAP_V4L2
+    return cv2.CAP_ANY
+
+
 def capture(cfg: StationConfig) -> "cv2.typing.MatLike":
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(cfg.camera_index, capture_backend())
     if not cap.isOpened():
         raise RuntimeError(f"카메라 index {cfg.camera_index}를 열 수 없습니다 (--probe로 확인)")
     try:
@@ -142,7 +170,7 @@ def read_distance(cfg: StationConfig) -> Measurement | None:
 
 def probe_cameras(max_index: int = 3) -> None:
     for idx in range(max_index):
-        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+        cap = cv2.VideoCapture(idx, capture_backend())
         if not cap.isOpened():
             print(f"index {idx}: 안 열림")
             continue
@@ -254,7 +282,7 @@ def check_wiring(args) -> int:
 
     print("=== 카메라 ===")
     cfg = StationConfig()
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(cfg.camera_index, capture_backend())
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_height)
@@ -598,7 +626,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     detector = build_detector()
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(cfg.camera_index, capture_backend())
     if not cap.isOpened():
         print(f"카메라 index {cfg.camera_index} 안 열림 (--probe로 확인)", file=sys.stderr)
         trigger.__exit__(None, None, None)

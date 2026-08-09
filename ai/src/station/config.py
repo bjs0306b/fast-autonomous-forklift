@@ -41,7 +41,11 @@ class StationConfig:
     # --- 카메라 ---
     # 이 PC에는 내장 캠과 BRIO가 함께 있어 인덱스가 섞일 수 있다. 실측(2026-07-22):
     # index 1이 BRIO였음. 장치 구성이 바뀌면 `python -m station.serve --probe`로 재확인.
-    camera_index: int = 0
+    #
+    # ⚠️ 2026-08-06에 이 값이 **0으로 바뀐 채 주석만 1로 남아** 있었다(43fa010,
+    # "Refactor forklift teleop protocol" — 제목에 스테이션이 없어 안 보였다).
+    # 0은 내장 캠이라 측정이 엉뚱한 화면을 잰다. **주석과 값이 어긋나면 값을 의심할 것.**
+    camera_index: int = 1
     frame_width: int = 1920    # 캘리브레이션 기준 해상도 — 바꾸면 fx/fy 무효
     frame_height: int = 1080
     warmup_frames: int = 25    # 자동 노출 안정화 전 프레임은 어둡다 (실측)

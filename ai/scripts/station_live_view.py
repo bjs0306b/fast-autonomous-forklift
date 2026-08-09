@@ -43,6 +43,7 @@ from station.annotate import annotate  # noqa: E402
 from station.config import StationConfig  # noqa: E402
 from station.detector import OnnxDetector  # noqa: E402
 from station.pipeline import build_payload  # noqa: E402
+from station.serve import capture_backend  # noqa: E402
 from station.tilt import estimate_roll_deg  # noqa: E402
 
 PATH_COLOR = {"onboard": (120, 220, 120), "local": (80, 180, 255), "none": (80, 80, 240)}
@@ -137,7 +138,7 @@ def main(argv=None) -> int:
         detector = local
         print("추론: 노트북(로컬)")
 
-    cap = cv2.VideoCapture(cfg.camera_index, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(cfg.camera_index, capture_backend())
     if not cap.isOpened():
         print(f"카메라 index {cfg.camera_index} 안 열림 (serve.py --probe로 확인)")
         return 1
