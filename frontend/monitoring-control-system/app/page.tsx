@@ -523,29 +523,14 @@ export default function MonitoringPage() {
                 onRetryConnection={reconnectStream}
                 selectedVehicle={selectedSummary}
                 realtimeStatus={realtimeStatus}
-                pip={
-                  <AiMeasurementVideo
-                    streamUrl={AI_MEASUREMENT_STREAM_URL}
-                    onboardStreamUrl={ONBOARD_STREAM_URL}
-                    connectionStatus={aiVideoStatus}
-                    active={activeSlide === 0}
-                    pip
-                    retryKey={aiVideoRetryKey}
-                    /*
-                     * 검출 상자는 **송출 영상에 이미 그려져 있다**(측정 PC 가 매 프레임
-                     * 추론해 얹는다). 여기서 또 그리면 같은 물체에 두 벌이 겹친다.
-                     *
-                     * 그리고 이쪽 좌표는 **측정 시점에 고정**이라 그 뒤 화물이 움직이면
-                     * 어긋난 자리에 남는다 — 영상은 지금 모습인데 상자만 과거다.
-                     * 되살리려면 측정 PC 의 `--stream-infer-fps 0` 과 함께 쓸 것.
-                     */
-                    tippingLevel={lastMeasurement?.tippingLevel}
-                    onConnectionStatusChange={setAiVideoStatus}
-                    onFrameLoaded={setLastAiFrameReceivedAt}
-                    onOpenFullscreen={() => setActiveSlide(1)}
-                    onRetry={() => setAiVideoRetryKey((value) => value + 1)}
-                  />
-                }
+                /*
+                 * AI 측정 영상 PIP 는 뺐다(2026-08-10). 트윈 영상 위에 얹혀 있으면 정작
+                 * 봐야 할 차량·랙을 가리는데, 측정 영상은 옆 화면("AI 측정 영상 화면 열기")
+                 * 에서 크게 볼 수 있어 여기 둘 이유가 없다.
+                 *
+                 * `pip` 을 안 넘기면 `MainRealtimeMonitoringView` 가 선택 차량 오버레이를
+                 * 원래 자리로 되돌린다(같은 컴포넌트의 `!pip` 분기).
+                 */
               />
             </div>
 
