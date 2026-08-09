@@ -44,6 +44,9 @@ services:
         NEXT_PUBLIC_ISAAC_WEBRTC_SIGNAL_PORT: ${NEXT_PUBLIC_ISAAC_WEBRTC_SIGNAL_PORT:-49100}
         NEXT_PUBLIC_ISAAC_WEBRTC_MEDIA_PORT: ${NEXT_PUBLIC_ISAAC_WEBRTC_MEDIA_PORT:-47998}
         NEXT_PUBLIC_AI_MEASUREMENT_STREAM_URL: ${NEXT_PUBLIC_AI_MEASUREMENT_STREAM_URL:-}
+        # ⚠️ `NEXT_PUBLIC_*` 는 **빌드 때 코드에 박힌다.** `.env` 에만 넣고 여기 안 적으면
+        # 값이 컨테이너까지 가지 않아 화면에서 조용히 빠진다(2026-08-09 실측).
+        NEXT_PUBLIC_ONBOARD_STREAM_URL: ${NEXT_PUBLIC_ONBOARD_STREAM_URL:-}
     container_name: fast-frontend
     restart: unless-stopped
     ports:
