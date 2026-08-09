@@ -115,12 +115,14 @@ class Overlay:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._dets: list = []
+        self._lines: list = []
         self._stamp = 0.0
         self._error: str | None = None
 
-    def publish(self, dets: list) -> None:
+    def publish(self, dets: list, lines: list | None = None) -> None:
         with self._lock:
             self._dets = dets
+            self._lines = lines or []
             self._stamp = time.monotonic()
             self._error = None
 
@@ -138,6 +140,13 @@ class Overlay:
             if not self._dets or (time.monotonic() - self._stamp) > max_age_s:
                 return []
             return list(self._dets)
+
+    def read_lines(self, max_age_s: float = 2.0) -> list:
+        """패널 문구. 검출과 같은 이유로 오래된 것은 안 그린다."""
+        with self._lock:
+            if (time.monotonic() - self._stamp) > max_age_s:
+                return []
+            return list(self._lines)
 
     @property
     def error(self) -> str | None:
@@ -157,13 +166,15 @@ class InferenceThread(threading.Thread):
     """
 
     def __init__(self, bus: "FrameBus", detector, overlay: Overlay,
-                 stop: threading.Event, fps: float = 3.0) -> None:
+                 stop: threading.Event, fps: float = 3.0, summarize=None) -> None:
         super().__init__(name="station-stream-infer", daemon=True)
         self._bus = bus
         self._detector = detector
         self._overlay = overlay
         self._stopping = stop
         self._interval = 1.0 / fps if fps > 0 else 0.0
+        # 검출 목록 -> 화면 상단 패널 문구. 없으면 상자만 그린다.
+        self._summarize = summarize
 
     def run(self) -> None:
         seq = -1
@@ -173,7 +184,9 @@ class InferenceThread(threading.Thread):
             if frame is None:
                 continue
             try:
-                self._overlay.publish(self._detector.detect(frame))
+                dets = self._detector.detect(frame)
+                lines = self._summarize(dets) if self._summarize else []
+                self._overlay.publish(dets, lines)
             except Exception as e:
                 # 조용히 빈 화면으로 넘어가지 않는다 — 원인을 남긴다.
                 self._overlay.fail(f"{type(e).__name__}: {e}")
@@ -208,6 +221,29 @@ def draw_detections(frame: np.ndarray, dets: list) -> np.ndarray:
         cv2.rectangle(out, (x, top), (x + tw + 8, top + th + 10), color, -1)
         cv2.putText(out, text, (x + 4, top + th + 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    return out
+
+
+PANEL_BG = (30, 30, 30)
+
+
+def draw_panel(frame: np.ndarray, lines: list) -> np.ndarray:
+    """상단 정보 패널. `lines` 는 `(문구, BGR색)` 목록.
+
+    패널을 **위**에 그린다 — 파렛트는 카메라가 낮아 늘 프레임 하단에 잡히므로
+    아래에 그리면 보여줘야 할 바로 그 부분을 가린다(`annotate.py` 와 같은 이유).
+    """
+    if not lines:
+        return frame
+    out = frame.copy()
+    font, fs, ft, pad, lh = cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2, 14, 42
+    height = pad * 2 + lh * len(lines)
+    shade = out.copy()
+    cv2.rectangle(shade, (0, 0), (out.shape[1], height), PANEL_BG, -1)
+    out = cv2.addWeighted(shade, 0.75, out, 0.25, 0)
+    for i, item in enumerate(lines):
+        text, color = item if isinstance(item, (tuple, list)) else (item, (240, 240, 240))
+        cv2.putText(out, text, (pad, pad + lh * (i + 1) - 10), font, fs, color, ft)
     return out
 
 
@@ -278,6 +314,7 @@ def _handler_factory(bus: FrameBus, stream_width: int, quality: int,
             # 선 굵기·글자 크기도 따로 맞춰야 한다.
             if overlay is not None:
                 frame = draw_detections(frame, overlay.read())
+                frame = draw_panel(frame, overlay.read_lines())
             if stream_width and frame.shape[1] > stream_width:
                 h = int(round(frame.shape[0] * stream_width / frame.shape[1]))
                 frame = cv2.resize(frame, (stream_width, h), interpolation=cv2.INTER_AREA)

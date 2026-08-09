@@ -273,6 +273,51 @@ def make_detector(args, cfg: StationConfig):
     )
 
 
+def make_stream_summary(cfg: StationConfig):
+    """송출 패널 문구를 만드는 함수를 돌려준다.
+
+    **거리계가 없어도 되는 항목만 낸다** — 전복 등급·편하중·돌출은 파렛트 대비
+    비율이라 기하만으로 나온다. 반면 **치수(W/H)는 거리에 비례**하므로 여기서 내지
+    않는다. 예전에 라이브 뷰가 고정 150cm 로 치수를 그려 **틀린 값이 그럴듯하게**
+    보인 적이 있다(CLAUDE.md 측정 조건). 치수는 측정 때만 낸다.
+    """
+    from perception.load_balance import assess_load
+    from station import tipping as tipping_mod
+
+    level_color = {"safe": (80, 200, 80), "warning": (0, 200, 255), "danger": (60, 60, 255)}
+
+    def summarize(dets) -> list:
+        boxes = [d.box for d in dets
+                 if d.label == "box" and d.score >= cfg.threshold_for("box")]
+        pallets = [d for d in dets
+                   if d.label == "pallet" and d.score >= cfg.threshold_for("pallet")]
+        lines = [(f"boxes {len(boxes)}   pallet {'yes' if pallets else 'no'}",
+                  (240, 240, 240))]
+        if not boxes or not pallets:
+            # 왜 나머지가 비었는지 화면에 남긴다 — 빈칸은 "안전"으로 오해된다.
+            lines.append(("tipping: N/A (박스 또는 파렛트 미검출)", (80, 80, 240)))
+            return lines
+
+        pallet = max(pallets, key=lambda d: d.score).box
+        tip = tipping_mod.assess_tipping(boxes, pallet)
+        if tip.get("assessable"):
+            level = tip["level"]
+            lines.append((f"TIPPING: {level.upper()}   offset {tip['support_offset']:.0%}"
+                          f"   overhang {tip['overhang']:.0%}",
+                          level_color.get(level, (240, 240, 240))))
+        try:
+            load = assess_load(boxes, pallet, threshold=cfg.eccentric_threshold)
+            state = "ECCENTRIC" if abs(load.ratio_x) > cfg.eccentric_threshold else "BALANCED"
+            lines.append((f"load: {state}  (ratio_x {load.ratio_x:+.3f})", (190, 190, 190)))
+        except Exception:
+            pass
+        # 치수는 거리계가 필요하다 — 여기서 지어내지 않고 그렇다고 알린다.
+        lines.append(("W/H: 측정 시 산출 (거리계 필요)", (170, 170, 170)))
+        return lines
+
+    return summarize
+
+
 def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None):
     """송출 화면에 검출을 그리는 추론 스레드를 띄운다. 끄면 `None`.
 
@@ -285,7 +330,8 @@ def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None):
     detector = detector or make_detector(args, cfg)
     overlay = livestream.Overlay()
     thread = livestream.InferenceThread(bus, detector, overlay, stop,
-                                        fps=args.stream_infer_fps)
+                                        fps=args.stream_infer_fps,
+                                        summarize=make_stream_summary(cfg))
     thread.start()
     where = args.infer_url or "로컬 ONNX"
     print(f"[stream] 검출 오버레이 {args.stream_infer_fps}fps ({where}) — 표시 전용",
