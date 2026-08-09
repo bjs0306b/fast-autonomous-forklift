@@ -74,6 +74,63 @@ class PlacementServiceTest {
                 slotCode, usableHeight, usableWidth, 0.40, 1.0, 2.0, 180.0, travelDistance, status);
     }
 
+    // ── 층 선택 ────────────────────────────────────────────────────────────────
+    // 랙에 0층·1층이 생기면서 필요해진 기준이다. 실측(2026-08-10) 기준으로
+    // 0층 칸(0.14 m)이 1층 칸(0.0675 m)보다 **높다**. 그래서 "남는 높이 최소" 로만 고르면
+    // 작은 화물이 죄다 1층으로 올라간다. 팀 결정은 **낮은 층 먼저**다.
+
+    /** 모형 스케일 설정 — 팔레트 0.012 · 여유 0.025 (application.yml 과 같은 값). */
+    private final PlacementService modelScale =
+            new PlacementService(new PlacementProperties(0.025, 0.012, 0.05, 0.10));
+
+    /** 0층 = fork 0.0 · usable 0.14 / 1층 = fork 1.325 · usable 0.0675 */
+    private static PlacementCandidate slot(String code, double usableHeight, double forkHeight) {
+        return new PlacementCandidate(
+                code, usableHeight, null, forkHeight, 5.0, 9.3, 180.0, 1.0,
+                StorageSlotStatus.EMPTY);
+    }
+
+    @Test
+    void 둘_다_들어가면_낮은_층을_고른다() {
+        // 2cm 화물은 0층(남는 높이 0.108)에도 1층(0.0355)에도 들어간다.
+        // 예전 기준이라면 딱 맞는 1층이 뽑혔다.
+        PlacementRecommendation result = modelScale.recommend(0.02, List.of(
+                slot("A101", 0.0675, 1.325),
+                slot("A001", 0.14, 0.0)));
+
+        assertThat(result.slotCode()).isEqualTo("A001");
+        assertThat(result.forkHeight()).isEqualTo(0.0);
+    }
+
+    @Test
+    void 낮은_층이_차면_위층으로_올라간다() {
+        PlacementRecommendation result = modelScale.recommend(0.02, List.of(
+                new PlacementCandidate("A001", 0.14, null, 0.0, 5.0, 9.3, 180.0, 1.0,
+                        StorageSlotStatus.OCCUPIED),
+                slot("A101", 0.0675, 1.325)));
+
+        assertThat(result.slotCode()).isEqualTo("A101");
+    }
+
+    @Test
+    void 위층에_안_들어가는_화물은_아래층으로_간다() {
+        // 5cm 화물: required 0.087 > 1층 0.0675 라 1층은 후보에서 빠진다.
+        PlacementRecommendation result = modelScale.recommend(0.05, List.of(
+                slot("A101", 0.0675, 1.325),
+                slot("A001", 0.14, 0.0)));
+
+        assertThat(result.slotCode()).isEqualTo("A001");
+    }
+
+    @Test
+    void 같은_층이면_예전대로_딱_맞는_칸을_고른다() {
+        PlacementRecommendation result = modelScale.recommend(0.02, List.of(
+                slot("A001", 0.14, 0.0),
+                slot("A002", 0.10, 0.0)));
+
+        assertThat(result.slotCode()).isEqualTo("A002");
+    }
+
     // ── 폭 검사 ────────────────────────────────────────────────────────────────
     // 깊이(depth)는 정면 카메라로 측정할 수 없어(pipeline.py 가 항상 null) 검사 대상이 아니다.
     // 그래서 회전(가로↔세로 교환) 판정도 하지 않는다 — 두 축을 다 알아야 성립한다.

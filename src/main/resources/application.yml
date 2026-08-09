@@ -20,8 +20,14 @@ server:
 storage:
   placement:
     # 단위는 m이며 화물 높이에는 팔레트 높이를 포함하지 않는다.
-    height-clearance: ${STORAGE_PLACEMENT_HEIGHT_CLEARANCE:0.25}
-    pallet-height-m: ${STORAGE_PLACEMENT_PALLET_HEIGHT_M:0.12}
+    #
+    # ⚠️ 값이 1/10 이다. 이 창고는 **모형**이고 AI 측정 카메라가 재는 것도 그 모형 박스다
+    #    (0층 칸 높이가 실측 0.14 m 다). 팔레트 0.12·여유 0.25 는 실물 T-11 기준이라,
+    #    그대로 두면 required 가 0.37 m 라 어떤 칸에도 안 들어간다. 세 값이 같은 자에서
+    #    비교되도록 모형 스케일로 통일했다(2026-08-10).
+    #    실물 크기 창고로 가면 0.25 / 0.12 로 되돌릴 것.
+    height-clearance: ${STORAGE_PLACEMENT_HEIGHT_CLEARANCE:0.025}
+    pallet-height-m: ${STORAGE_PLACEMENT_PALLET_HEIGHT_M:0.012}
     max-overhang-ratio-exclusive: ${STORAGE_PLACEMENT_MAX_OVERHANG_RATIO_EXCLUSIVE:0.05}
 
 station:
