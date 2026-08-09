@@ -250,6 +250,49 @@ def release_session(abandon: bool = False) -> int:
     return 0
 
 
+def make_detector(args, cfg: StationConfig):
+    """추론기를 만든다.
+
+    `--infer-url`이 있으면 온보드 원격 추론 서버만 사용한다.
+    원격 주소가 없을 때만 로컬 ONNX 모델을 초기화한다.
+    """
+    if args.infer_url:
+        from station.remote_detector import RemoteDetector
+        return RemoteDetector(
+            args.infer_url,
+            input_size=cfg.input_size,
+            local_detector=None,
+            score_threshold=cfg.score_threshold,
+            class_thresholds=cfg.class_score_thresholds,
+        )
+
+    return OnnxDetector(
+        cfg.model_path, cfg.input_size, cfg.score_threshold,
+        cfg.class_names, cfg.norm_mean, cfg.norm_std,
+        class_thresholds=cfg.class_score_thresholds,
+    )
+
+
+def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None):
+    """송출 화면에 검출을 그리는 추론 스레드를 띄운다. 끄면 `None`.
+
+    ⚠️ **표시 전용이다.** 저장되는 측정은 트리거 시점에 한 번만 재고, 이건 화면에
+    "지금 무엇을 잡고 있는가"를 보여줄 뿐이다. 둘을 섞으면 어느 프레임이 진짜 측정인지
+    구분할 수 없다.
+    """
+    if args.stream_infer_fps <= 0:
+        return None, None
+    detector = detector or make_detector(args, cfg)
+    overlay = livestream.Overlay()
+    thread = livestream.InferenceThread(bus, detector, overlay, stop,
+                                        fps=args.stream_infer_fps)
+    thread.start()
+    where = args.infer_url or "로컬 ONNX"
+    print(f"[stream] 검출 오버레이 {args.stream_infer_fps}fps ({where}) — 표시 전용",
+          flush=True)
+    return overlay, thread
+
+
 def run_stream_only(args) -> int:
     """카메라 화면만 내보낸다 — MQTT 도 측정도 하지 않는다.
 
@@ -277,8 +320,10 @@ def run_stream_only(args) -> int:
     stop = threading.Event()
     thread = livestream.CaptureThread(cap, bus, stop)
     thread.start()
+    overlay, _infer = start_stream_overlay(args, cfg, bus, stop)
     try:
-        server = livestream.start_server(bus, port=port, stream_width=args.stream_width)
+        server = livestream.start_server(bus, port=port, stream_width=args.stream_width,
+                                         overlay=overlay)
     except OSError as e:
         print(f"❌ 포트 {port} 열기 실패 — {e}", file=sys.stderr)
         stop.set()
@@ -451,6 +496,10 @@ def main(argv: list[str] | None = None) -> int:
                              f"여기서 함께 내보낸다")
     parser.add_argument("--stream-width", type=int, default=livestream.DEFAULT_STREAM_WIDTH,
                         help="송출 폭(px). 측정은 원본 해상도로 하고 화면만 줄인다")
+    parser.add_argument("--stream-infer-fps", type=float, default=3.0,
+                        help="송출 화면에 검출 상자를 그리는 주기(fps). 0이면 원본만 "
+                             "내보낸다. ⚠️ 표시 전용이고 백엔드로 안 간다 — 저장되는 "
+                             "측정은 트리거 시점 한 번뿐이다")
     parser.add_argument("--stream-only", action="store_true",
                         help="송출만 한다 — MQTT·측정 없이 카메라 화면만 내보낸다. "
                              "브로커 자격증명 없이 관제 화면을 띄워보거나 카메라를 "
@@ -477,26 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = StationConfig()
 
     def build_detector():
-        """추론기를 만든다.
-
-        `--infer-url`이 있으면 온보드 원격 추론 서버만 사용한다.
-        원격 주소가 없을 때만 로컬 ONNX 모델을 초기화한다.
-        """
-        if args.infer_url:
-            from station.remote_detector import RemoteDetector
-            return RemoteDetector(
-                args.infer_url,
-                input_size=cfg.input_size,
-                local_detector=None,
-                score_threshold=cfg.score_threshold,
-                class_thresholds=cfg.class_score_thresholds,
-            )
-
-        return OnnxDetector(
-            cfg.model_path, cfg.input_size, cfg.score_threshold,
-            cfg.class_names, cfg.norm_mean, cfg.norm_std,
-            class_thresholds=cfg.class_score_thresholds,
-        )
+        return make_detector(args, cfg)
 
     def measure_and_emit(detector=None, frame=None, spans: Spans | None = None) -> dict | None:
         """측정하고 결과를 stdout·`--out`으로 낸다. 이미지 로드 실패면 None.
@@ -722,9 +752,13 @@ def main(argv: list[str] | None = None) -> int:
 
     stream_server = None
     if args.stream_port:
+        # 측정용 추론기를 그대로 넘긴다 — 화면과 측정이 같은 모델·임계를 보게 한다.
+        # 다른 것을 쓰면 화면에 잡히는데 측정은 못 잡는(또는 그 반대) 일이 생긴다.
+        overlay, _ = start_stream_overlay(args, cfg, bus, stop_capture, detector)
         try:
             stream_server = livestream.start_server(
-                bus, port=args.stream_port, stream_width=args.stream_width)
+                bus, port=args.stream_port, stream_width=args.stream_width,
+                overlay=overlay)
             print(f"[listen] 송출 http://<이 PC>:{args.stream_port}/stream "
                   f"(폭 {args.stream_width}px · /health 로 상태 확인)", flush=True)
         except OSError as e:

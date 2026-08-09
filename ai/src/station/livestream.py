@@ -109,6 +109,108 @@ class FrameBus:
                     "frames": self._seq, "error": self._error}
 
 
+class Overlay:
+    """송출 프레임에 그릴 검출 결과. 추론 스레드가 갱신하고 인코딩 쪽이 읽는다."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._dets: list = []
+        self._stamp = 0.0
+        self._error: str | None = None
+
+    def publish(self, dets: list) -> None:
+        with self._lock:
+            self._dets = dets
+            self._stamp = time.monotonic()
+            self._error = None
+
+    def fail(self, message: str) -> None:
+        with self._lock:
+            self._error = message
+
+    def read(self, max_age_s: float = 2.0) -> list:
+        """너무 오래된 결과는 버린다.
+
+        추론이 멎었는데 마지막 상자를 계속 그리면 **화면이 지금 그것을 잡고 있다고
+        거짓말한다.** 사라진 물체가 계속 표시되는 쪽이 아무것도 안 그리는 것보다 나쁘다.
+        """
+        with self._lock:
+            if not self._dets or (time.monotonic() - self._stamp) > max_age_s:
+                return []
+            return list(self._dets)
+
+    @property
+    def error(self) -> str | None:
+        with self._lock:
+            return self._error
+
+
+class InferenceThread(threading.Thread):
+    """송출용 검출 — 화면에 그릴 상자를 주기적으로 갱신한다.
+
+    ⚠️ **이 결과는 표시 전용이다. 백엔드로 안 간다.** 저장되는 측정은 트리거 시점에
+    한 번만 재야 한다(화물을 놓는 도중 프레임은 손이 걸리거나 화물이 가장자리에 있어
+    치수가 틀린다 — `station_live_view.py` 주석 참고).
+
+    프레임마다 돌리지 않는다. 원격 추론은 왕복이 있고 보드는 다른 일도 한다 —
+    `fps` 로 제한하고 그 사이 프레임은 직전 결과를 그대로 쓴다.
+    """
+
+    def __init__(self, bus: "FrameBus", detector, overlay: Overlay,
+                 stop: threading.Event, fps: float = 3.0) -> None:
+        super().__init__(name="station-stream-infer", daemon=True)
+        self._bus = bus
+        self._detector = detector
+        self._overlay = overlay
+        self._stopping = stop
+        self._interval = 1.0 / fps if fps > 0 else 0.0
+
+    def run(self) -> None:
+        seq = -1
+        while not self._stopping.is_set():
+            started = time.monotonic()
+            frame, seq = self._bus.next(seq, timeout=2.0)
+            if frame is None:
+                continue
+            try:
+                self._overlay.publish(self._detector.detect(frame))
+            except Exception as e:
+                # 조용히 빈 화면으로 넘어가지 않는다 — 원인을 남긴다.
+                self._overlay.fail(f"{type(e).__name__}: {e}")
+                print(f"[stream-infer] ⚠️ 추론 실패: {e}", file=sys.stderr, flush=True)
+                if self._stopping.wait(1.0):
+                    return
+            if self._interval:
+                remain = self._interval - (time.monotonic() - started)
+                if remain > 0:
+                    self._stopping.wait(remain)
+
+
+BOX_COLOR = (80, 200, 80)      # BGR — 박스: 초록
+PALLET_COLOR = (60, 140, 255)  # 파렛트: 주황
+
+
+def draw_detections(frame: np.ndarray, dets: list) -> np.ndarray:
+    """검출 상자를 그린 사본을 돌려준다(원본은 건드리지 않는다 — 측정이 쓴다)."""
+    if not dets:
+        return frame
+    out = frame.copy()
+    for d in dets:
+        box = getattr(d, "box", None)
+        if box is None:
+            continue
+        x, y, w, h = int(box.x), int(box.y), int(box.w), int(box.h)
+        color = PALLET_COLOR if getattr(d, "label", "") == "pallet" else BOX_COLOR
+        cv2.rectangle(out, (x, y), (x + w, y + h), color, 3)
+        text = f"{getattr(d, 'label', '?')} {getattr(d, 'score', 0.0):.2f}"
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+        top = max(y - th - 10, 0)
+        cv2.rectangle(out, (x, top), (x + tw + 8, top + th + 10), color, -1)
+        cv2.putText(out, text, (x + 4, top + th + 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    return out
+
+
 class CaptureThread(threading.Thread):
     """카메라를 계속 읽어 버스에 흘린다.
 
@@ -152,7 +254,8 @@ class CaptureThread(threading.Thread):
                     self._stopping.wait(remain)
 
 
-def _handler_factory(bus: FrameBus, stream_width: int, quality: int):
+def _handler_factory(bus: FrameBus, stream_width: int, quality: int,
+                     overlay: Overlay | None = None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         # Nagle 이 작은 쓰기를 모으려고 기다리면 수백 ms 가 그냥 붙는다. 관제 영상은
@@ -171,6 +274,10 @@ def _handler_factory(bus: FrameBus, stream_width: int, quality: int):
                 self.send_error(404, "not found")
 
         def _encode(self, frame: np.ndarray) -> bytes | None:
+            # **검출을 원본 해상도에서 그린다.** 축소 뒤에 그리면 좌표를 환산해야 하고
+            # 선 굵기·글자 크기도 따로 맞춰야 한다.
+            if overlay is not None:
+                frame = draw_detections(frame, overlay.read())
             if stream_width and frame.shape[1] > stream_width:
                 h = int(round(frame.shape[0] * stream_width / frame.shape[1]))
                 frame = cv2.resize(frame, (stream_width, h), interpolation=cv2.INTER_AREA)
@@ -251,7 +358,8 @@ def _handler_factory(bus: FrameBus, stream_width: int, quality: int):
 
 def start_server(bus: FrameBus, port: int = DEFAULT_PORT, host: str = "0.0.0.0",
                  stream_width: int = DEFAULT_STREAM_WIDTH,
-                 quality: int = 80) -> ThreadingHTTPServer:
+                 quality: int = 80,
+                 overlay: Overlay | None = None) -> ThreadingHTTPServer:
     """MJPEG 서버를 데몬 스레드로 띄우고 돌려준다.
 
     ⚠️ `ThreadingHTTPServer` 를 쓴다. MJPEG 은 클라이언트가 접속을 길게 유지하므로
@@ -259,7 +367,8 @@ def start_server(bus: FrameBus, port: int = DEFAULT_PORT, host: str = "0.0.0.0",
     `onboard_infer_server.py` 의 "스레드 쓰지 말 것" 경고는 pycuda CUDA 컨텍스트가
     생성 스레드에 묶이는 문제라 여기엔 해당하지 않는다 — 여기선 CUDA 를 안 쓴다.)
     """
-    server = ThreadingHTTPServer((host, port), _handler_factory(bus, stream_width, quality))
+    server = ThreadingHTTPServer(
+        (host, port), _handler_factory(bus, stream_width, quality, overlay))
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, name="station-stream",
                      daemon=True).start()
