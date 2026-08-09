@@ -29,7 +29,7 @@ import {
   type ControlVehicleView,
   type OperationStateResponse,
 } from "@/lib/api/operationApi"
-import { AI_MEASUREMENT_STREAM_URL } from "@/lib/config/aiMeasurement"
+import { AI_MEASUREMENT_STREAM_URL, ONBOARD_STREAM_URL } from "@/lib/config/aiMeasurement"
 import { useIsaacSimStream } from "@/components/monitoring/IsaacSimStream"
 import type { RealtimeConnectionStatus, SelectedVehicleSummary } from "@/types/monitoring"
 import type { StationMeasurementData } from "@/types/websocket"
@@ -526,6 +526,7 @@ export default function MonitoringPage() {
                 pip={
                   <AiMeasurementVideo
                     streamUrl={AI_MEASUREMENT_STREAM_URL}
+                    onboardStreamUrl={ONBOARD_STREAM_URL}
                     connectionStatus={aiVideoStatus}
                     active={activeSlide === 0}
                     pip
@@ -569,6 +570,7 @@ export default function MonitoringPage() {
         <div className="h-full w-1/2 shrink-0 overflow-hidden px-0.5 pb-5" aria-label="AI 측정 영상 전체 보기 화면">
           <AiMeasurementVideo
             streamUrl={AI_MEASUREMENT_STREAM_URL}
+            onboardStreamUrl={ONBOARD_STREAM_URL}
             connectionStatus={aiVideoStatus}
             active={activeSlide === 1}
             fullscreen

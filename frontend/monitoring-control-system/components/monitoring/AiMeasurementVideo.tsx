@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ArrowLeft, Expand, Loader2, RefreshCw, Video, VideoOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AI_MEASUREMENT_STREAM_KIND } from "@/lib/config/aiMeasurement"
@@ -19,6 +19,7 @@ const STATUS_STYLE: Record<AiVideoConnectionStatus, { label: string; className: 
 
 export function AiMeasurementVideo({
   streamUrl,
+  onboardStreamUrl = null,
   connectionStatus,
   active,
   fullscreen = false,
@@ -37,6 +38,11 @@ export function AiMeasurementVideo({
   className,
 }: {
   streamUrl: string | null
+  /**
+   * 지게차(Orin) 온보드 카메라 스트림. 주면 헤더에 **스테이션/온보드 전환 버튼**이
+   * 생긴다. 없으면 버튼도 없다 — 누를 곳만 있고 안 나오는 것보다 낫다.
+   */
+  onboardStreamUrl?: string | null
   connectionStatus: AiVideoConnectionStatus
   active: boolean
   fullscreen?: boolean
@@ -74,14 +80,24 @@ export function AiMeasurementVideo({
   className?: string
 }) {
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const [source, setSource] = useState<"station" | "onboard">("station")
+
+  /*
+   * 온보드 주소가 없으면(또는 사라지면) 스테이션으로 돌아간다. 그렇지 않으면 선택만
+   * 남고 화면은 비어 "왜 안 나오지"가 된다.
+   */
+  const canSwitch = Boolean(onboardStreamUrl)
+  const activeSource = canSwitch ? source : "station"
+  const activeUrl = activeSource === "onboard" ? onboardStreamUrl : streamUrl
+
   // MJPEG 이냐 재생 페이지냐에 따라 그리는 요소가 다르다(streamKind.ts 주석 참고).
   // ⚠️ 아래 이펙트의 의존성 배열이 렌더 중에 읽으므로 **이펙트보다 먼저** 선언해야 한다.
-  const kind = streamKind(streamUrl, AI_MEASUREMENT_STREAM_KIND)
+  const kind = streamKind(activeUrl, AI_MEASUREMENT_STREAM_KIND)
 
   useEffect(() => {
     if (!active) return
-    onConnectionStatusChange(streamUrl ? "CONNECTING" : "DISCONNECTED")
-  }, [active, onConnectionStatusChange, retryKey, streamUrl])
+    onConnectionStatusChange(activeUrl ? "CONNECTING" : "DISCONNECTED")
+  }, [active, onConnectionStatusChange, retryKey, activeUrl])
 
   /*
    * MJPEG 은 `onLoad` 만 믿으면 안 된다.
@@ -95,7 +111,7 @@ export function AiMeasurementVideo({
    * 아직이면 짧은 주기로 다시 본다 — 이벤트가 오면 그쪽이 먼저 끝낸다.
    */
   useEffect(() => {
-    if (!active || !streamUrl || kind !== "mjpeg") return
+    if (!active || !activeUrl || kind !== "mjpeg") return
     if (connectionStatus === "CONNECTED") return
 
     const check = () => {
@@ -110,13 +126,13 @@ export function AiMeasurementVideo({
       if (check()) clearInterval(timer)
     }, 500)
     return () => clearInterval(timer)
-  }, [active, streamUrl, kind, connectionStatus, retryKey,
+  }, [active, activeUrl, kind, connectionStatus, retryKey,
       onConnectionStatusChange, onFrameLoaded])
 
   const boxRects = toBoxRects(boxes, frameWidth, frameHeight)
   const tipping = toTippingBadge(tippingLevel)
   const status = STATUS_STYLE[connectionStatus]
-  const showStream = active && Boolean(streamUrl)
+  const showStream = active && Boolean(activeUrl)
 
   return (
     <section
@@ -161,6 +177,40 @@ export function AiMeasurementVideo({
           </div>
         </div>
         <div className={cn("flex shrink-0 items-center gap-2", pip && "gap-1")}>
+          {/*
+            카메라 전환. 온보드 주소가 있을 때만 나온다.
+
+            ⚠️ 두 카메라는 **서로 다른 장치**다. 온보드로 바꾸면 측정 결과(검출 상자·
+            전복 등급)는 스테이션 카메라 기준이라 화면과 안 맞는다 — 그래서 전환하면
+            그 오버레이를 감춘다.
+          */}
+          {canSwitch ? (
+            <div
+              className="inline-flex overflow-hidden rounded-md border border-slate-600"
+              role="group"
+              aria-label="카메라 선택"
+            >
+              {([
+                { key: "station", label: "스테이션" },
+                { key: "onboard", label: "온보드" },
+              ] as const).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setSource(item.key)}
+                  aria-pressed={activeSource === item.key}
+                  className={cn(
+                    "px-2 py-0.5 text-[10px] font-semibold transition-colors",
+                    activeSource === item.key
+                      ? "bg-sky-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {fullscreen && lastFrameReceivedAt ? (
             <span className="hidden text-[10px] text-slate-400 sm:inline">
               최근 프레임 {formatTime(lastFrameReceivedAt)}
@@ -219,7 +269,7 @@ export function AiMeasurementVideo({
           <img
             key={retryKey}
             ref={imgRef}
-            src={streamUrl ?? undefined}
+            src={activeUrl ?? undefined}
             alt="화물·팔레트 AI 측정 카메라 실시간 영상"
             className="absolute inset-0 size-full object-contain"
             onLoad={() => {
@@ -244,7 +294,7 @@ export function AiMeasurementVideo({
            */
           <iframe
             key={retryKey}
-            src={streamUrl ?? undefined}
+            src={activeUrl ?? undefined}
             title="화물·팔레트 AI 측정 카메라 실시간 영상"
             allow="autoplay; fullscreen"
             className="absolute inset-0 size-full border-0"
@@ -263,7 +313,7 @@ export function AiMeasurementVideo({
           좌표는 %라 창 크기가 바뀌어도 따라간다(measurementBox.ts 주석 참고).
           pointer-events-none 이라 영상 조작을 가리지 않는다.
         */}
-        {showStream && boxRects.length > 0 ? (
+        {showStream && activeSource === "station" && boxRects.length > 0 ? (
           <div className="pointer-events-none absolute inset-0" aria-hidden="true">
             {boxRects.map((rect, index) => (
               <div
@@ -293,7 +343,7 @@ export function AiMeasurementVideo({
           고정한다. 상자 오버레이와 같은 절대배치 층에 두되 상자를 가리지 않도록
           위쪽 여백만 차지한다.
         */}
-        {showStream && tipping ? (
+        {showStream && activeSource === "station" && tipping ? (
           <div className="pointer-events-none absolute top-2 left-2 z-10">
             <span
               className={cn(
@@ -313,7 +363,7 @@ export function AiMeasurementVideo({
         {connectionStatus !== "CONNECTED" || !showStream ? (
           <div className={cn("absolute inset-0 flex items-center justify-center bg-slate-950/92 px-6 text-center", pip && "px-4")}>
             <div className={cn("flex max-w-md flex-col items-center gap-3", pip && "gap-2")}>
-              {connectionStatus === "CONNECTING" && streamUrl ? (
+              {connectionStatus === "CONNECTING" && activeUrl ? (
                 <Loader2 className={cn("size-9 animate-spin text-sky-400", pip && "size-7")} aria-hidden="true" />
               ) : connectionStatus === "ERROR" ? (
                 <VideoOff className={cn("size-9 text-red-400", pip && "size-7")} aria-hidden="true" />
@@ -322,10 +372,10 @@ export function AiMeasurementVideo({
               )}
               <div>
                 <p className={cn("text-sm font-semibold text-slate-100", pip && "text-[13px]")}>
-                  {connectionStatus === "ERROR" ? "AI 측정 영상 연결 끊김" : streamUrl ? "AI 측정 영상 연결 중" : "AI 측정 영상 연결 대기"}
+                  {connectionStatus === "ERROR" ? "AI 측정 영상 연결 끊김" : activeUrl ? "AI 측정 영상 연결 중" : "AI 측정 영상 연결 대기"}
                 </p>
                 <p className={cn("mt-1 text-xs text-slate-400", pip && "mt-1 text-[11px]")}>
-                  {connectionStatus === "ERROR" ? "영상 스트림 연결 상태를 확인하세요." : streamUrl ? "측정 카메라 영상의 첫 프레임을 기다리고 있습니다." : "측정 카메라가 연결되면 영상이 표시됩니다."}
+                  {connectionStatus === "ERROR" ? "영상 스트림 연결 상태를 확인하세요." : activeUrl ? "측정 카메라 영상의 첫 프레임을 기다리고 있습니다." : "측정 카메라가 연결되면 영상이 표시됩니다."}
                 </p>
               </div>
               {connectionStatus === "ERROR" && onRetry ? (

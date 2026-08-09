@@ -18,3 +18,16 @@ export const AI_MEASUREMENT_STREAM_URL =
  */
 export const AI_MEASUREMENT_STREAM_KIND =
   process.env.NEXT_PUBLIC_AI_MEASUREMENT_STREAM_KIND?.trim() || null
+
+/**
+ * 지게차(Orin)에 달린 온보드 카메라 스트림. 예: `http://<젯슨>:8878/stream`
+ * (`ai/scripts/onboard_camera_stream.py`).
+ *
+ * 값이 있으면 "AI 측정 영상" 패널에 **스테이션/온보드 전환 버튼**이 생긴다. 없으면
+ * 버튼 없이 스테이션 화면만 나온다 — 누를 곳이 있는데 안 나오는 것보다 낫다.
+ *
+ * ⚠️ 온보드 카메라는 **포크 정렬 노드와 같은 장치**다. 그쪽이 돌고 있으면 송출
+ * 서버가 카메라를 못 연다(리눅스 V4L2 도 배타적이다). 먼저 쓰는 쪽이 이긴다.
+ */
+export const ONBOARD_STREAM_URL =
+  process.env.NEXT_PUBLIC_ONBOARD_STREAM_URL?.trim() || null
