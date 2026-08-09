@@ -113,3 +113,8 @@ ai/camera_probe_*.jpg
 *.bak
 frontend/monitoring-control-system/tsconfig.tsbuildinfo
 frontend/monitoring-control-system/.next-dev.*.log
+
+# 발표 자료 이미지·영상 (116MB). 슬라이드에 넣고 나면 Canva 가 원본을 들고 있고,
+# git 은 바이너리 델타를 못 눌러 리포가 커진 채로 되돌아가지 않는다.
+# 원고·촬영 리스트·생성 스크립트(tools/)는 텍스트라 계속 추적한다.
+발표자료/images/
