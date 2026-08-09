@@ -43,9 +43,18 @@
 --
 --   높이로 잡았다가 1층이 0.0675 가 되어 3cm 짜리만 들어가는 이상한 랙이 됐다.
 --
---   층   칸 높이(시뮬)   usable_height(실물 m)   fork_height(시뮬)
---   0층  1.325           0.14  ← 실측             0.0
---   1층  2.0             0.2                     1.325
+-- ⚠️ **랙 A 와 B 는 선반 높이가 다르다**(2026-08-10, 실물 확인). 처음에는 둘이 같은 줄
+--    알고 한 값으로 넣었는데, B 는 선반이 더 낮게 달려 있어 0층이 좁고 1층이 넓다.
+--
+--   랙   층   칸 높이(시뮬)   usable_height(실물 m)   fork_height(시뮬)
+--   A    0층  1.35            0.14  ← 실측             0.0
+--   A    1층  2.0             0.2                     1.325
+--   B    0층  1.0             0.1                     0.0
+--   B    1층  2.35            0.235                   1.0   ← 선반이 낮으니 포크도 낮다
+--
+--    F팀 정본 `rack_slots.csv` 는 A1·B1 둘 다 `place_z 1.325` 로 **같다.** 시뮬은
+--    자기완결적이라 이 차이가 안 보이고, 어긋나는 것은 실물 포크뿐이다. 시뮬에 B 랙
+--    선반을 내리려면 그쪽 CSV 도 함께 고쳐야 한다(계약 문서 §6 로 전달할 것).
 --
 -- ⚠️ **단위가 컬럼마다 다르다**(seed-rack-slots.sql §1 참고).
 --    `fork_height` · `destination_*` 는 **시뮬 단위**(실물 ×10)로 그대로 task 에 나가고,
@@ -64,10 +73,13 @@
 --
 --     required = 화물높이 + 팔레트 0.012 + 여유 0.025      (모형 스케일)
 --
---     0층  0.14 ≥ required  →  화물 ≤ 0.103 m (10.3 cm)
---     1층  0.2  ≥ required  →  화물 ≤ 0.163 m (16.3 cm)
+--     A 0층  0.14  ≥ required  →  화물 ≤ 0.103 m (10.3 cm)
+--     A 1층  0.2   ≥ required  →  화물 ≤ 0.163 m (16.3 cm)
+--     B 0층  0.1   ≥ required  →  화물 ≤ 0.063 m ( 6.3 cm)
+--     B 1층  0.235 ≥ required  →  화물 ≤ 0.198 m (19.8 cm)
 --
--- 즉 10.3 cm 를 넘는 화물은 0층에 안 들어가고 **1층으로 올라간다.**
+-- 즉 화물이 커질수록 0층에서 밀려 1층으로 올라가고, A 1층에도 안 들어가는 큰 화물은
+-- B 1층으로 간다. 주기 설정의 무작위 상한(0.19)이 B 1층 한계 안에 있는 이유다.
 --
 -- =============================================================================
 
@@ -75,7 +87,22 @@
 -- (seed-rack-slots.sql §2). 그 값으로는 어떤 화물도 걸러지지 않았다.
 UPDATE storage_slot
    SET usable_height = 0.2
- WHERE slot_code REGEXP '^[AB][0-9]{3}$';
+ WHERE slot_code REGEXP '^A[0-9]{3}$';
+
+-- 랙 B 1층 — 선반이 A 보다 낮게 달려 있다. 칸이 그만큼 넓고(2.35) 포크는 낮게(1.0) 든다.
+--
+-- ⚠️ **UPDATE 로 둔다.** 아래 0층은 `INSERT IGNORE` 라 이미 있는 행을 안 고치는데, 이
+--    값들은 seed 를 한 번 돌린 뒤에 바뀐 것이라 INSERT 만으로는 영영 반영되지 않는다.
+--    UPDATE 는 몇 번 돌려도 같은 결과다.
+UPDATE storage_slot
+   SET usable_height = 0.235,
+       fork_height   = 1.0
+ WHERE slot_code REGEXP '^B[0-9]{3}$';
+
+-- 랙 B 0층 — 위와 같은 이유로 UPDATE 를 함께 둔다(신규 DB 는 아래 INSERT 가 넣는다).
+UPDATE storage_slot
+   SET usable_height = 0.1
+ WHERE slot_code REGEXP '^BF[0-9]{2}$';
 
 -- 0층 — 신규 24 칸. destination_* 는 1층과 같다(같은 칸의 위아래라 접근점이 같다).
 -- fork_height 0.0 — 바닥에 놓으므로 포크를 올리지 않는다. 이 값이 "낮은 층 먼저"
@@ -98,18 +125,18 @@ INSERT IGNORE INTO storage_slot
     ('AF11', 0.14, NULL, 0.0,  5.0, 22.5, 180.0, 'EMPTY'),
     ('AF12', 0.14, NULL, 0.0,  5.0, 23.8, 180.0, 'EMPTY'),
 -- ── 랙 B (가운데) · 접근점 x = 14.5 ─────────────────────────────────────────
-    ('BF01', 0.14, NULL, 0.0, 14.5,  9.3, 180.0, 'EMPTY'),
-    ('BF02', 0.14, NULL, 0.0, 14.5, 10.5, 180.0, 'EMPTY'),
-    ('BF03', 0.14, NULL, 0.0, 14.5, 11.8, 180.0, 'EMPTY'),
-    ('BF04', 0.14, NULL, 0.0, 14.5, 13.2, 180.0, 'EMPTY'),
-    ('BF05', 0.14, NULL, 0.0, 14.5, 14.5, 180.0, 'EMPTY'),
-    ('BF06', 0.14, NULL, 0.0, 14.5, 15.8, 180.0, 'EMPTY'),
-    ('BF07', 0.14, NULL, 0.0, 14.5, 17.2, 180.0, 'EMPTY'),
-    ('BF08', 0.14, NULL, 0.0, 14.5, 18.5, 180.0, 'EMPTY'),
-    ('BF09', 0.14, NULL, 0.0, 14.5, 19.7, 180.0, 'EMPTY'),
-    ('BF10', 0.14, NULL, 0.0, 14.5, 21.2, 180.0, 'EMPTY'),
-    ('BF11', 0.14, NULL, 0.0, 14.5, 22.5, 180.0, 'EMPTY'),
-    ('BF12', 0.14, NULL, 0.0, 14.5, 23.8, 180.0, 'EMPTY');
+    ('BF01', 0.1,  NULL, 0.0, 14.5,  9.3, 180.0, 'EMPTY'),
+    ('BF02', 0.1,  NULL, 0.0, 14.5, 10.5, 180.0, 'EMPTY'),
+    ('BF03', 0.1,  NULL, 0.0, 14.5, 11.8, 180.0, 'EMPTY'),
+    ('BF04', 0.1,  NULL, 0.0, 14.5, 13.2, 180.0, 'EMPTY'),
+    ('BF05', 0.1,  NULL, 0.0, 14.5, 14.5, 180.0, 'EMPTY'),
+    ('BF06', 0.1,  NULL, 0.0, 14.5, 15.8, 180.0, 'EMPTY'),
+    ('BF07', 0.1,  NULL, 0.0, 14.5, 17.2, 180.0, 'EMPTY'),
+    ('BF08', 0.1,  NULL, 0.0, 14.5, 18.5, 180.0, 'EMPTY'),
+    ('BF09', 0.1,  NULL, 0.0, 14.5, 19.7, 180.0, 'EMPTY'),
+    ('BF10', 0.1,  NULL, 0.0, 14.5, 21.2, 180.0, 'EMPTY'),
+    ('BF11', 0.1,  NULL, 0.0, 14.5, 22.5, 180.0, 'EMPTY'),
+    ('BF12', 0.1,  NULL, 0.0, 14.5, 23.8, 180.0, 'EMPTY');
 
 -- 확인 — 층별로 24 칸씩 48 칸이어야 한다.
 --
@@ -118,10 +145,14 @@ INSERT IGNORE INTO storage_slot
 -- 실제로는 UPDATE·INSERT 가 이미 적용된 뒤라 더 헷갈린다.
 --
 --   L0_floor  = 0층(바닥)   L1_shelf = 1층(선반)
-SELECT CASE WHEN slot_code LIKE '_F%' THEN 'L0_floor' ELSE 'L1_shelf' END AS level_name,
+--
+-- 랙까지 같이 묶는다 — A 와 B 의 높이가 다르므로 층만 보면 그 차이가 안 보이고,
+-- MIN() 이 낮은 쪽 값만 보여줘 "B 가 반영됐나"를 확인할 수 없다.
+SELECT LEFT(slot_code, 1) AS rack,
+       CASE WHEN slot_code LIKE '_F%' THEN 'L0_floor' ELSE 'L1_shelf' END AS level_name,
        COUNT(*)           AS slots,
        MIN(usable_height) AS usable_height,
        MIN(fork_height)   AS fork_height
   FROM storage_slot
- GROUP BY level_name
- ORDER BY level_name;
+ GROUP BY rack, level_name
+ ORDER BY rack, level_name;
