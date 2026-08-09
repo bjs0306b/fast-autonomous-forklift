@@ -338,7 +338,10 @@ class SteeredStallKickTest(unittest.TestCase):
     made 60% move the vehicle exactly nothing backwards.
     """
 
-    def kick(self):
+    def kick(self, straighten=True):
+        # ⚠️ straighten_to_start 는 이제 **기본이 꺼져 있다.** 2026-08-09
+        #    재측정에서 50도로 꺾인 채 정지 출발이 됐기 때문이다. 아래 시험들은
+        #    그 기능 자체를 보는 것이므로 명시적으로 켠다.
         return StartupKick(
             forward_percent=50,
             reverse_percent=100,
@@ -347,7 +350,22 @@ class SteeredStallKickTest(unittest.TestCase):
             steering_center_cdeg=9600,
             stall_speed_mps=0.01,
             max_stall_kick_sec=2.0,
+            straighten_to_start=straighten,
         )
+
+    def test_straightening_is_off_by_default(self):
+        """근거였던 실측이 낡았다 -- 켜 두면 회전 때마다 갈팡질팡한다.
+
+        2026-08-09 재측정: 후륜 25.6°/43.8°/50.2° 전부 정지에서 출발했고,
+        중간 각도는 직진(0.057)보다 오히려 빨랐다(0.170). 기능은 남기되
+        기본은 끈다 -- 바닥이나 적재가 바뀌면 파라미터 하나로 되살린다.
+        """
+        self.assertFalse(StartupKick(50, 100, 0.3).straighten_to_start)
+        default = self.kick(straighten=False)
+        command = ActuatorCommand(drive_percent=35, steering_cdeg=13200)
+        default.apply(command, 0.0, 0.0)
+        # 조향을 펴지 않고 원래 각도를 유지한 채 듀티만 올린다
+        self.assertEqual(default.apply(command, 1.0, 0.0).steering_cdeg, 13200)
 
     def test_stalled_and_steered_first_straightens_instead_of_pushing_harder(self):
         """듀티를 더 주기 전에 **긁는 저항 자체를 없앤다.**

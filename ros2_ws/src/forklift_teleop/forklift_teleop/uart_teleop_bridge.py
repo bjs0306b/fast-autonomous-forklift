@@ -55,8 +55,9 @@ class UartTeleopBridge(Node):
         self.declare_parameter("stall_speed_mps", 0.01)
         self.declare_parameter("max_stall_kick_sec", 2.0)
         self.declare_parameter("stall_kick_rest_sec", 1.0)
-        # 꺾인 채로 못 뜰 때 조향을 펴고 출발할지. 끄면 종전처럼 듀티만 올린다.
-        self.declare_parameter("straighten_to_start", True)
+        # 꺾인 채로 못 뜰 때 조향을 펴고 출발할지. 기본은 꺼져 있다 --
+        # 2026-08-09 실측에서 50도로 꺾인 채 정지 출발이 됐다.
+        self.declare_parameter("straighten_to_start", False)
         self.declare_parameter("straighten_max_sec", 1.5)
         self.declare_parameter("straighten_release_mps", 0.05)
         self.declare_parameter("speed_control_enabled", True)
