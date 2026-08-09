@@ -186,6 +186,35 @@ class SimTaskReceiver(Node):
     def handle_task(self, payload: dict) -> bool:
         """Convert and republish. Returns whether the task was accepted."""
         task_id = str(payload.get("taskId", ""))
+        action = str(payload.get("action", "")).upper()
+
+        # ⚠️ **관제는 지점을 하나씩 보낸다** (orin-pose-spec §6.2). 순환로를
+        #    따라 다음 지점만 오고, 같은 목표를 되풀이하지 않는다. 그 형식은
+        #    action="GOTO" 에 pickup 하나뿐이라, pickup·dropoff 를 둘 다
+        #    요구하면 **단순 이동 명령이 통째로 거절된다.** 그러면 증상은
+        #    "관제가 좌표를 주는데 차가 안 움직인다" 로만 보인다.
+        if action == "GOTO" or (
+            "dropoff" not in payload and "pickup" in payload
+        ):
+            goal = self._to_real(payload.get("pickup") or {}, "goal")
+            if goal is None:
+                self.get_logger().error(f"Task {task_id or '(no id)'} refused")
+                return False
+            mission = {
+                "taskId": task_id,
+                "action": "GOTO",
+                "goal": goal,
+                "sim": {"goal": payload.get("pickup")},
+            }
+            self._publisher.publish(String(data=json.dumps(mission)))
+            self.get_logger().info(
+                f"Task {task_id or '(no id)'} GOTO: "
+                f"sim({payload['pickup']['x']}, {payload['pickup']['y']}) "
+                f"-> real({goal['x']:.3f}, {goal['y']:.3f}) "
+                f"yaw {goal['yaw']:.4f} rad"
+            )
+            return True
+
         pickup = self._to_real(payload.get("pickup") or {}, "pickup")
         dropoff = self._to_real(payload.get("dropoff") or {}, "dropoff")
         if pickup is None or dropoff is None:
@@ -194,6 +223,7 @@ class SimTaskReceiver(Node):
 
         mission = {
             "taskId": task_id,
+            "action": "PICKUP_DROPOFF",
             "cargoId": payload.get("cargoId"),
             "pickup": pickup,
             "dropoff": dropoff,

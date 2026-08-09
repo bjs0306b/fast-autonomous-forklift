@@ -110,6 +110,33 @@ class MissionRunnerTest(unittest.TestCase):
         self.assertEqual([s[0] for s in self.steps],
                          ["nav", "align", "fork"])
 
+    def test_a_goto_task_drives_once_and_leaves_the_fork_alone(self):
+        """관제는 순환로를 따라 지점을 하나씩 준다 (orin-pose-spec §6.2).
+
+        좌표 하나만 오는데 픽업·적재 한 쌍을 요구하면 단순 이동이 통째로
+        거절되고, 증상은 "관제가 좌표를 주는데 차가 안 움직인다" 로만 보인다.
+        """
+        self.assertTrue(self.node.run({
+            "taskId": "T-9", "action": "GOTO",
+            "goal": {"x": 1.7, "y": 0.5, "yaw": 0.0},
+        }))
+        self.assertEqual(self.steps, [("nav", "목적지", 1.7, 0.5)])
+        self.assertEqual(self.stages()[-1], "ARRIVED")
+
+    def test_a_goto_without_coordinates_fails_before_moving(self):
+        self.assertFalse(self.node.run({"taskId": "T-9", "action": "GOTO"}))
+        self.assertEqual(self.steps, [])
+        self.assertEqual(self.stages()[-1], "FAILED")
+
+    def test_a_goto_that_cannot_be_reached_is_reported(self):
+        self.nav_ok = False
+        self.assertFalse(self.node.run({
+            "taskId": "T-9", "action": "GOTO",
+            "goal": {"x": 1.7, "y": 0.5, "yaw": 0.0},
+        }))
+        self.assertEqual(self.stages()[-1], "FAILED")
+        self.assertEqual(self.modes[-1], NAV)
+
     def test_a_second_task_is_refused_while_one_is_running(self):
         """반쯤 하다 만 작업 두 개보다, 거절된 작업 하나가 낫다."""
         self.node._running = True

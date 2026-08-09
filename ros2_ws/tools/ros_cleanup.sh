@@ -32,15 +32,49 @@ PATTERNS+='|waypoint_follower|lifecycle_manager|nav2_map_server'
 #    오갔다. RViz 에서는 점군이 통째로 흔들리는 것으로 보이고, 센서를 아무리
 #    들여다봐도 원인이 안 나온다 -- 센서는 멀쩡하기 때문이다.
 PATTERNS+='|robot_localization/ekf_node'
+# ⚠️ fast_mqtt_bridge 가 빠져 있었다. orin_telemetry 와 sim_task_receiver 가
+#    거기 있어서, 여러 번 launch 하는 동안 **텔레메트리가 7개까지 쌓였다**
+#    (2026-08-08). 같은 좌표를 일곱 번 발행하니 MQTT 쪽에서는 10 Hz 가 70 Hz 로
+#    보이고, 관제가 어느 것을 최신으로 볼지는 도착 순서에 달린다.
+PATTERNS+='|fast_mqtt_bridge/lib'
 PORTS=${PORTS:-"/dev/ttyACM0 /dev/ttyUSB0 /dev/ttyTHS1"}
 
-pkill -f "ros2 launch forklift_teleop" 2>/dev/null
+# ⚠️ **자기 자신과 조상은 절대 죽이지 않는다.**
+#
+# `bash tools/ros_cleanup.sh && ros2 launch forklift_teleop ...` 처럼 한 줄로
+# 쓰면, 그 셸의 명령줄에 "ros2 launch forklift_teleop" 이 들어 있어 아래의
+# pkill 이 **자기를 부른 셸을 죽인다.** launch 는 뜨지도 못하고 exit 144 로
+# 끝나는데, 화면에는 정리 메시지만 남아 성공한 것처럼 보인다.
+#
+# 같은 이유로 손으로 `pkill -f drive_mux` 를 치면 그 셸도 함께 죽는다
+# (2026-08-08 에 그렇게 해서 drive_mux 3개 · uart_teleop_bridge 3개가 살아남았고,
+# 브리지 셋이 같은 시리얼 포트에 서로 다른 조향을 번갈아 써서 서보가 10 Hz 로
+# 54도와 0도 사이를 오갔다). 손으로 죽일 때는 대괄호를 쓸 것: pgrep -f '[d]rive_mux'.
+SELF=()
+pid=$$
+while [ "$pid" -gt 1 ]; do
+    SELF+=("$pid")
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -z "$pid" ] && break
+done
+
+is_self() {
+    local candidate=$1 mine
+    for mine in "${SELF[@]}"; do [ "$candidate" = "$mine" ] && return 0; done
+    return 1
+}
+
+for pid in $(pgrep -f "ros2 launch forklift_teleop" 2>/dev/null); do
+    is_self "$pid" || kill "$pid" 2>/dev/null
+done
 sleep 1
 
 # TERM first, then KILL. Nodes holding a serial port do not always close it on
 # TERM, and a half-closed port is what produces the two-readers symptom.
 for signal in TERM KILL; do
-    mapfile -t pids < <(pgrep -f "$PATTERNS" 2>/dev/null)
+    mapfile -t found < <(pgrep -f "$PATTERNS" 2>/dev/null)
+    pids=()
+    for pid in "${found[@]}"; do is_self "$pid" || pids+=("$pid"); done
     [ ${#pids[@]} -eq 0 ] && break
     printf '%s 로 %d개 종료\n' "$signal" "${#pids[@]}"
     for pid in "${pids[@]}"; do kill "-$signal" "$pid" 2>/dev/null; done

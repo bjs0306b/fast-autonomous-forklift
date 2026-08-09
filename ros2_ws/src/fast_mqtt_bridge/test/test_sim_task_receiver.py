@@ -109,6 +109,40 @@ class SimTaskConversionTest(unittest.TestCase):
         mission = self.recorder.sent[0]
         self.assertAlmostEqual(mission["dropoff"]["forkHeight"], 0.15)
 
+    def test_a_goto_task_carries_one_destination(self):
+        """관제는 순환로를 따라 지점을 하나씩 보낸다 (orin-pose-spec §6.2).
+
+        pickup·dropoff 한 쌍을 요구하면 이 형식이 통째로 거절되고, 증상은
+        "관제가 좌표를 주는데 차가 안 움직인다" 로만 보인다.
+        """
+        accepted = self.node.handle_task({
+            "taskId": "T-0042", "action": "GOTO",
+            "pickup": {"x": 17.0, "y": 5.0, "yaw": 0.0},
+        })
+        self.assertTrue(accepted)
+        mission = self.recorder.sent[0]
+        self.assertEqual(mission["action"], "GOTO")
+        self.assertAlmostEqual(mission["goal"]["x"], 1.7)
+        self.assertAlmostEqual(mission["goal"]["y"], 0.5)
+        self.assertNotIn("dropoff", mission)
+
+    def test_a_lone_pickup_is_treated_as_a_goto(self):
+        """action 을 안 붙이고 좌표만 보내는 쪽도 있다."""
+        accepted = self.node.handle_task({
+            "taskId": "T-0043",
+            "pickup": {"x": 5.0, "y": 9.3, "yaw": 3.1416},
+        })
+        self.assertTrue(accepted)
+        self.assertEqual(self.recorder.sent[0]["action"], "GOTO")
+
+    def test_a_goto_outside_the_mockup_is_still_refused(self):
+        accepted = self.node.handle_task({
+            "taskId": "T-0044", "action": "GOTO",
+            "pickup": {"x": 25.0, "y": 5.0, "yaw": 0.0},
+        })
+        self.assertFalse(accepted)
+        self.assertEqual(self.recorder.sent, [])
+
     def test_the_simulator_numbers_are_carried_along(self):
         """로그 한 줄에서 보낸 값과 받은 값을 대조할 수 있어야 한다."""
         self.node.handle_task(self.task(

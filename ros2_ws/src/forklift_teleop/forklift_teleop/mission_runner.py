@@ -266,11 +266,32 @@ class MissionRunner(Node):
 
     # ---- 미션 --------------------------------------------------------
 
+    def goto(self, task: dict) -> bool:
+        """목적지 하나로 가고 끝. 포크도 정렬도 없다.
+
+        관제가 순환로를 따라 **다음 지점을 하나씩** 보내는 경우다
+        (orin-pose-spec §6.2). 픽업·적재 한 쌍이 아니라 좌표 하나만 온다.
+        """
+        task_id = task.get("taskId")
+        goal = task.get("goal")
+        if not isinstance(goal, dict) or "x" not in goal:
+            self._report(task_id, "FAILED", detail="목적지 좌표가 없다")
+            return False
+        self._report(task_id, "NAV")
+        if not self.navigate_to("목적지", goal):
+            self._report(task_id, "FAILED", detail="항법 실패")
+            return False
+        self._report(task_id, "ARRIVED", x=round(goal["x"], 3),
+                     y=round(goal["y"], 3))
+        return True
+
     def run(self, task: dict) -> bool:
         task_id = task.get("taskId")
         self._running = True
         skipped = []
         try:
+            if str(task.get("action", "")).upper() == "GOTO":
+                return self.goto(task)
             for label, point, lift in (
                 ("픽업", task.get("pickup"), "UP"),
                 ("적재", task.get("dropoff"), "DOWN"),

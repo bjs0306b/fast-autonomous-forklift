@@ -57,6 +57,13 @@ class VisionDetection:
     distance_m: Optional[float] = None
 
 
+# 회전 중 옆으로 필요한 최소 여유. 차체 반폭 0.074 + 꼬리 휨 0.182 이다.
+# 후륜 조향차가 최소반경으로 돌면 바깥 뒷모서리가 회전반경보다 그만큼 더
+# 나가므로, 앞이 지나갈 수 있다고 보고 돌기 시작하면 뒤가 걸린다.
+# 근거: tools/geometry_limits.py.
+TAIL_SWING_CLEARANCE_M = 0.256
+
+
 @dataclass(frozen=True)
 class AvoidanceConfig:
     # Distances are in base_link, while the footprint reaches x=0.190 m.
@@ -107,9 +114,20 @@ class AvoidanceConfig:
             self.lidar_clearance_margin_m,
         ) < 0.0:
             raise ValueError("avoidance thresholds cannot be negative")
-        if self.minimum_turn_clearance_m <= self.stop_distance_m:
+        # ⚠️ **옆은 앞과 다른 기하다.** 종전에는 회전 여유가 전방 정지거리보다
+        #    커야 한다고 묶어 두었는데, 두 값이 재는 것이 다르다:
+        #
+        #      앞  = 제동거리 + 차체 앞끝 0.190  -> 들이받는 문제
+        #      옆  = 차체 반폭 0.074 + 꼬리 휨 0.182 = 0.256 -> 스치는 문제
+        #
+        #    묶어 두면 옆을 앞보다 과감하게 둘 수 없고, 그 결과 목업 벽을 따라
+        #    선 차는 회전 판정이 아예 안 나 앞뒤로만 흔들렸다(2026-08-08).
+        #    이제 하한은 꼬리 휨이 정한다. tools/geometry_limits.py 가 근거다.
+        if self.minimum_turn_clearance_m < TAIL_SWING_CLEARANCE_M:
             raise ValueError(
-                "minimum_turn_clearance_m must exceed stop_distance_m"
+                "minimum_turn_clearance_m 은 꼬리 휨 하한 "
+                f"{TAIL_SWING_CLEARANCE_M:.3f} m 이상이어야 한다 -- "
+                "그보다 작으면 회전 중 바깥 뒷모서리가 닿는다"
             )
         if not (self.stop_distance_m < self.avoidance_engage_distance_m
                 <= self.slowdown_distance_m):

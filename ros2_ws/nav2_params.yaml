@@ -513,8 +513,21 @@ planner_server:
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
       tolerance: 0.25
-      downsample_costmap: false
-      downsampling_factor: 1
+      # ⚠️ **심 지도는 0.005 m/px 다.** 창고 20 x 30 m 를 0.05 로 그린 지도를
+      #    실물 축척(1/10)으로 쓰면 해상도도 1/10 이 된다. 그 결과 글로벌
+      #    코스트맵이 400 x 600 = 240,000 칸이고, 각도 72 빈을 곱하면 상태공간이
+      #    1,700만 개다. max_iterations 10만으로는 근처도 못 간다 --
+      #    `exceeded maximum iterations` 로 실패하고, 목표는 목업 안의
+      #    멀쩡한 자리인데 "경로 없음" 이 된다 (2026-08-08, (0.50, 0.93)).
+      #
+      #    4 로 줄이면 0.02 m 가 되어 100 x 150 이다. 차폭이 0.148 m 라 2 cm
+      #    격자는 충분히 곱다 -- 한 칸이 차폭의 1/7 이다.
+      #
+      #    지도 자체를 다시 그리지 않는 이유: 그 지도가 심과 공유하는 좌표계의
+      #    근거라, 해상도를 바꾸면 좌표계 통일을 다시 확인해야 한다. 여기는
+      #    플래너가 탐색할 때만 줄이므로 지도와 좌표는 그대로다.
+      downsample_costmap: true
+      downsampling_factor: 4
       allow_unknown: true
       max_iterations: 100000
       max_on_approach_iterations: 1000
@@ -531,7 +544,9 @@ planner_server:
       #    다시 출발해야 한다. 조향이 완전히 누운 채로 서면 못 뜬다 -- 그건
       #    아직 안 풀린 한계다. reverse_penalty 가 후진을 최후 수단으로 남긴다.
       motion_model_for_search: "REEDS_SHEPP"
-      angle_quantization_bins: 72
+      # 72 -> 36 (2026-08-08). 상태공간이 각도에 비례한다. 10도 간격이면
+      # 조향 한계 ±58도 를 12단계로 쪼개는 셈이라 이 차에는 충분하다.
+      angle_quantization_bins: 36
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 3.0
       # ⚠️ 이 값은 velocity_smoother 의 각속도 상한과 **짝이다**.

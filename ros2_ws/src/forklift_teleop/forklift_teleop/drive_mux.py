@@ -47,6 +47,9 @@ ALIGN = "ALIGN"
 # mode, not a special case inside NAV: while it holds the wheel nav2's
 # commands must not reach the motor, or the two push against each other.
 RECOVER = "RECOVER"
+# 좁은 곳에서 방향만 바꾸는 제자리 전환. 전진·후진을 번갈아 하며 조향으로
+# yaw 를 쌓는 동안 nav2 명령이 섞이면 두 쪽이 서로를 밀어낸다.
+PIVOT = "PIVOT"
 IDLE = "IDLE"
 
 
@@ -57,6 +60,7 @@ class DriveMux(Node):
         self.declare_parameter("nav_topic", "/cmd_vel")
         self.declare_parameter("align_topic", "/cmd_vel_align")
         self.declare_parameter("recover_topic", "/cmd_vel_recover")
+        self.declare_parameter("pivot_topic", "/cmd_vel_pivot")
         self.declare_parameter("output_topic", "/cmd_vel_arbitrated")
         self.declare_parameter("mode_topic", "/drive/mode")
         self.declare_parameter("status_topic", "/drive/mux_status")
@@ -67,9 +71,9 @@ class DriveMux(Node):
         self.declare_parameter("source_timeout_sec", 0.3)
 
         self._sources: Dict[str, Optional[Twist]] = {
-            NAV: None, ALIGN: None, RECOVER: None}
+            NAV: None, ALIGN: None, RECOVER: None, PIVOT: None}
         self._seen: Dict[str, float] = {
-            NAV: -1e9, ALIGN: -1e9, RECOVER: -1e9}
+            NAV: -1e9, ALIGN: -1e9, RECOVER: -1e9, PIVOT: -1e9}
         self._mode = NAV
         self._last_reported = ""
 
@@ -86,6 +90,9 @@ class DriveMux(Node):
         self.create_subscription(
             Twist, str(self.get_parameter("recover_topic").value),
             lambda m: self._on_source(RECOVER, m), 10)
+        self.create_subscription(
+            Twist, str(self.get_parameter("pivot_topic").value),
+            lambda m: self._on_source(PIVOT, m), 10)
 
         # Latched: a node that starts late still learns who is driving. Without
         # this an alignment node coming up mid-mission would sit silent while
@@ -118,7 +125,7 @@ class DriveMux(Node):
 
     def _on_mode(self, message: String) -> None:
         requested = message.data.strip().upper()
-        if requested not in (NAV, ALIGN, RECOVER, IDLE):
+        if requested not in (NAV, ALIGN, RECOVER, PIVOT, IDLE):
             self.get_logger().warn(
                 f"Unknown drive mode '{message.data}', staying in {self._mode}"
             )
