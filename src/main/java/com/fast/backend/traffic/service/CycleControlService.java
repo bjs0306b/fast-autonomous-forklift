@@ -6,6 +6,9 @@ import com.fast.backend.traffic.domain.Track;
 import com.fast.backend.traffic.domain.VehicleCycle;
 import com.fast.backend.traffic.domain.VehicleMotion;
 import com.fast.backend.traffic.dto.CargoActionMessage;
+import com.fast.backend.common.time.CommunicationTime;
+import com.fast.backend.storage.domain.Cargo;
+import com.fast.backend.storage.mapper.CargoMapper;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.traffic.dto.PlaceRackTaskMessage;
 import com.fast.backend.vehicle.domain.VehicleStatus;
@@ -51,6 +54,7 @@ public class CycleControlService {
     private final RackApproachProvider rackApproaches;
     private final VehicleProcedureRegistry procedureRegistry;
     private final StorageSlotMapper storageSlotMapper;
+    private final CargoMapper cargoMapper;
 
     /** 등록된 칸 수. 실행 중에 늘지 않으므로 한 번만 읽는다. {@code -1} 은 아직 안 읽었다는 뜻. */
     private volatile int totalSlots = -1;
@@ -75,7 +79,8 @@ public class CycleControlService {
             CycleGoalPublisher publisher,
             RackApproachProvider rackApproaches,
             VehicleProcedureRegistry procedureRegistry,
-            StorageSlotMapper storageSlotMapper) {
+            StorageSlotMapper storageSlotMapper,
+            CargoMapper cargoMapper) {
         this.cycleProperties = cycleProperties;
         this.loopProperties = loopProperties;
         this.track = loopProperties.toTrack();
@@ -84,6 +89,7 @@ public class CycleControlService {
         this.rackApproaches = rackApproaches;
         this.procedureRegistry = procedureRegistry;
         this.storageSlotMapper = storageSlotMapper;
+        this.cargoMapper = cargoMapper;
     }
 
     /**
@@ -432,9 +438,17 @@ public class CycleControlService {
             return;
         }
         try {
-            if (storageSlotMapper.markOccupiedIfEmpty(slotCode) == 0) {
+            // OCCUPIED 는 화물 ID 를 요구한다(chk_storage_slot_state). 주기에는 운반 작업이
+            // 없어 줄 ID 가 없으므로 여기서 하나 만든다 — 박스가 실제로 그 칸에 놓였으니
+            // 사실이고, cargo 테이블은 id 와 시각뿐이라 만드는 비용도 없다.
+            Cargo cargo = new Cargo();
+            cargo.setCreatedAt(CommunicationTime.nowLocal());
+            cargoMapper.insert(cargo);
+            if (storageSlotMapper.markOccupiedIfEmpty(slotCode, cargo.getCargoId()) == 0) {
                 // 이미 OCCUPIED 거나 다른 흐름이 예약한 칸이다. 덮어쓰지 않는다.
-                log.warn("적재 칸 상태를 바꾸지 못했다(이미 비어 있지 않음): slotCode={}", slotCode);
+                // 방금 만든 화물은 주인 없이 남는다 — 주기 데모용이라 그대로 둔다.
+                log.warn("적재 칸 상태를 바꾸지 못했다(이미 비어 있지 않음): slotCode={}, cargoId={}",
+                        slotCode, cargo.getCargoId());
             }
         } catch (RuntimeException e) {
             log.error("적재 칸 상태 기록 실패(격리됨): slotCode={}, error={}", slotCode, e.getMessage());

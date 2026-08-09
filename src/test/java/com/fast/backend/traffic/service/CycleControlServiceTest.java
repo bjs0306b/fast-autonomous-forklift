@@ -1,5 +1,6 @@
 package com.fast.backend.traffic.service;
 
+import com.fast.backend.storage.mapper.CargoMapper;
 import com.fast.backend.storage.mapper.StorageSlotMapper;
 import com.fast.backend.traffic.config.CycleProperties;
 import com.fast.backend.traffic.config.LoopTrackProperties;
@@ -43,6 +44,7 @@ class CycleControlServiceTest {
     private RackApproachProvider rackApproaches;
     private VehicleProcedureRegistry procedureRegistry;
     private StorageSlotMapper storageSlotMapper;
+    private CargoMapper cargoMapper;
 
     @BeforeEach
     void setUp() {
@@ -51,6 +53,7 @@ class CycleControlServiceTest {
         rackApproaches = mock(RackApproachProvider.class);
         procedureRegistry = mock(VehicleProcedureRegistry.class);
         storageSlotMapper = mock(StorageSlotMapper.class);
+        cargoMapper = mock(CargoMapper.class);
         // 기본은 "아직 자리가 남았다" — 복귀 조건을 건드리지 않는다.
         when(storageSlotMapper.countAll()).thenReturn(48);
         when(storageSlotMapper.countEmpty()).thenReturn(47);
@@ -66,7 +69,7 @@ class CycleControlServiceTest {
     private CycleControlService service() {
         return new CycleControlService(
                 cycleProps(), loopProps(), operationService,
-                publisher, rackApproaches, procedureRegistry, storageSlotMapper);
+                publisher, rackApproaches, procedureRegistry, storageSlotMapper, cargoMapper);
     }
 
     private static CycleProperties cycleProps() {
@@ -183,7 +186,7 @@ class CycleControlServiceTest {
                 Map.of(), Map.of("A", 2.60), 2.0, Map.of());
         CycleControlService svc = new CycleControlService(
                 off, loopProps(), operationService, publisher, rackApproaches,
-                procedureRegistry, storageSlotMapper);
+                procedureRegistry, storageSlotMapper, cargoMapper);
 
         svc.tick(List.of(at(5.0, 20.0)), Set.of());
 

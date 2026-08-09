@@ -43,8 +43,14 @@ public interface StorageSlotMapper {
      * 채울 수 있어야 하기 때문이다. 반면 주기 상태기계는 운반 작업 없이 차량별 배정표대로 돌아서
      * 예약 단계 자체가 없다. 그래서 {@code EMPTY} 에서 바로 넘어가는 경로를 따로 둔다.
      *
+     * <p><b>{@code storedCargoId} 가 반드시 있어야 한다.</b> {@code chk_storage_slot_state} 가
+     * {@code OCCUPIED} 에 화물 ID 를 요구한다(schema.sql:114). 주기에는 운반 작업이 없으므로
+     * 호출부가 화물 레코드를 하나 만들어 넘긴다 — 박스가 실제로 그 칸에 놓였으니 사실이다.
+     *
      * <p>{@code EMPTY} 조건은 남겨 둔다 — 두 흐름이 같은 칸을 동시에 채우려 할 때 늦은 쪽이
      * 조용히 덮어쓰지 않고 0 을 돌려받게 하려는 것이다.
      */
-    int markOccupiedIfEmpty(@Param("slotCode") String slotCode);
+    int markOccupiedIfEmpty(
+            @Param("slotCode") String slotCode,
+            @Param("storedCargoId") Long storedCargoId);
 }
