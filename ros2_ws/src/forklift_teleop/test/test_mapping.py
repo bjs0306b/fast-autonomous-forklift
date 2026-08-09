@@ -610,10 +610,21 @@ class StartCeilingTest(unittest.TestCase):
     steered wheels plough sideways and 60% cannot start the vehicle at all.
     """
 
-    def test_the_two_ceilings_are_separate_and_ordered(self):
+    def test_the_cruise_ceiling_never_exceeds_the_start_ceiling(self):
+        """순항이 출발보다 셀 수는 없다 -- 그 반대는 말이 안 된다.
+
+        ⚠️ 종전에는 **더 작아야** 한다고 못 박았다. 둘을 나눠 둔 이유는
+           발열이다: 100 은 정지마찰을 이기는 동안만 쓰는 값이고, 계속 물리면
+           멈춘 모터에 최대 전류가 그대로 들어간다.
+
+           2026-08-09 에 깊은 조향에서 힘이 계속 모자라 순항 상한을 100 으로
+           올리면서 그 구분이 사라졌다. **의도한 선택이지 실수가 아니다.**
+           대신 되돌릴 조건을 teleop.yaml 에 적어 두었다 -- 모터가 뜨겁거나
+           전압이 떨어져 오히려 더 못 가면 내린다.
+        """
         limits = TeleopLimits()
-        self.assertGreater(limits.max_start_drive_percent,
-                           limits.max_drive_percent)
+        self.assertLessEqual(limits.max_drive_percent,
+                             limits.max_start_drive_percent)
 
     def test_a_start_ceiling_below_the_cruise_ceiling_is_rejected(self):
         with self.assertRaises(ValueError):

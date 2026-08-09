@@ -209,7 +209,23 @@ controller_server:
       approach_velocity_scaling_dist: 0.30
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
-      use_regulated_linear_velocity_scaling: true
+      # ⚠️ **곡률 규제를 끈다** (2026-08-09). 이 기능은 급한 곡선에서 속도를
+      #    깎는데, 이 차에는 정반대로 작용한다.
+      #
+      #    전륜 구동 · 후륜 조향이라 깊게 꺾일수록 조향륜(후륜)이 바닥을 옆으로
+      #    긁고, 구동륜이 그 저항까지 끌어야 한다. **더 많은 힘이 필요한 바로 그
+      #    순간에 컨트롤러가 속도를 줄인다.** 속도가 낮으면 듀티도 낮게 매핑되어
+      #    힘이 더 빠지고, 결국 회전 중에 멎는다.
+      #
+      #    보통의 로봇에서는 안전을 위한 기능이지만 여기서는 그 안전이 "회전을
+      #    못 해서 통로에 갇히는" 형태로 되돌아온다. 전방 안전은 가드가
+      #    (실제 센서로) 따로 잡고 있으므로 이 규제가 없어도 정지 권한은 그대로다.
+      #
+      #    ⚠️ 되돌릴 조건: 회전에서 횡오차가 커지거나 경로를 크게 벗어나면
+      #       다시 켜고, 대신 regulated_linear_scaling_min_speed 를 올린다.
+      use_regulated_linear_velocity_scaling: false
+      # 비용 기반 감속은 남긴다 -- 이쪽은 곡률이 아니라 **장애물에 가까울 때**
+      # 줄이는 것이라, 좁은 목업에서 벽에 붙어 달리는 것을 막아 준다.
       use_cost_regulated_linear_velocity_scaling: true
       # 이 반경보다 급한 곡선에서 감속이 시작된다. 플래너 최소반경과 같은
       # 값이어야 한다 — 크게 두면 계획된 모든 곡선에서 감속이 걸리고, 그

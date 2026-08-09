@@ -359,8 +359,8 @@ class TeleopLimits:
     # ⚠️ **전역으로 올리지 말 것.** 12 에는 파렛 진입 속도가 묶여 있다
     #    (INSERT_SPEED 가 이 하한에 걸려 실제 진입 듀티를 정한다). 조향각에
     #    비례해서만 올려야 직진·진입 구간이 종전 그대로 남는다.
-    max_sustain_drive_percent: int = 22
-    max_drive_percent: int = 75
+    max_sustain_drive_percent: int = 35
+    max_drive_percent: int = 100
     # 정지마찰을 이기는 동안만 쓰는 상한. 위 값은 **순항** 상한이다.
     #
     # 위 주석대로 60 에는 INSERT_SPEED_ACTUAL·진입 깊이·조향 중립이 전부
@@ -387,7 +387,7 @@ class TeleopLimits:
     # 그대로이고 그 위를 더 빨리 지날 뿐이다.
     # 조향륜이 깊게 꺾일수록 목표 속도를 올린다. 중립이면 1.0 배라 직선은
     # 그대로다. 근거와 실측은 config/teleop.yaml 에 있다.
-    steered_speed_boost: float = 1.6
+    steered_speed_boost: float = 2.5
     # ⚠️ **정지 상태에서 뒷바퀴가 완전히 누우면 못 출발한다** (2026-08-07 실측,
     #    100% 듀티까지 확인). 굴러가는 중이면 완전 조향으로도 잘 돈다 -- 안 되는
     #    것은 그 상태로 서 있다가 출발하는 것 하나뿐이다.
