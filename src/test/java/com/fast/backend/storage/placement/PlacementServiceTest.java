@@ -83,7 +83,7 @@ class PlacementServiceTest {
     private final PlacementService modelScale =
             new PlacementService(new PlacementProperties(0.025, 0.012, 0.05, 0.10));
 
-    /** 0층 = fork 0.0 · usable 0.14 / 1층 = fork 1.325 · usable 0.0675 */
+    /** 0층 = fork 0.0 · usable 0.14 / 1층 = fork 1.325 · usable 0.2 (실측, 2026-08-10) */
     private static PlacementCandidate slot(String code, double usableHeight, double forkHeight) {
         return new PlacementCandidate(
                 code, usableHeight, null, forkHeight, 5.0, 9.3, 180.0, 1.0,
@@ -92,43 +92,53 @@ class PlacementServiceTest {
 
     @Test
     void 둘_다_들어가면_낮은_층을_고른다() {
-        // 2cm 화물은 0층(남는 높이 0.108)에도 1층(0.0355)에도 들어간다.
-        // 예전 기준이라면 딱 맞는 1층이 뽑혔다.
+        // 2cm 화물은 0층에도 1층에도 들어간다. 낮은 층 먼저이므로 0층이다.
         PlacementRecommendation result = modelScale.recommend(0.02, List.of(
-                slot("A101", 0.0675, 1.325),
-                slot("A001", 0.14, 0.0)));
+                slot("A101", 0.2, 1.325),
+                slot("AF01", 0.14, 0.0)));
 
-        assertThat(result.slotCode()).isEqualTo("A001");
+        assertThat(result.slotCode()).isEqualTo("AF01");
         assertThat(result.forkHeight()).isEqualTo(0.0);
     }
 
     @Test
     void 낮은_층이_차면_위층으로_올라간다() {
         PlacementRecommendation result = modelScale.recommend(0.02, List.of(
-                new PlacementCandidate("A001", 0.14, null, 0.0, 5.0, 9.3, 180.0, 1.0,
+                new PlacementCandidate("AF01", 0.14, null, 0.0, 5.0, 9.3, 180.0, 1.0,
                         StorageSlotStatus.OCCUPIED),
-                slot("A101", 0.0675, 1.325)));
+                slot("A101", 0.2, 1.325)));
 
         assertThat(result.slotCode()).isEqualTo("A101");
     }
 
     @Test
-    void 위층에_안_들어가는_화물은_아래층으로_간다() {
-        // 5cm 화물: required 0.087 > 1층 0.0675 라 1층은 후보에서 빠진다.
-        PlacementRecommendation result = modelScale.recommend(0.05, List.of(
-                slot("A101", 0.0675, 1.325),
-                slot("A001", 0.14, 0.0)));
+    void 큰_화물은_1층으로_올라간다() {
+        // 12cm 화물: required 0.157.  0층(0.14)에는 안 들어가고 1층(0.2)에만 들어간다.
+        // 실측상 1층 칸(2.0 시뮬 = 0.2 실물)이 0층 칸(1.325 시뮬 = 0.14 실물)보다 넓다.
+        PlacementRecommendation result = modelScale.recommend(0.12, List.of(
+                slot("AF01", 0.14, 0.0),
+                slot("A101", 0.2, 1.325)));
 
-        assertThat(result.slotCode()).isEqualTo("A001");
+        assertThat(result.slotCode()).isEqualTo("A101");
+        assertThat(result.forkHeight()).isEqualTo(1.325);
+    }
+
+    @Test
+    void 어느_층에도_안_들어가면_거부한다() {
+        // 17cm 화물: required 0.207 > 1층 0.2.
+        assertThatThrownBy(() -> modelScale.recommend(0.17, List.of(
+                slot("AF01", 0.14, 0.0),
+                slot("A101", 0.2, 1.325))))
+                .isInstanceOf(BusinessException.class);
     }
 
     @Test
     void 같은_층이면_예전대로_딱_맞는_칸을_고른다() {
         PlacementRecommendation result = modelScale.recommend(0.02, List.of(
-                slot("A001", 0.14, 0.0),
-                slot("A002", 0.10, 0.0)));
+                slot("AF01", 0.14, 0.0),
+                slot("AF02", 0.10, 0.0)));
 
-        assertThat(result.slotCode()).isEqualTo("A002");
+        assertThat(result.slotCode()).isEqualTo("AF02");
     }
 
     // ── 폭 검사 ────────────────────────────────────────────────────────────────
