@@ -346,11 +346,21 @@ public class CycleControlService {
         if (slotCode == null) {
             return null;
         }
-        java.util.regex.Matcher m = WIRE_RACK.matcher(slotCode);
+        // 0층(바닥)이 먼저다 — 아래 SHELF 패턴은 "AF01" 도 삼켜 "AF1" 을 만든다.
+        java.util.regex.Matcher floor = FLOOR_RACK.matcher(slotCode);
+        if (floor.matches()) {
+            return floor.group(1) + Integer.parseInt(floor.group(2)) + "F";
+        }
+        java.util.regex.Matcher m = SHELF_RACK.matcher(slotCode);
         return m.matches() ? m.group(1) + Integer.parseInt(m.group(2)) : slotCode;
     }
 
-    private static final java.util.regex.Pattern WIRE_RACK =
+    /** 0층(바닥) — {@code AF01} → {@code A1F}. */
+    private static final java.util.regex.Pattern FLOOR_RACK =
+            java.util.regex.Pattern.compile("([A-Za-z]+)F0*(\\d+)");
+
+    /** 1층(선반) — {@code A001} → {@code A1}. 지금 시뮬이 아는 유일한 형식이다. */
+    private static final java.util.regex.Pattern SHELF_RACK =
             java.util.regex.Pattern.compile("([A-Za-z]+)0*(\\d+)");
 
     // ── RETURNING ───────────────────────────────────────────────────────────────

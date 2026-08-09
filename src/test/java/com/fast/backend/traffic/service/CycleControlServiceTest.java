@@ -208,6 +208,9 @@ class CycleControlServiceTest {
         assertThat(CycleControlService.toWireRackCode("A001")).isEqualTo("A1");
         assertThat(CycleControlService.toWireRackCode("B012")).isEqualTo("B12");
         assertThat(CycleControlService.toWireRackCode("A1")).isEqualTo("A1");
+        // 0층(바닥)은 F 를 뒤에 붙여 구분한다.
+        assertThat(CycleControlService.toWireRackCode("AF01")).isEqualTo("A1F");
+        assertThat(CycleControlService.toWireRackCode("BF12")).isEqualTo("B12F");
     }
 
     @Test
