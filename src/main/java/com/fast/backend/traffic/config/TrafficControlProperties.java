@@ -86,6 +86,10 @@ public record TrafficControlProperties(
      * <p><b>⚠️ 이 목록에 넣은 차량은 아무도 피하지 않는다.</b> 물리적으로 다른 공간에 있어
      * 좌표계만 겹치는 차량에만 쓸 것. 같은 바닥을 공유하는 차량을 넣으면 충돌 예측이 그 차량에
      * 대해서만 조용히 꺼진다.
+     *
+     * <p><b>명령은 그대로 나간다.</b> 빼는 것은 "다른 차량이 볼 대상"뿐이고, 이 차량 자신은
+     * 주기 목표도 받고 정지·재개 판단도 받는다. 한때 관측 목록 자체에서 빼 봤는데 그러면
+     * <b>주기 명령까지 끊겨</b> 차가 목적지를 영영 못 받았다(2026-08-10).
      */
     public boolean ignores(String vehicleId) {
         return vehicleId != null && Set.copyOf(ignoredVehicles).contains(vehicleId);

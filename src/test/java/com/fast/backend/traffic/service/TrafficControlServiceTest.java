@@ -201,6 +201,20 @@ class TrafficControlServiceTest {
     }
 
     @Test
+    @DisplayName("ignored-vehicles 에 들어도 그 차량 자신은 정지 판단을 받는다")
+    void 판단제외_차량도_자기_정지는_받는다() {
+        // 빼는 것은 "남이 볼 대상"뿐이다. 관측 목록째 빼면 주기 명령까지 끊긴다.
+        location("REAL-F01", 0, 0, 0, 2.0);     // 앞차를 향해 접근
+        location("LEADER", 5, 0, 0, 0.0);
+        status("REAL-F01", VehicleStatus.MOVING);
+        status("LEADER", VehicleStatus.IDLE);
+
+        service(props(List.of("REAL-F01"), true, "REAL-F01", "LEADER")).tick();
+
+        assertThat(issuedCommands("REAL-F01")).containsExactly("STOP");
+    }
+
+    @Test
     @DisplayName("같은 상황이 계속돼도 STOP 을 반복 발행하지 않는다")
     void STOP_은_상태가_바뀔_때만_보낸다() {
         location("FOLLOWER", 0, 0, 0, 2.0);

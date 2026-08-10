@@ -62,6 +62,29 @@ class Nav2AdapterTest(unittest.TestCase):
         sender.finish(True, "arrived")
         self.assertEqual(["ACCEPTED", "IN_PROGRESS", "SUCCESS"], emit.results)
 
+    def test_목표를_실물_맵_배수로_줄여_보낸다(self):
+        """백엔드는 시뮬 좌표(20x30m)로 말하고 실물 맵은 그 1/10(2.0x3.0m)이다.
+
+        배수가 없으면 (15.5, 4.0) 이 그대로 나가 맵 밖이 되고 Nav2 가 경로를 못 짠다
+        (2026-08-10 실측: 지게차가 안 움직였다).
+        """
+        sender, emit = FakeSender(), Recorder()
+        Nav2CommandAdapter(sender, destination_scale=0.1).execute(
+            move(x=15.5, y=4.0, heading=90.0), emit)
+
+        x, y, yaw, _ = sender.goals[0]
+        self.assertAlmostEqual(1.55, x, places=6)
+        self.assertAlmostEqual(0.40, y, places=6)
+        # 각도는 배수와 무관하다 — 축소해도 방향은 그대로다.
+        self.assertAlmostEqual(heading_to_yaw_rad(90.0), yaw, places=9)
+
+    def test_배수_기본값은_좌표를_바꾸지_않는다(self):
+        sender, emit = FakeSender(), Recorder()
+        Nav2CommandAdapter(sender).execute(move(x=15.5, y=4.0), emit)
+
+        x, y, _, _ = sender.goals[0]
+        self.assertEqual((15.5, 4.0), (x, y))
+
     def test_목표를_보내고_바로_돌아온다(self):
         """주행이 끝날 때까지 붙잡고 있으면 MQTT 콜백 스레드가 수십 초 묶인다."""
         sender, emit = FakeSender(), Recorder()

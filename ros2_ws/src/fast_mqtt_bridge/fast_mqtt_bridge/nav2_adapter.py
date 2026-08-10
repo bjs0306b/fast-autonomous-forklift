@@ -71,10 +71,23 @@ class Nav2CommandAdapter:
 
     def __init__(self, goal_sender: GoalSender,
                  server_wait_s: float = 5.0,
-                 logger: Optional[Any] = None) -> None:
+                 logger: Optional[Any] = None,
+                 destination_scale: float = 1.0) -> None:
+        """`destination_scale` 은 백엔드 좌표 → 실물 맵 좌표 배수다.
+
+        ⚠️ **백엔드는 시뮬 좌표계로 말한다.** 시뮬 창고는 20×30 m 이고 실물 맵
+        (`sim_warehouse_real`)은 그것을 1/10 로 줄인 **2.0×3.0 m** 다(400×600 px ×
+        0.005 m/px). 그래서 `0.1` 이 아니면 목표가 맵 밖으로 나가 Nav2 가 경로를 못
+        짠다 — 2026-08-10 실측: 백엔드가 `(15.5, 4.0)` 을 보냈고 그대로 넘겼다.
+
+        반대 방향(`orin_telemetry`)은 이미 ×10 으로 올려 보내고 있었다. **한쪽만 있고
+        짝이 없던 것**이 이 버그다. 기본값을 1.0 으로 두는 이유는 좌표계가 같은 환경
+        (시뮬 차량·테스트)에서 이 어댑터를 그대로 쓰기 때문이다.
+        """
         self._sender = goal_sender
         self._server_wait_s = server_wait_s
         self._log = logger
+        self._destination_scale = destination_scale
 
     def execute(self, command: Any, emit_result: EmitResult) -> None:
         if command.command != "MOVE":
@@ -109,9 +122,19 @@ class Nav2CommandAdapter:
             # 차량에 대고 측정을 시작한다.
             emit_result("SUCCESS" if succeeded else "FAILED", message)
 
+        scale = self._destination_scale
+        if self._log is not None and scale != 1.0:
+            # 좌표가 바뀌어 나가는 것은 로그에 남긴다. 안 남기면 "왜 저기로 갔지"를
+            # 나중에 못 가른다.
+            self._log.info(
+                "MOVE 목표 환산: (%.2f, %.2f) x%.3f -> (%.2f, %.2f)",
+                float(destination.x), float(destination.y), scale,
+                float(destination.x) * scale, float(destination.y) * scale)
+
         self._sender.send_goal(
-            x=float(destination.x),
-            y=float(destination.y),
+            # heading 은 각도라 배수를 곱하지 않는다 — 축소해도 방향은 그대로다.
+            x=float(destination.x) * scale,
+            y=float(destination.y) * scale,
             yaw_rad=heading_to_yaw_rad(float(destination.heading)),
             frame_id=str(destination.frame_id),
             on_accepted=on_accepted,

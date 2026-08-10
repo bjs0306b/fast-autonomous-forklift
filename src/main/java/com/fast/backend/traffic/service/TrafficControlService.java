@@ -117,10 +117,22 @@ public class TrafficControlService {
         }
 
         List<VehicleMotion> motions = collectFreshMotions();
-        workZoneRegistry.refresh(motions);
+        /*
+         * 남이 볼 대상에서만 뺀다.
+         *
+         * ⚠️ `motions` 자체에서 빼면 **주기 명령까지 끊긴다** — 아래에서 같은 목록을
+         *    `cycleControlService.tick` 에 넘기기 때문이다. 그러면 실물이 목적지를
+         *    영영 못 받는다(2026-08-10 실측: 실물을 ignored 에 넣자 MOVE 가 한 번도
+         *    안 나갔다). 빼야 하는 것은 "명령"이 아니라 "다른 차량이 피할 대상"이다.
+         */
+        List<VehicleMotion> peers = motions.stream()
+                .filter(m -> !properties.ignores(m.vehicleId()))
+                .toList();
+
+        workZoneRegistry.refresh(peers);
         List<WorkZone> zones = workZoneRegistry.zones();
 
-        releaseOneIntoLoop(motions);
+        releaseOneIntoLoop(motions, peers);
 
         for (VehicleMotion motion : motions) {
             if (!properties.controls(motion.vehicleId())) {
@@ -131,11 +143,11 @@ public class TrafficControlService {
             if (operationService.isManuallyHeld(motion.vehicleId())) {
                 continue;
             }
-            Optional<TrafficStopDecision> decision = findStopReason(motion, motions, zones);
+            Optional<TrafficStopDecision> decision = findStopReason(motion, peers, zones);
             if (decision.isPresent()) {
                 hold(motion.vehicleId(), decision.get());
             } else if (heldVehicles.containsKey(motion.vehicleId())
-                    && canRelease(motion, motions, zones)) {
+                    && canRelease(motion, peers, zones)) {
                 release(motion.vehicleId());
             }
         }
@@ -151,19 +163,24 @@ public class TrafficControlService {
      * <p>앞차와의 간격 계산만 여기서 하고, 순서·쿨다운 판단은 {@link OperationService} 가 한다.
      * 순환로 기하를 아는 쪽과 운행 상태를 아는 쪽을 나눠 두려는 것이다.
      */
-    private void releaseOneIntoLoop(List<VehicleMotion> motions) {
+    private void releaseOneIntoLoop(List<VehicleMotion> motions, List<VehicleMotion> peers) {
         if (!operationService.state().isDriving()) {
             return;
         }
+        // 합류 **후보**는 전체에서 고른다 — 빠진 차량도 합류는 해야 목표를 받는다.
         Map<String, VehicleMotion> byId = new LinkedHashMap<>();
         for (VehicleMotion motion : motions) {
             byId.put(motion.vehicleId(), motion);
         }
+        // 앞차 간격을 잴 상대만 추린다. 피할 대상이 아닌 차량이 앞을 막아 합류가
+        // 멎으면 안 된다(그 차량은 애초에 다른 공간에 있다).
+        Set<String> peerIds = peers.stream().map(VehicleMotion::vehicleId)
+                .collect(java.util.stream.Collectors.toSet());
         operationService.releaseOne(
                 properties.tickMs(),
                 loopProperties.entryHeadwayM(),
                 loopProperties.entryIntervalMs(),
-                candidateId -> nearestJoinedGap(candidateId, byId));
+                candidateId -> nearestJoinedGap(candidateId, byId, peerIds));
     }
 
     /**
@@ -172,7 +189,8 @@ public class TrafficControlService {
      * <p>순환로를 벗어난 차량은 세지 않는다 — 바이에서 작업 중인 차 때문에 새 차가 영영 합류하지
      * 못하면 운행이 시작되지 않는다.
      */
-    private Double nearestJoinedGap(String candidateId, Map<String, VehicleMotion> byId) {
+    private Double nearestJoinedGap(String candidateId, Map<String, VehicleMotion> byId,
+                                    Set<String> peerIds) {
         VehicleMotion candidate = byId.get(candidateId);
         if (candidate == null) {
             return null;    // 위치를 모르는 차량 — 간격으로 막지 않는다(온라인 판정이 이미 걸렀다)
@@ -182,6 +200,9 @@ public class TrafficControlService {
         for (VehicleMotion other : byId.values()) {
             if (other.vehicleId().equals(candidateId) || !operationService.isJoined(other.vehicleId())) {
                 continue;
+            }
+            if (!peerIds.contains(other.vehicleId())) {
+                continue;   // 피할 대상이 아닌 차량은 앞을 막은 것으로 세지 않는다
             }
             if (!CollisionPredictor.isOnTrack(track, other, loopProperties.offTrackTolM())) {
                 continue;
@@ -444,11 +465,6 @@ public class TrafficControlService {
         List<VehicleLocationSnapshot> fresh = new ArrayList<>();
         for (VehicleLocationSnapshot snapshot : locationProvider.findAllLatest()) {
             if (snapshot.x() == null || snapshot.y() == null) {
-                continue;
-            }
-            if (properties.ignores(snapshot.vehicleId())) {
-                // 좌표계만 겹치고 물리적으로는 다른 공간에 있는 차량. 여기서 빼지 않으면
-                // 명령을 안 보내도 **남을 막는다**(TrafficControlProperties.ignores 주석).
                 continue;
             }
             if (isStale(snapshot.receivedAt(), now)) {

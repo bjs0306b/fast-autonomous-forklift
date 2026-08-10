@@ -22,4 +22,10 @@ fast_mqtt_bridge:
     command_cache_ttl_sec: 3600.0
     command_cache_max_entries: 1000
     path_max_points: 1000
+    # 백엔드 좌표(시뮬 20x30 m) → 실물 맵(sim_warehouse_real, 2.0x3.0 m) 배수.
+    #
+    # ⚠️ 반대 방향(orin_telemetry)이 이미 x10 으로 올려 보낸다. 짝을 맞추지 않으면
+    #    백엔드가 준 (15.5, 4.0) 이 그대로 Nav2 로 가서 맵 밖이 된다(2026-08-10 실측:
+    #    Nav2 가 경로를 못 짜고 지게차가 안 움직였다).
+    nav2_destination_scale: 0.1
 
