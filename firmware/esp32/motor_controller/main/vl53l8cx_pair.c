@@ -400,13 +400,39 @@ static esp_err_t tof_start_sensor(tof_sensor_t *sensor)
         return ESP_ERR_NOT_FOUND;
     }
 
-    /* Uploads the sensor firmware; roughly a second at 400 kHz */
-    status = vl53l8cx_init(&sensor->device);
+    /*
+     * Uploads 84 KB of sensor firmware over I2C -- about two seconds at
+     * 400 kHz, and by far the longest transfer this driver ever makes.
+     * A connector that is merely marginal passes every short transaction
+     * and fails only here, which reads as a dead sensor rather than as
+     * loose wiring. Retry rather than give up on the first failure.
+     */
+    for (uint32_t attempt = 1; ; attempt++) {
+        status = vl53l8cx_init(&sensor->device);
 
-    if (status != VL53L8CX_STATUS_OK) {
-        ESP_LOGE(TAG, "%s sensor init failed: %u",
-                 sensor->name, (unsigned)status);
-        return ESP_FAIL;
+        if (status == VL53L8CX_STATUS_OK) {
+            if (attempt > 1U) {
+                /* Loud on purpose: a retry that worked still means the
+                 * link is marginal, and silence here would hide that. */
+                ESP_LOGW(TAG,
+                         "%s sensor init needed %lu attempts -- "
+                         "check that sensor's wiring",
+                         sensor->name, (unsigned long)attempt);
+            }
+            break;
+        }
+
+        if (attempt >= TOF_INIT_RETRY_COUNT) {
+            ESP_LOGE(TAG, "%s sensor init failed after %lu attempts: %u",
+                     sensor->name, (unsigned long)attempt,
+                     (unsigned)status);
+            return ESP_FAIL;
+        }
+
+        ESP_LOGW(TAG, "%s sensor init attempt %lu/%u failed: %u",
+                 sensor->name, (unsigned long)attempt,
+                 (unsigned)TOF_INIT_RETRY_COUNT, (unsigned)status);
+        vTaskDelay(pdMS_TO_TICKS(TOF_INIT_RETRY_DELAY_MS));
     }
 
     status = vl53l8cx_set_resolution(

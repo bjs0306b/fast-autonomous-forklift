@@ -15,7 +15,7 @@ setup(
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         (
             "share/" + package_name + "/config",
-            glob("config/*.rviz"),
+            glob("config/*.rviz") + glob("config/*.xml"),
         ),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         (
@@ -40,6 +40,16 @@ setup(
             "obstacle_avoidance = "
             "forklift_teleop.obstacle_avoidance_node:main",
             "unmanned_mission = forklift_teleop.unmanned_mission:main",
+            "field_lap_mission = forklift_teleop.field_lap_mission:main",
+            "drive_mux = forklift_teleop.drive_mux:main",
+            "unstick_node = forklift_teleop.unstick_node:main",
+            "mode_marker = forklift_teleop.mode_marker:main",
+            "mission_runner = forklift_teleop.mission_runner:main",
+            "pivot_node = forklift_teleop.pivot_node:main",
+            "debug_hud = forklift_teleop.debug_hud:main",
+            "fork_align_node = forklift_teleop.fork_align_node:main",
+            "map_odom_publisher = "
+            "forklift_teleop.map_odom_publisher:main",
         ],
     },
 )

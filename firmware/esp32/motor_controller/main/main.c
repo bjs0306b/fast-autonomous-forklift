@@ -133,7 +133,31 @@ void app_main(void)
                  seconds);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    ESP_ERROR_CHECK(run_guarded_homing_sequence());
+    /*
+     * ⚠️ **여기에 ESP_ERROR_CHECK 를 쓰지 않는다.**
+     *
+     * 2026-08-09: 드라이버 열보호로 포크가 안 내려가 호밍이 실패했는데,
+     * ESP_ERROR_CHECK 가 패닉을 내 보드가 리셋되고 10 초 뒤 또 호밍을 걸었다.
+     * 뜨거운 드라이버에 통전이 끊기지 않고 반복돼 **과열을 오히려 키웠다.**
+     *
+     * 호밍 실패는 치명적이지 않다 — 포크 높이 기준만 없는 상태이고, 주행·통신은
+     * 그대로 살아 있어야 사람이 원인을 볼 수 있다. 그래서 드라이버를 끄고
+     * 시끄럽게 남긴 뒤 계속 부팅한다. 원인이 풀리면 `/fork/command` 의 `HOME`
+     * 으로 다시 걸면 된다.
+     */
+    esp_err_t homing_result = run_guarded_homing_sequence();
+
+    if (homing_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Startup homing failed: %s — driver disabled, fork height "
+            "is UNKNOWN. Check the lower-limit wiring, driver temperature "
+            "(TMC2209 shuts down when hot), and whether the fork is stuck. "
+            "Re-run with the HOME fork command once fixed.",
+            esp_err_to_name(homing_result)
+        );
+        (void)stepper_motor_stop();
+    }
 #elif STEPPER_MOTOR_STARTUP_TEST_ENABLED
     for (int seconds = 10; seconds > 0; --seconds) {
         ESP_LOGW(TAG,

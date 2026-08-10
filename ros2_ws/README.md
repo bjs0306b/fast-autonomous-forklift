@@ -27,6 +27,9 @@ ros2 launch forklift_teleop sensor_usb.launch.py
 `fast_mqtt_bridge`의 상세 설정, MQTT 토픽, 미연결 ROS2 adapter 범위는
 [`src/fast_mqtt_bridge/README.md`](src/fast_mqtt_bridge/README.md)를 참고합니다.
 
+LiDAR·좌우 전면 ToF·SLAM·Nav2·장애물 회피·10 Hz Orin 좌표 전송을 한 번에
+기동하는 현장 절차는 [`FIELD_SLAM_MQTT.md`](FIELD_SLAM_MQTT.md)를 참고합니다.
+
 ## LiDAR AMCL 및 Nav2 통합 현황
 
 2026-07-30 기준 `S15P11A304-98`과 `S15P11A304-99`에서 확인한
@@ -181,3 +184,104 @@ ros2 topic echo /cmd_vel
 - 지면에서 직선·곡선 경로 추종 오차 측정
 - 후륜 조향 후미 스윙과 obstacle footprint 검증
 
+
+---
+
+## RViz 를 다른 PC 에서 띄우기
+
+오린에서 RViz 를 돌리면 코어 하나를 통째로 먹는다. 그 부하로 스캔이 버려지면
+`map->odom` 이 끊기고, 그러면 자세 추정이 통째로 흔들린다 — 화면을 보려다 보는
+대상을 망가뜨린다. RViz 는 노트북에서 띄우고 오린은 ROS 만 돌린다.
+
+### 노트북에 필요한 것
+
+ROS 2 **Humble** (오린과 같은 배포판이어야 메시지 타입이 맞는다).
+
+```bash
+sudo apt install ros-humble-desktop ros-humble-nav2-msgs
+```
+
+`nav2-msgs` 는 `/local_costmap/voxel_grid`(`nav2_msgs/VoxelGrid`) 를 보려면
+필요하다. 나머지 디스플레이는 전부 표준 메시지라 `desktop` 만으로 뜬다.
+이 저장소를 노트북에 받을 필요는 없다 — 커스텀 메시지를 쓰지 않는다.
+
+### 양쪽에 똑같이 넣을 환경변수
+
+```bash
+export ROS_DOMAIN_ID=100          # ⚠️ 오린과 반드시 같아야 한다
+export ROS_LOCALHOST_ONLY=0
+export FASTRTPS_DEFAULT_PROFILES_FILE=/경로/fastdds_no_shm.xml
+```
+
+⚠️ **`ROS_DOMAIN_ID` 가 도구마다 다르다.** 오린 프로필은 100 이고
+`tools/field_lap_session.sh` 도 100 인데, `FIELD_SLAM_MQTT.md` 는 시뮬을 0 으로
+쓴다고 적고 있다. 오린에서 `echo $ROS_DOMAIN_ID` 로 실제 값을 확인하고 맞출 것.
+**틀리면 에러 없이 그냥 아무것도 안 보인다** — 가장 흔한 실패다.
+
+⚠️ **DDS 프로파일을 노트북에도 걸 것.** 파일은
+`src/forklift_teleop/config/fastdds_no_shm.xml` 이고, 노트북으로 복사해 그
+경로를 가리키면 된다. 한쪽만 걸면 디스커버리가 반쪽이 되어 "토픽 목록은
+보이는데 데이터가 안 온다" 가 된다.
+
+### 같은 공유기에 있을 때
+
+위 세 줄만 넣고 노트북에서 바로 확인한다.
+
+```bash
+ros2 topic list          # 오린 토픽이 보여야 한다
+ros2 topic hz /scan      # 실제로 데이터가 흘러야 한다
+rviz2 -d forklift.rviz   # 설정 파일은 오린에서 복사
+```
+
+### VPN 이나 다른 대역일 때 — 멀티캐스트가 안 된다
+
+오린에는 Tailscale 대역(`100.x`)이 함께 잡혀 있다. **VPN 을 타면 DDS 의 기본
+디스커버리(멀티캐스트)가 통하지 않아** 위 방법으로는 아무것도 안 보인다.
+상대를 명시적으로 알려 주는 프로파일을 쓴다. 아래를 노트북의
+`fastdds_peer.xml` 로 저장하고 `FASTRTPS_DEFAULT_PROFILES_FILE` 을 그것으로
+가리킨다. `<address>` 에는 **노트북에서 오린으로 ping 이 되는 주소**를 넣는다.
+
+```xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_only</transport_id>
+        <type>UDPv4</type>
+      </transport_descriptor>
+    </transport_descriptors>
+    <participant profile_name="remote_rviz" is_default_profile="true">
+      <rtps>
+        <userTransports><transport_id>udp_only</transport_id></userTransports>
+        <useBuiltinTransports>false</useBuiltinTransports>
+        <builtin>
+          <initialPeersList>
+            <locator><udpv4><address>오린_IP</address></udpv4></locator>
+          </initialPeersList>
+        </builtin>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>
+```
+
+오린 쪽에도 같은 방식으로 노트북 주소를 넣어 두면 양방향이 확실해진다.
+
+### RViz 에서 볼 것
+
+주행이 멈추면 이유가 최소 넷인데(가드·플래너·컨트롤러·브리지) 밖에서는 넷이
+똑같이 "안 움직인다" 로 보인다. 아래 넷을 켜 두면 구분된다.
+
+| 디스플레이 | 토픽 | 무엇을 답하는가 |
+|---|---|---|
+| MarkerArray | `/debug/hud` | **여섯 줄 요약** — 가드 판정·운전 주체·nav2 v/w·실제 서보 각도·경로 갱신 시각 |
+| Path | `/plan` | 플래너가 경로를 냈는가 |
+| Path | `/local_plan` | 컨트롤러가 실제로 따라가는 궤적 |
+| Map | `/local_costmap/costmap` | 장애물이 실제보다 크게 잡히는가 |
+
+`/debug/hud` 의 경로 줄은 점 수가 아니라 **마지막 갱신 후 경과**를 띄운다.
+재계획 중인지 포기했는지는 그것만이 가른다.
+
+점군(`/scan`, ToF)은 기본으로 꺼 둔다. 네트워크로 보내면 대역폭을 가장 많이
+먹으면서 위 넷만큼 답을 주지 않는다.

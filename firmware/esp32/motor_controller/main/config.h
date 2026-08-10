@@ -66,12 +66,40 @@
  */
 #define STEPPER_MOTOR_HOLD_AFTER_MOTION   1
 
+/*
+ * 유지 토크를 **얼마나 오래** 붙잡을 것인가. 0 이면 무기한(종전 동작).
+ *
+ * ⚠️ 2026-08-09 에 무기한 유지로 **TMC2209 가 만질 수 없을 만큼 뜨거워졌다.**
+ * 열보호가 걸리면 포크가 안 내려가고, 그러면 부팅 호밍이 하한 스위치에 영영
+ * 닿지 못해 150 초를 갈다 실패한다 — 그 사이 모든 포크 명령이
+ * `ESP_ERR_INVALID_STATE` 로 거부된다.
+ *
+ * 30 초면 "정렬 직전에 높이를 맞춰 두는" 용도는 그대로 살고, 방치했을 때의
+ * 상시 통전은 사라진다. 정렬 한 회차가 30 초를 넘으면 늘릴 것.
+ *
+ * ⚠️ 이건 **증상 완화지 근본 해결이 아니다.** 근본은 드라이버 Vref(전류 제한)가
+ * 미니어처 포크에 견줘 과하다는 것이다. Vref 를 낮추면 유지 중에도 안 뜨겁다.
+ */
+#define STEPPER_MOTOR_HOLD_TIMEOUT_MS     30000U
+
 #define STEPPER_MOTOR_DEFAULT_RATE_SPS    5000U
 #define STEPPER_MOTOR_DEFAULT_ACCEL_SPS2  10000U
 #define STEPPER_MOTOR_DEFAULT_MOVE_STEPS  19200U
 #define STEPPER_MOTOR_HOMING_RATE_SPS     2000U
 #define STEPPER_MOTOR_HOMING_ACCEL_SPS2   600U
-#define STEPPER_MOTOR_HOMING_MAX_STEPS    300000U
+/*
+ * 호밍이 하한 스위치를 못 찾았을 때 포기하는 지점.
+ *
+ * 300000 스텝은 2000 sps 에서 **150 초**다. 스위치가 안 눌리는 상황(배선 끊김·
+ * 드라이버 열보호·포크 걸림)에서 그 150 초를 통째로 갈아넣고서야 실패를 알았다.
+ * 그동안 포크 명령은 전부 거부되고 모터는 계속 통전된다 — 과열 상황에서는
+ * 이 시간이 그대로 손해다.
+ *
+ * 60000 = 30 초. 실제 스트로크보다 넉넉하되 실패를 빨리 알리는 값으로 잡았다.
+ * ⚠️ 실제 최대 스트로크를 재본 값이 아니다 — 정상 호밍이 이 값에 가깝게
+ * 걸리면 늘릴 것.
+ */
+#define STEPPER_MOTOR_HOMING_MAX_STEPS    60000U
 #define STEPPER_MOTOR_HOME_BACKOFF_DELAY_MS 500U
 /*
  * 호밍 뒤 하한에서 올라오는 양 = **포크의 기준 높이**다. 미니어처 파렛트는 총높이
@@ -122,7 +150,9 @@
  * 안 돈다). 바퀴를 띄우고 부하를 뗀 상태에서만 켤 것.
  */
 #define STEPPER_MOTOR_STARTUP_TEST_ENABLED 0
-#define STEPPER_MOTOR_STARTUP_HOME_ENABLED 1
+/* 2026-08-10 진단용 임시 0. 호밍 실패 -> abort() -> 재부팅 루프(163초 주기)를
+ * 끊어 스테퍼를 비워두려는 것. 모터가 도는 것을 확인하면 1 로 되돌린다. */
+#define STEPPER_MOTOR_STARTUP_HOME_ENABLED 0
 #define STEPPER_MOTOR_STARTUP_TEST_STEPS   500U
 #define STEPPER_MOTOR_STARTUP_TEST_RATE_SPS 100U
 

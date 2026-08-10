@@ -1,5 +1,6 @@
 """ROS2 guard for roof LiDAR and two forward-facing fork-level ToFs."""
 
+from dataclasses import replace
 import json
 import math
 import struct
@@ -8,7 +9,11 @@ import time
 from geometry_msgs.msg import Twist
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSProfile,
+    qos_profile_sensor_data,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan, PointCloud2, PointField
 from std_msgs.msg import String
@@ -17,13 +22,16 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from forklift_teleop.obstacle_fusion import (
     AvoidanceAction,
     AvoidanceConfig,
+    AvoidanceDecision,
     FrontTofClearance,
     LidarCorridors,
     VisionDetection,
     apply_decision,
     decide_avoidance,
-    front_tof_distance_from_points,
+    front_tof_corridors_from_points,
     lidar_corridors_from_points,
+    limit_reverse_yaw,
+    status_document,
 )
 
 
@@ -50,17 +58,39 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter("lidar_front_half_angle_deg", 70.0)
         self.declare_parameter("lidar_center_half_angle_deg", 18.0)
         self.declare_parameter("tof_front_half_angle_deg", 35.0)
+        self.declare_parameter("tof_center_half_angle_deg", 12.0)
+        # 차체 반폭 + 여유. 정지 판정이 쓰는 통로의 반폭이다.
+        self.declare_parameter("path_half_width_m", 0.11)
         self.declare_parameter("tof_min_height_m", 0.02)
         self.declare_parameter("tof_max_height_m", 0.80)
         self.declare_parameter("minimum_sector_hits", 2)
-        self.declare_parameter("stop_distance_m", 0.45)
+        self.declare_parameter("stop_distance_m", 0.25)
+        self.declare_parameter("avoidance_engage_distance_m", 0.45)
         self.declare_parameter("slowdown_distance_m", 1.00)
-        self.declare_parameter("minimum_speed_scale", 0.25)
-        self.declare_parameter("avoidance_yaw_rate_rps", 0.18)
+        self.declare_parameter("minimum_speed_scale", 0.80)
+        self.declare_parameter("avoidance_yaw_rate_rps", 0.02)
         self.declare_parameter("max_abs_yaw_rate_rps", 0.35)
         self.declare_parameter("tof_imbalance_m", 0.10)
         self.declare_parameter("lidar_clearance_margin_m", 0.15)
         self.declare_parameter("minimum_turn_clearance_m", 0.55)
+        self.declare_parameter("rear_stop_distance_m", 0.30)
+        # 정후방 콘 바깥의 고리. 조향 후진에서 꼬리가 쓸고 가는 구간이다.
+        #
+        # ⚠️ 90° 로 두면 **옆 평행벽이 후방 장애물로 읽힌다** -- 전방에서 이미
+        #    겪은 실패다(obstacle_avoidance.yaml 의 방위 구간 주석 참고).
+        #    0 이면 이 채널이 꺼지고 종전 동작 그대로다.
+        self.declare_parameter("lidar_rear_side_half_angle_deg", 60.0)
+        self.declare_parameter("reverse_tail_clearance_m", 0.40)
+        # 꺾인 명령일수록 감속을 덜 한다(0 = 종전, 1 = 최대 곡률에서 감속 없음).
+        self.declare_parameter("steered_scale_relief", 0.0)
+        # 이 반경보다 급하게 돌면 **감속을 전혀 안 한다.** 기동 한계(0.25 m,
+        # 조향 30°)가 아니라 그보다 완만한 값을 쓴다 -- 스톨은 최대 락에서만
+        # 나는 게 아니라 조금만 꺾여도 난다. 0.60 m 는 후륜 13.5° 다.
+        self.declare_parameter("full_relief_turning_radius_m", 0.60)
+        # 파렛 진입 중에만 쓰는 전방 임계. footprint 전면이 0.190 m 이므로
+        # 0.20 은 차체가 닿기 직전이다.
+        self.declare_parameter("align_stop_distance_m", 0.20)
+        self.declare_parameter("mode_topic", "/drive/mode")
         self.declare_parameter("vision_confidence_threshold", 0.60)
         self.declare_parameter("dynamic_object_stop_distance_m", 1.50)
         self.declare_parameter("dynamic_labels", [
@@ -78,6 +108,11 @@ class ObstacleAvoidanceNode(Node):
         self._vision_timeout = float(
             self.get_parameter("vision_timeout_sec").value
         )
+        self._rear_stop_distance = float(
+            self.get_parameter("rear_stop_distance_m").value
+        )
+        if self._rear_stop_distance <= 0.0:
+            raise ValueError("rear stop distance must be positive")
         if min(rate_hz, self._command_timeout, self._sensor_timeout) <= 0.0:
             raise ValueError("rate and timeout parameters must be positive")
 
@@ -101,6 +136,28 @@ class ObstacleAvoidanceNode(Node):
         ))
         if not 0.0 < self._lidar_center_angle < self._lidar_front_angle:
             raise ValueError("LiDAR center angle must be inside front angle")
+        self._lidar_rear_side_angle = math.radians(float(
+            self.get_parameter("lidar_rear_side_half_angle_deg").value
+        ))
+        if self._lidar_rear_side_angle and (
+                self._lidar_rear_side_angle <= self._lidar_center_angle):
+            raise ValueError(
+                "lidar_rear_side_half_angle_deg 는 후방 콘 바깥이어야 한다 -- "
+                "lidar_center_half_angle_deg 보다 커야 고리가 생긴다"
+            )
+        self._tof_center_angle = math.radians(float(
+            self.get_parameter("tof_center_half_angle_deg").value
+        ))
+        if not 0.0 < self._tof_center_angle < self._tof_front_angle:
+            raise ValueError(
+                "tof_center_half_angle_deg must be between 0 and "
+                "tof_front_half_angle_deg"
+            )
+        self._path_half_width = float(
+            self.get_parameter("path_half_width_m").value
+        )
+        if self._path_half_width <= 0.0:
+            raise ValueError("path_half_width_m must be positive")
         self._tof_min_height = float(
             self.get_parameter("tof_min_height_m").value
         )
@@ -122,6 +179,9 @@ class ObstacleAvoidanceNode(Node):
             slowdown_distance_m=float(
                 self.get_parameter("slowdown_distance_m").value
             ),
+            avoidance_engage_distance_m=float(
+                self.get_parameter("avoidance_engage_distance_m").value
+            ),
             minimum_speed_scale=float(
                 self.get_parameter("minimum_speed_scale").value
             ),
@@ -137,6 +197,12 @@ class ObstacleAvoidanceNode(Node):
             minimum_turn_clearance_m=float(
                 self.get_parameter("minimum_turn_clearance_m").value
             ),
+            reverse_tail_clearance_m=float(
+                self.get_parameter("reverse_tail_clearance_m").value
+            ),
+            steered_scale_relief=float(
+                self.get_parameter("steered_scale_relief").value
+            ),
             vision_confidence_threshold=float(
                 self.get_parameter("vision_confidence_threshold").value
             ),
@@ -149,6 +215,41 @@ class ObstacleAvoidanceNode(Node):
             ),
         )
         self._policy.validate()
+
+        # ⚠️ **ALIGN 일 때는 파렛이 장애물이 아니다.** 포크를 넣으려면 일부러
+        #    파렛까지 다가가야 하는데, 순항용 0.25 m 로는 닿기 전에 가드가
+        #    세운다. 그러면 미션은 "정렬 성공, 포크 헛돌음" 으로 끝난다.
+        #
+        #    풀어 주는 것은 **전방 거리 하나뿐**이다. 회피 조향은 오히려 꺼야
+        #    한다 -- 파렛을 비켜 가면 진입 자체가 어긋난다. 후방 정지와 센서
+        #    타임아웃은 그대로 산다. 사람이 뒤에 있는 것과 포크 앞의 파렛은
+        #    다른 문제다.
+        align_stop = float(self.get_parameter("align_stop_distance_m").value)
+        if align_stop <= 0.0 or align_stop > self._policy.stop_distance_m:
+            raise ValueError(
+                "align_stop_distance_m 는 0 보다 크고 stop_distance_m "
+                f"({self._policy.stop_distance_m}) 이하여야 한다"
+            )
+        # 회피 구간은 최소로 좁힌다(정지 임계 바로 위 1 cm). validate() 가
+        # stop < engage <= slowdown 을 요구해서 0 으로는 못 두는데, 넓게 두면
+        # 조향률이 0 인데도 상태가 계속 AVOID_LEFT 로 찍혀 로그가 거짓말을
+        # 한다 -- 진입 중 무슨 일이 있었는지 나중에 못 읽는다.
+        align_slowdown = max(align_stop * 2.0, 0.30)
+        self._align_policy = replace(
+            self._policy,
+            stop_distance_m=align_stop,
+            slowdown_distance_m=align_slowdown,
+            avoidance_engage_distance_m=align_stop + 0.01,
+            avoidance_yaw_rate_rps=0.0,
+        )
+        self._align_policy.validate()
+        self._drive_mode = "NAV"
+        latched = QoSProfile(depth=1)
+        latched.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
+        self.create_subscription(
+            String, str(self.get_parameter("mode_topic").value),
+            self._on_drive_mode, latched)
+
         self._max_yaw_rate = float(
             self.get_parameter("max_abs_yaw_rate_rps").value
         )
@@ -159,10 +260,13 @@ class ObstacleAvoidanceNode(Node):
         self._command_time = -math.inf
         self._lidar = LidarCorridors()
         self._lidar_time = -math.inf
-        self._tof_distance = [math.inf, math.inf]
+        self._tof_corridors = [FrontTofClearance(), FrontTofClearance()]
         self._tof_time = [-math.inf, -math.inf]
         self._vision = []
         self._vision_time = -math.inf
+        self._full_relief_radius = float(
+            self.get_parameter("full_relief_turning_radius_m").value)
+        self._reverse_yaw_folded = False
         self._last_action = None
 
         input_topic = str(
@@ -265,6 +369,7 @@ class ObstacleAvoidanceNode(Node):
                 self._lidar_center_angle,
                 self._lidar_front_angle,
                 self._minimum_hits,
+                self._lidar_rear_side_angle,
             )
             self._lidar_time = time.monotonic()
         except TransformException as error:
@@ -297,12 +402,14 @@ class ObstacleAvoidanceNode(Node):
                 self._transform_xyz(point, transform)
                 for point in self._pointcloud_xyz(message)
             )
-            self._tof_distance[index] = front_tof_distance_from_points(
+            self._tof_corridors[index] = front_tof_corridors_from_points(
                 points,
                 self._tof_front_angle,
+                self._tof_center_angle,
                 self._tof_min_height,
                 self._tof_max_height,
                 self._minimum_hits,
+                self._path_half_width,
             )
             self._tof_time[index] = time.monotonic()
         except (TransformException, ValueError, struct.error) as error:
@@ -346,6 +453,18 @@ class ObstacleAvoidanceNode(Node):
             missing.append("vision")
         return missing
 
+    def _on_drive_mode(self, message: String) -> None:
+        mode = message.data.strip().upper()
+        if mode == self._drive_mode:
+            return
+        self._drive_mode = mode
+        # 크게 남긴다. 전방 임계가 바뀌는 순간이라, 사고가 나면 제일 먼저
+        # 확인할 줄이다.
+        self.get_logger().info(
+            f"Drive mode {mode}: front stop "
+            f"{(self._align_policy if mode == 'ALIGN' else self._policy).stop_distance_m:.2f} m"
+        )
+
     def _on_timer(self) -> None:
         now = time.monotonic()
         output = Twist()
@@ -358,55 +477,105 @@ class ObstacleAvoidanceNode(Node):
             if now - self._vision_time <= self._vision_timeout
             else []
         )
-        tof = FrontTofClearance(*self._tof_distance)
+        # Both sensors cover the same forward cone, so a sector is as close as
+        # the nearer sensor says it is. Merging by sector rather than keeping
+        # one number per sensor is the whole point -- see FrontTofClearance.
+        first, second = self._tof_corridors
+        tof = FrontTofClearance(
+            front_left_m=min(first.front_left_m, second.front_left_m),
+            front_right_m=min(first.front_right_m, second.front_right_m),
+            front_center_m=min(first.front_center_m, second.front_center_m),
+            front_path_m=min(first.front_path_m, second.front_path_m),
+        )
         decision = decide_avoidance(
             self._lidar,
             tof,
             vision,
             self._missing_required_sensors(now),
-            self._policy,
+            self._align_policy if self._drive_mode == "ALIGN"
+            else self._policy,
         )
-        linear, angular = apply_decision(
+        if self._command.linear.x < 0.0:
+            if self._lidar.rear_m <= self._rear_stop_distance:
+                decision = AvoidanceDecision(
+                    AvoidanceAction.STOP,
+                    0.0,
+                    0.0,
+                    f"rear obstacle at {self._lidar.rear_m:.2f}m",
+                )
+            elif (
+                decision.action != AvoidanceAction.SENSOR_TIMEOUT
+                and not decision.reason.startswith("dynamic object")
+            ):
+                # A close front wall is the reason for backing up and must not
+                # block the escape. Rear LiDAR owns collision stopping here.
+                decision = AvoidanceDecision(
+                    AvoidanceAction.CLEAR,
+                    1.0,
+                    0.0,
+                    f"rear corridor clear at {self._lidar.rear_m:.2f}m",
+                )
+        # 조향하며 후진하면 꼬리가 정후방 콘 밖으로 나간다. 그쪽이 막혔으면
+        # **요만** 0으로 만든다 -- 속도를 건드리면 앞이 막혀서 물러나는 중인
+        # 차를 그 자리에 세우게 된다.
+        reverse_yaw = limit_reverse_yaw(
             self._command.linear.x,
             self._command.angular.z,
+            self._lidar,
+            self._policy,
+        )
+        folded = reverse_yaw != self._command.angular.z
+        if folded != self._reverse_yaw_folded:
+            # 상태가 바뀔 때만 찍는다. 매 주기 찍으면 20Hz 로 로그가 묻힌다.
+            self.get_logger().info(
+                f"후진 조향을 접는다 -- 꼬리 쪽 여유가 "
+                f"{self._policy.reverse_tail_clearance_m:.2f} m 미만이다"
+                if folded else "후진 조향을 다시 편다 -- 꼬리 쪽이 트였다"
+            )
+            self._reverse_yaw_folded = folded
+        policy = (self._align_policy if self._drive_mode == "ALIGN"
+                  else self._policy)
+        linear, angular = apply_decision(
+            self._command.linear.x,
+            reverse_yaw,
             decision,
             self._max_yaw_rate,
+            policy.steered_scale_relief,
+            # 이 반경보다 급하면 완화가 100% -- 즉 감속이 사라진다.
+            (1.0 / self._full_relief_radius
+             if self._full_relief_radius > 0.0 else 0.0),
         )
         output.linear.x = linear
         output.angular.z = angular
         self._safe_publisher.publish(output)
 
-        def finite_or_none(value):
-            return None if math.isinf(value) else round(value, 3)
-
-        status = {
-            "action": decision.action.value,
-            "reason": decision.reason,
-            "speedScale": round(decision.speed_scale, 3),
-            "roofLidar": {
-                "left": finite_or_none(self._lidar.left_m),
-                "center": finite_or_none(self._lidar.center_m),
-                "right": finite_or_none(self._lidar.right_m),
-            },
-            "frontTof": {
-                "left": finite_or_none(tof.front_left_m),
-                "right": finite_or_none(tof.front_right_m),
-            },
-            "visionLabels": [item.label for item in vision],
-        }
+        # 형식은 obstacle_fusion.status_document 한 곳에만 산다 -- unstick 이
+        # corridors_from_status 로 되읽으므로 여기서 손으로 만들면 어긋난다.
+        status = status_document(
+            decision.action.value,
+            decision.reason,
+            decision.speed_scale,
+            self._lidar,
+            tof,
+            [item.label for item in vision],
+        )
         self._status_publisher.publish(String(
             data=json.dumps(status, separators=(",", ":"))
         ))
         if decision.action != self._last_action:
-            log = (
-                self.get_logger().warning
-                if decision.action in {
-                    AvoidanceAction.STOP,
-                    AvoidanceAction.SENSOR_TIMEOUT,
-                }
-                else self.get_logger().info
+            message = (
+                f"Avoidance {decision.action.value}: {decision.reason}"
             )
-            log(f"Avoidance {decision.action.value}: {decision.reason}")
+            # rclpy caches severity by call site. Calling a dynamically chosen
+            # bound method from one line raises "Logger severity cannot be
+            # changed between calls" when CLEAR/AVOID changes to STOP.
+            if decision.action in {
+                AvoidanceAction.STOP,
+                AvoidanceAction.SENSOR_TIMEOUT,
+            }:
+                self.get_logger().warning(message)
+            else:
+                self.get_logger().info(message)
             self._last_action = decision.action
 
 

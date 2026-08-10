@@ -1,4 +1,4 @@
-"""Route nominal velocity through the obstacle guard before UART output."""
+"""Arbitrate who is driving, then route that through the guard to UART."""
 
 import os
 
@@ -16,12 +16,49 @@ def generate_launch_description():
         package_share, "config", "teleop.yaml"
     )
     return LaunchDescription([
+        # ⚠️ 가드 **앞**에 중재가 온다. nav2 와 포크 정렬 노드가 각자 Twist 를
+        #    내는데, 둘 다 /cmd_vel 에 쓰면 마지막에 온 것이 이긴다 -- 에러도
+        #    경고도 없고 차만 이상하게 움직인다. 여기서 하나만 통과시킨다.
+        #
+        #    nav2 는 건드리지 않는다. 가드의 input_cmd_vel_topic 만 중재 결과를
+        #    보게 바꾸면 되고, 그 아래(가드·브리지·펌웨어 워치독)는 그대로다.
+        Node(
+            package="forklift_teleop",
+            executable="drive_mux",
+            name="drive_mux",
+            output="screen",
+        ),
+        # 가드가 STOP 을 걸면 컨트롤러가 명령을 안 내고, 그러면 nav2 의 진행
+        # 판정이 돌 기회가 없어 복구가 영영 발동하지 않는다. 가드 **바깥**에서
+        # 봐야만 알 수 있는 상태라 별도 노드로 둔다.
+        Node(
+            package="forklift_teleop",
+            executable="unstick_node",
+            name="unstick_node",
+            output="screen",
+            # 가드와 같은 파일에서 받는다. 탈출이 방향을 고를 때 쓰는
+            # tof_imbalance_m 같은 값이 가드와 어긋나면, 가드는 한쪽이
+            # 막혔다고 보는데 탈출은 대칭이라고 보는 상태가 된다.
+            parameters=[avoidance_parameters],
+        ),
+        # 주행이 멈추면 이유가 최소 넷이다(가드·플래너·컨트롤러·브리지). 밖에서
+        # 보면 넷이 똑같이 "안 움직인다" 로 보이므로, 흩어진 토픽을 차 위에 글자로
+        # 모아 둔다. 읽기만 하는 노드라 주행 경로에 끼어들지 않는다.
+        Node(
+            package="forklift_teleop",
+            executable="debug_hud",
+            name="debug_hud",
+            output="screen",
+        ),
         Node(
             package="forklift_teleop",
             executable="obstacle_avoidance",
             name="obstacle_avoidance",
             output="screen",
-            parameters=[avoidance_parameters],
+            parameters=[
+                avoidance_parameters,
+                {"input_cmd_vel_topic": "/cmd_vel_arbitrated"},
+            ],
         ),
         Node(
             package="forklift_teleop",

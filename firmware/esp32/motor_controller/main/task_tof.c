@@ -20,6 +20,13 @@
 
 #define TOF_WAIT_TIMEOUT_MS         500U
 #define TOF_LOST_INTERRUPT_LOG_MS   5000U
+/*
+ * A failed block read can leave the active-low INT asserted.  There is then
+ * no next falling edge, so an interrupt-driven sensor would otherwise remain
+ * silent until reboot.  Poll after three missed 15 Hz frames to read and clear
+ * the pending frame; the next interrupt edge resumes normal operation.
+ */
+#define TOF_INTERRUPT_RECOVERY_MS   200U
 
 static const char *TAG = "TOF_TASK";
 
@@ -106,7 +113,7 @@ static esp_err_t tof_interrupt_init(void)
     return ESP_OK;
 }
 
-static void tof_publish(
+static bool tof_publish(
     uint32_t sensor,
     uint32_t *sequence,
     int64_t timestamp_us
@@ -118,7 +125,7 @@ static void tof_publish(
     if (result != ESP_OK) {
         ESP_LOGW(TAG, "Sensor %lu read failed: %s",
                  (unsigned long)sensor, esp_err_to_name(result));
-        return;
+        return false;
     }
 
     tof_sample_t sample = {
@@ -134,6 +141,7 @@ static void tof_publish(
     telemetry_submit_tof(&sample);
     s_published[sensor]++;
     sequence[sensor]++;
+    return true;
 }
 
 static void tof_task(void *argument)
@@ -149,6 +157,9 @@ static void tof_task(void *argument)
      */
     TickType_t last_warning_tick = xTaskGetTickCount();
     TickType_t last_status_tick = xTaskGetTickCount();
+    TickType_t last_publish_tick[TOF_SENSOR_COUNT] = {
+        last_status_tick, last_status_tick
+    };
 
     ESP_LOGI(TAG, "Front ToF ranging started");
 
@@ -170,9 +181,15 @@ static void tof_task(void *argument)
                 }
 
                 interrupt_seen[sensor] = true;
-                tof_publish(sensor, sequence, s_timestamp_us[sensor]);
+                if (tof_publish(
+                        sensor, sequence, s_timestamp_us[sensor]
+                    )) {
+                    last_publish_tick[sensor] = xTaskGetTickCount();
+                }
             }
         }
+
+        TickType_t now = xTaskGetTickCount();
 
         /*
          * Anything the interrupt never delivers is picked up here. A sensor
@@ -181,7 +198,11 @@ static void tof_task(void *argument)
          * both usable while the warning below keeps the fault visible.
          */
         for (uint32_t sensor = 0; sensor < TOF_SENSOR_COUNT; sensor++) {
-            if (interrupt_seen[sensor] ||
+            bool recovery_due =
+                now - last_publish_tick[sensor] >=
+                pdMS_TO_TICKS(TOF_INTERRUPT_RECOVERY_MS);
+
+            if ((!recovery_due && interrupt_seen[sensor]) ||
                 !tof_pair_is_present((tof_sensor_id_t)sensor)) {
                 continue;
             }
@@ -203,10 +224,10 @@ static void tof_task(void *argument)
 
             /* Sampled before the read clears the sensor's INT output */
             s_level_when_ready[sensor] = gpio_get_level(s_int_gpio[sensor]);
-            tof_publish(sensor, sequence, esp_timer_get_time());
+            if (tof_publish(sensor, sequence, esp_timer_get_time())) {
+                last_publish_tick[sensor] = xTaskGetTickCount();
+            }
         }
-
-        TickType_t now = xTaskGetTickCount();
 
         if (now - last_status_tick >=
             pdMS_TO_TICKS(TELEMETRY_STATUS_PERIOD_MS)) {

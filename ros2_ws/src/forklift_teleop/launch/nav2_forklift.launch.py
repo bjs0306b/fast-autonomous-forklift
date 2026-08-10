@@ -43,8 +43,11 @@ def generate_launch_description() -> LaunchDescription:
     teleop_share = get_package_share_directory("forklift_teleop")
     nav2_share = get_package_share_directory("nav2_bringup")
 
+    # 재계획·복구 트리. 앞선 navigate_to_pose_no_spin.xml 은 경로를 한 번만
+    # 계산하고 실패하면 즉시 abort 해서, 장애물 앞에 멈춘 뒤 아무것도 하지
+    # 않았다. 되돌릴 때를 대비해 옛 트리도 레포에 남겨 둔다.
     bt_xml = os.path.join(teleop_share, "behavior_trees",
-                          "navigate_to_pose_no_spin.xml")
+                          "navigate_to_pose_replanning.xml")
 
     map_yaml = LaunchConfiguration("map")
     params_file = LaunchConfiguration("params_file")

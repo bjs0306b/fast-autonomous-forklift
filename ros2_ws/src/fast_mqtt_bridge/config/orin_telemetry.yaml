@@ -1,0 +1,48 @@
+orin_telemetry:
+  ros__parameters:
+    vehicle_id: fk01
+    map_frame: map
+    base_frame: base_link
+    odom_topic: /odometry/filtered
+    status_topic: /vehicle/telemetry_state
+    publish_rate_hz: 10.0
+    # slam_toolbox may briefly publish map->odom more slowly under scan-matcher
+    # load. Two seconds still rejects a dead pose without dropping valid laps.
+    pose_timeout_sec: 2.0
+    velocity_timeout_sec: 0.5
+
+    # SLAM map starts at the vehicle pose, not at the warehouse lower-left.
+    # Set these to the vehicle's measured warehouse pose at SLAM startup.
+    origin_configured: false
+    origin_x_m: 0.0
+    origin_y_m: 0.0
+    origin_yaw_rad: 0.0
+
+    mqtt_enabled: false
+    mqtt_host: i15a304.p.ssafy.io
+    mqtt_port: 8883
+    mqtt_username: ""
+    mqtt_password_env: MQTT_PASSWORD
+    mqtt_client_id: fk01-orin-telemetry
+    mqtt_keepalive: 30
+    mqtt_ca_cert: ""
+    # The current field certificate identifies an IP, not the hostname.
+    # Enable only when using the team-provided FAST-MQTT-CA.
+    mqtt_tls_insecure: false
+    mqtt_topic: fast/v1/vehicle/fk01/telemetry
+
+    fork_height_m: 0.0
+    loaded: false
+    cargo_id: ""
+    task_id: ""
+    battery: 100.0
+    state_override: ""
+    moving_threshold_mps: 0.01
+
+    trajectory_csv: /tmp/fk01_slam_route.csv
+    trajectory_spacing_m: 0.05
+    lap_min_distance_m: 2.0
+    lap_closure_distance_m: 0.15
+    warehouse_width_m: 2.0
+    warehouse_height_m: 3.0
+    warehouse_bounds_tolerance_m: 0.05

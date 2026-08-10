@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  원격 RViz 용 Fast DDS 프로파일 (오린 쪽).
+
+  fastdds_no_shm.xml 과 다른 점은 두 가지이고, 둘 다 **Wi-Fi 때문**이다.
+
+  1) interfaceWhiteList — 광고할 주소를 랜 하나로 묶는다.
+
+     오린에는 인터페이스가 셋이다: wlP1p1s0(70.12.x, 랜) · tailscale0(100.x) ·
+     docker0(172.17.x). 화이트리스트가 없으면 Fast DDS 는 **셋 다 로케이터로
+     광고한다.** 노트북은 그중 못 닿는 주소로 붙으려다 시간을 버리고, 어떤
+     조합에서는 "토픽 목록은 보이는데 데이터가 안 오는" 상태가 된다.
+
+     ⚠️ 주소는 **오린의 실제 랜 IP** 다. 공유기가 바뀌면 여기도 바꿔야 한다.
+        `ip -4 -o addr show scope global` 로 확인할 것.
+
+  2) 노트북 쪽은 initialPeersList 로 오린을 직접 가리킨다(아래 참고).
+
+     디스커버리 기본값은 멀티캐스트인데, **Wi-Fi AP 가 멀티캐스트를 걸러내거나
+     단말 간 통신을 막는 경우가 흔하다**(캠퍼스·게스트 망은 대개 그렇다).
+     그러면 설정이 다 맞아도 서로를 못 찾는다. 유니캐스트로 상대를 직접 알려
+     주면 멀티캐스트가 죽어 있어도 붙는다.
+
+  공유 메모리를 끄는 이유는 fastdds_no_shm.xml 의 주석과 같다. 원격에서는
+  애초에 쓸 수 없기도 하다.
+
+  오린에서 쓰는 법:
+
+      export FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/install/forklift_teleop/\
+share/forklift_teleop/config/fastdds_remote.xml
+
+  노트북에서는 아래를 fastdds_peer.xml 로 저장하고 그것을 가리킨다.
+  <address> 에는 **노트북에서 ping 이 되는 오린 주소**를 넣는다:
+
+      <participant profile_name="remote_rviz" is_default_profile="true">
+        <rtps>
+          <userTransports><transport_id>udp_only</transport_id></userTransports>
+          <useBuiltinTransports>false</useBuiltinTransports>
+          <builtin>
+            <initialPeersList>
+              <locator><udpv4><address>70.12.247.81</address></udpv4></locator>
+            </initialPeersList>
+          </builtin>
+        </rtps>
+      </participant>
+
+  ⚠️ **먼저 ping 부터 해 볼 것.** 노트북에서 오린으로 ping 이 안 되면 AP 가
+     단말 간 통신을 막는 것이고, DDS 설정으로는 못 푼다 — 유선이나 다른 망,
+     또는 휴대폰 핫스팟을 써야 한다.
+-->
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_only</transport_id>
+        <type>UDPv4</type>
+        <!-- ⚠️ **오린의 랜 주소다. 바뀌면 여기도 바꿔야 한다.**
+             화이트리스트에 이 기기에 없는 주소를 적으면 그 트랜스포트가
+             죽어서 노드끼리도 못 붙는다. 증상은 '토픽이 /rosout 과
+             /parameter_events 둘만 보인다' 이고, 노드는 멀쩡히 떠 있어서
+             원인을 찾기 어렵다(2026-08-10 실측). `ip -4 addr` 로 확인. -->
+        <interfaceWhiteList>
+          <address>70.12.247.81</address>
+          <!-- ⚠️ **루프백을 빼면 오린 자기 도구가 못 붙는다.** 화이트리스트는
+               "이 인터페이스만 쓴다" 는 뜻이라, 랜 주소만 적으면 127.0.0.1 이
+               막혀 goto.py · set_pose.py 같은 같은 기기 안의 도구가 전부
+               조용히 아무것도 못 받는다(2026-08-09 실측: 8초에 0건).
+               원격을 열자고 로컬을 닫으면 안 된다. -->
+          <address>127.0.0.1</address>
+        </interfaceWhiteList>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="remote_capable" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_only</transport_id>
+        </userTransports>
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

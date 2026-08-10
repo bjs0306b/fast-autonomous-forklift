@@ -5,13 +5,26 @@ import json
 import time
 from typing import Optional
 
+from dataclasses import replace
+
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TwistWithCovarianceStamped
 from rclpy.node import Node
 import serial
 from std_msgs.msg import String
 
-from forklift_teleop.mapping import TeleopLimits, map_twist, select_command
+from forklift_teleop.mapping import (
+    sustain_floor_percent,
+    ActuatorCommand,
+    SpeedController,
+    StartupKick,
+    TurnSpeedBoost,
+    TeleopLimits,
+    map_twist,
+    steering_turn_ratio,
+    select_command,
+)
+from forklift_teleop import protocol
 from forklift_teleop.protocol import (
     encode_command,
     encode_lift_command,
@@ -32,6 +45,30 @@ class UartTeleopBridge(Node):
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("command_rate_hz", 20.0)
         self.declare_parameter("command_timeout_sec", 0.5)
+        self.declare_parameter("forward_startup_kick_percent", 50)
+        self.declare_parameter("reverse_startup_kick_percent", 100)
+        self.declare_parameter(
+            "reverse_startup_kick_straight_percent", 60
+        )
+        self.declare_parameter("steering_settle_sec", 0.6)
+        self.declare_parameter("wheel_twist_topic", "/wheel/twist")
+        self.declare_parameter("stall_speed_mps", 0.01)
+        self.declare_parameter("max_stall_kick_sec", 2.0)
+        self.declare_parameter("stall_kick_rest_sec", 1.0)
+        # 꺾인 채로 못 뜰 때 조향을 펴고 출발할지. 기본은 꺼져 있다 --
+        # 2026-08-09 실측에서 50도로 꺾인 채 정지 출발이 됐다.
+        self.declare_parameter("straighten_to_start", False)
+        self.declare_parameter("straighten_max_sec", 1.5)
+        self.declare_parameter("straighten_release_mps", 0.05)
+        self.declare_parameter("speed_control_enabled", True)
+        self.declare_parameter("speed_percent_per_mps_second", 500.0)
+        self.declare_parameter("speed_max_bias_percent", 40)
+        self.declare_parameter("turn_boost_gain_per_second", 0.8)
+        self.declare_parameter("turn_boost_decay_per_second", 2.0)
+        self.declare_parameter("turn_boost_max_multiplier", 2.5)
+        self.declare_parameter("turn_boost_engage_ratio", 0.25)
+
+        self.declare_parameter("forward_startup_kick_sec", 0.3)
         # ⚠️ **기본값을 여기 다시 적지 않는다.** `TeleopLimits` 하나만 본다.
         #
         # 2026-08-05 까지 여기에 10000/8500/11500 · ±15° · drive 50 이 박혀 있었다.
@@ -47,9 +84,16 @@ class UartTeleopBridge(Node):
         self.declare_parameter("rear_steering_limit_deg",
                                _d.rear_steering_limit_deg)
         self.declare_parameter("min_drive_percent", _d.min_drive_percent)
+        self.declare_parameter("min_sustain_drive_percent",
+                               _d.min_sustain_drive_percent)
+        self.declare_parameter("max_sustain_drive_percent",
+                               _d.max_sustain_drive_percent)
         self.declare_parameter("max_drive_percent", _d.max_drive_percent)
+        self.declare_parameter("max_start_drive_percent",
+                               _d.max_start_drive_percent)
         self.declare_parameter("max_drive_percent_reverse",
                                _d.max_drive_percent_reverse)
+        self.declare_parameter("steered_speed_boost", _d.steered_speed_boost)
         self.declare_parameter("steering_center_cdeg", _d.steering_center_cdeg)
         self.declare_parameter("steering_min_cdeg", _d.steering_min_cdeg)
         self.declare_parameter("steering_max_cdeg", _d.steering_max_cdeg)
@@ -78,6 +122,18 @@ class UartTeleopBridge(Node):
             min_drive_percent=int(
                 self.get_parameter("min_drive_percent").value
             ),
+            steered_speed_boost=float(
+                self.get_parameter("steered_speed_boost").value
+            ),
+            max_start_drive_percent=int(
+                self.get_parameter("max_start_drive_percent").value
+            ),
+            min_sustain_drive_percent=int(
+                self.get_parameter("min_sustain_drive_percent").value
+            ),
+            max_sustain_drive_percent=int(
+                self.get_parameter("max_sustain_drive_percent").value
+            ),
             max_drive_percent_reverse=int(
                 self.get_parameter("max_drive_percent_reverse").value
             ),
@@ -95,6 +151,132 @@ class UartTeleopBridge(Node):
             ),
         )
         self._limits.validate()
+
+        # 운전 범위가 프로토콜 봉투 밖이면 **여기서** 죽는다.
+        #
+        # 그러지 않으면 launch 는 멀쩡히 뜨고, 차가 처음으로 그만큼 깊게
+        # 꺾는 순간 encode_command 가 타이머 콜백 안에서 ValueError 를 내며
+        # 브리지만 조용히 사라진다. 2026-08-08 에 정확히 그렇게 됐다 --
+        # teleop.yaml 만 ±58° 로 넓히고 protocol.py 를 안 따라 넓혀서,
+        # 랩 주행 세 번이 전부 "서보가 안 꺾이고 엔코더 0" 으로 끝났다.
+        # 나머지 스택은 살아 있으니 가드는 SLOW 를 계속 발행했고, 밖에서
+        # 보면 "가는 중" 이었다. 시작할 때 못 뜨는 편이 훨씬 낫다.
+        if (protocol.STEERING_MIN_CDEG > self._limits.steering_min_cdeg
+                or self._limits.steering_max_cdeg > protocol.STEERING_MAX_CDEG):
+            raise ValueError(
+                f"조향 운전 범위 [{self._limits.steering_min_cdeg}, "
+                f"{self._limits.steering_max_cdeg}] 가 프로토콜 봉투 "
+                f"[{protocol.STEERING_MIN_CDEG}, {protocol.STEERING_MAX_CDEG}] "
+                f"밖이다 -- protocol.py 와 펌웨어 config.h 를 같이 넓힐 것"
+            )
+
+        # 정지마찰을 이기는 순간 킥. 클래스와 설정은 예전부터 있었는데
+        # **아무도 만들지 않아 죽은 코드였다** — Nav2 순항 0.10 m/s 는 48% 로
+        # 매핑되고 실측 출발 문턱은 50% 라, 킥 없이는 정지에서 출발을 못 한다.
+        forward_kick = int(
+            self.get_parameter("forward_startup_kick_percent").value
+        )
+        reverse_kick = int(
+            self.get_parameter("reverse_startup_kick_percent").value
+        )
+        reverse_straight_kick = int(
+            self.get_parameter("reverse_startup_kick_straight_percent").value
+        )
+        kick_duration = float(
+            self.get_parameter("forward_startup_kick_sec").value
+        )
+        if not (
+            self._limits.min_drive_percent
+            <= forward_kick
+            <= self._limits.max_drive_percent
+        ):
+            raise ValueError(
+                f"forward startup kick {forward_kick} is outside "
+                f"[{self._limits.min_drive_percent}, "
+                f"{self._limits.max_drive_percent}]"
+            )
+        if not (
+            self._limits.min_drive_percent
+            <= reverse_kick
+            <= self._limits.max_drive_percent_reverse
+        ):
+            raise ValueError(
+                f"reverse startup kick {reverse_kick} is outside "
+                f"[{self._limits.min_drive_percent}, "
+                f"{self._limits.max_drive_percent_reverse}]"
+            )
+        if not (
+            self._limits.min_drive_percent
+            <= reverse_straight_kick
+            <= reverse_kick
+        ):
+            raise ValueError(
+                f"straight reverse startup kick {reverse_straight_kick} is "
+                f"outside [{self._limits.min_drive_percent}, {reverse_kick}]"
+            )
+        if kick_duration < 0.0:
+            raise ValueError("startup kick duration must not be negative")
+        self._startup_kick = StartupKick(
+            forward_kick,
+            reverse_kick,
+            kick_duration,
+            reverse_straight_percent=reverse_straight_kick,
+            steering_settle_sec=float(
+                self.get_parameter("steering_settle_sec").value
+            ),
+            steering_center_cdeg=self._limits.steering_center_cdeg,
+            stall_speed_mps=float(
+                self.get_parameter("stall_speed_mps").value
+            ),
+            max_stall_kick_sec=float(
+                self.get_parameter("max_stall_kick_sec").value
+            ),
+            stall_kick_rest_sec=float(
+                self.get_parameter("stall_kick_rest_sec").value
+            ),
+            straighten_to_start=bool(
+                self.get_parameter("straighten_to_start").value
+            ),
+            straighten_max_sec=float(
+                self.get_parameter("straighten_max_sec").value
+            ),
+            straighten_release_mps=float(
+                self.get_parameter("straighten_release_mps").value
+            ),
+        )
+        # The encoder tells the kick whether the wheels actually turned. With
+        # no publisher this stays None and the kick falls back to its timer.
+        self._measured_speed: Optional[float] = None
+        self._speed_control = SpeedController(
+            percent_per_mps_second=float(
+                self.get_parameter("speed_percent_per_mps_second").value
+            ),
+            max_bias_percent=int(
+                self.get_parameter("speed_max_bias_percent").value
+            ),
+        ) if bool(
+            self.get_parameter("speed_control_enabled").value
+        ) else None
+        self._turn_boost = TurnSpeedBoost(
+            gain_per_second=float(
+                self.get_parameter("turn_boost_gain_per_second").value
+            ),
+            decay_per_second=float(
+                self.get_parameter("turn_boost_decay_per_second").value
+            ),
+            max_multiplier=float(
+                self.get_parameter("turn_boost_max_multiplier").value
+            ),
+            engage_turn_ratio=float(
+                self.get_parameter("turn_boost_engage_ratio").value
+            ),
+        )
+        self.create_subscription(
+            TwistWithCovarianceStamped,
+            str(self.get_parameter("wheel_twist_topic").value),
+            self._on_wheel_twist,
+            10,
+        )
 
         self._serial: Optional[serial.Serial] = None
         self._next_reconnect_time = 0.0
@@ -129,6 +311,13 @@ class UartTeleopBridge(Node):
             fork_status_topic,
             10,
         )
+        # 실제로 UART 로 나간 값. 이게 없으면 "서보가 안 움직인다" 를 밖에서
+        # 확인할 방법이 아예 없다 -- /cmd_vel_safe 는 가드의 출력이지 서보
+        # 명령이 아니고, 그 사이에 킥·속도제어·곡률제한이 전부 들어간다.
+        # 2026-08-08 에 이것 때문에 브리지가 죽은 것과 조향이 얕은 것을
+        # 구분하는 데 여러 번을 썼다.
+        self._command_publisher = self.create_publisher(
+            String, "/teleop/command", 10)
         self._timer = self.create_timer(1.0 / command_rate_hz, self._on_timer)
         self.get_logger().info(
             f"UART teleop ready: topic={cmd_vel_topic}, "
@@ -230,9 +419,27 @@ class UartTeleopBridge(Node):
             or self._last_twist_time is None
         ):
             return map_twist(0.0, 0.0, self._limits)
+        linear_x = self._last_twist.linear.x
+        angular_z = self._last_twist.angular.z
+
+        # Both together, so the curvature -- their ratio -- is untouched and
+        # the planner's steering angle survives. map_twist clamps the result
+        # to max_linear_mps, which is the speed the stopping distance was
+        # derived from, so this cannot outrun the braking margin.
+        multiplier = self._turn_boost.limited(
+            self._turn_boost.update(
+                linear_x,
+                self._measured_speed,
+                steering_turn_ratio(linear_x, angular_z, self._limits),
+                now,
+            ),
+            linear_x,
+            angular_z,
+            self._limits,
+        )
         return select_command(
-            self._last_twist.linear.x,
-            self._last_twist.angular.z,
+            linear_x * multiplier,
+            angular_z * multiplier,
             now - self._last_twist_time,
             self._command_timeout_sec,
             self._limits,
@@ -293,12 +500,63 @@ class UartTeleopBridge(Node):
             except ValueError as error:
                 self.get_logger().warning(f"Invalid UART frame: {error}")
 
+
+
+    def _apply_speed_control(
+        self, command: ActuatorCommand, now: float
+    ) -> ActuatorCommand:
+        """Trim duty toward the commanded speed using the encoder."""
+        if self._speed_control is None or self._last_twist is None:
+            return command
+        bias = self._speed_control.bias(
+            self._last_twist.linear.x, self._measured_speed, now
+        )
+        if bias == 0 or command.drive_percent == 0:
+            return command
+
+        # The bias helps or holds back along the direction already chosen; it
+        # never reverses one. Clamping to the configured envelope keeps the
+        # measured limits (teleop.yaml) authoritative over the controller.
+        # Once the wheels are turning the floor is the one that keeps them
+        # turning, not the higher one it took to start them. Holding the
+        # starting floor while rolling is what made 0.08 m/s come out as 0.17.
+        rolling = (self._measured_speed is not None
+                   and abs(self._measured_speed)
+                   > self._startup_kick.stall_speed_mps)
+        # 굴러가는 중의 하한은 조향 깊이에 따라 달라진다. 조향륜이 꺾일수록
+        # 바닥을 옆으로 긁는 저항이 커져, 직진에서 잰 12% 로는 굴러가던 차가
+        # 도로 선다. 중립이면 그대로 12% 라 직선과 파렛 진입은 안 바뀐다.
+        floor = (sustain_floor_percent(self._last_twist.linear.x,
+                                       self._last_twist.angular.z,
+                                       self._limits) if rolling
+                 else self._limits.min_drive_percent)
+        # Both bounds move together: while stalled the vehicle may go below
+        # the cruising floor's reason for existing and above the cruising
+        # ceiling's, because neither was measured for a standstill.
+        ceiling = (self._limits.max_drive_percent if rolling
+                   else self._limits.max_start_drive_percent)
+        if command.drive_percent > 0:
+            percent = min(
+                max(command.drive_percent + bias, floor),
+                ceiling,
+            )
+        else:
+            percent = max(
+                min(command.drive_percent - bias, -floor),
+                -self._limits.max_drive_percent_reverse,
+            )
+        return replace(command, drive_percent=percent)
+    def _on_wheel_twist(self, message: TwistWithCovarianceStamped) -> None:
+        self._measured_speed = float(message.twist.twist.linear.x)
     def _on_timer(self) -> None:
         now = time.monotonic()
         if not self._ensure_serial(now):
             return
 
-        command = self._current_command(now)
+        command = self._startup_kick.apply(
+            self._current_command(now), now, self._measured_speed
+        )
+        command = self._apply_speed_control(command, now)
 
         try:
             assert self._serial is not None
@@ -319,6 +577,18 @@ class UartTeleopBridge(Node):
                     command.steering_cdeg,
                 )
             )
+            self._command_publisher.publish(String(data=json.dumps({
+                "drivePercent": command.drive_percent,
+                "steeringCdeg": command.steering_cdeg,
+                "rearSteeringDeg": round(
+                    (command.steering_cdeg
+                     - self._limits.steering_center_cdeg) / 100.0, 1),
+                # 엔코더가 아직 안 왔으면 None 이다. 그걸 0.0 으로 적으면
+                # "정지" 와 "모름" 이 구분이 안 된다 -- 지금 찾는 것이 정확히
+                # 그 차이라서 그대로 둔다.
+                "measuredMps": (None if self._measured_speed is None
+                                else round(self._measured_speed, 3)),
+            })))
             self._read_uart()
             self._sequence = next_sequence(self._sequence)
         except (serial.SerialException, OSError) as error:

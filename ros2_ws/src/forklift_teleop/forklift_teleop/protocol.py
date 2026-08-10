@@ -11,6 +11,8 @@ from dataclasses import dataclass
 #
 # 2026-08-04: 8500~11500 → 6600~12600 (중립 9600 기준 ±30°, S15P11A304-197).
 # 2026-08-05: 6600~12600 → 4000~14000 (S15P11A304-152).
+# 2026-08-08: 4000~14000 → 3200~14800 (±58°). 목업 통로에서 돌려면 반경 0.198 m
+#             로는 부족하다 -- 58° 면 0.090 m 다.
 #
 # ⚠️ **여기는 "허용 봉투" 이지 운전 범위가 아니다.** 실제로 쓰는 범위는
 #    `teleop.yaml` 의 steering_min/max_cdeg 이고, 그쪽은 재플래시 없이 바꾼다.
@@ -21,8 +23,8 @@ from dataclasses import dataclass
 #    증상은 "조향이 아예 안 움직임" 이었다. `/cmd_vel` 토픽 자체가 사라진다.
 #
 # 값은 펌웨어 config.h 의 TELEOP_STEERING_MIN/MAX_CDEG 와 **같아야 한다.**
-STEERING_MIN_CDEG = 4000
-STEERING_MAX_CDEG = 14000
+STEERING_MIN_CDEG = 3200
+STEERING_MAX_CDEG = 14800
 
 # 펌웨어 TELEOP_MAX_DRIVE_PERCENT 와 같은 값이어야 한다(2026-08-05: 60 → 100).
 # 봉투일 뿐이고, 전진 60 · 후진 100 은 teleop.yaml 이 정한다.
