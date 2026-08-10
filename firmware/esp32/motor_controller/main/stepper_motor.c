@@ -40,6 +40,9 @@ static stepper_motor_motion_t s_motion = {0};
 static portMUX_TYPE s_motion_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_initialized = false;
 static volatile bool s_homed = false;
+static volatile bool s_driver_enabled = false;
+/* 0 = 유지 해제 예약 없음. 그 외에는 이 틱에 드라이버를 끈다. */
+static volatile TickType_t s_hold_release_deadline = 0;
 
 bool stepper_motor_is_lower_limit_active(void)
 {
@@ -93,6 +96,11 @@ static void stepper_motor_set_enabled(bool enabled)
         : !STEPPER_MOTOR_ENABLE_ACTIVE_LEVEL;
 
     gpio_set_level(STEPPER_MOTOR_ENABLE_GPIO, level);
+    s_driver_enabled = enabled;
+
+    if (!enabled) {
+        s_hold_release_deadline = 0;
+    }
 }
 
 static bool IRAM_ATTR stepper_motor_notify_profile_task_from_isr(void)
@@ -239,9 +247,21 @@ static void stepper_motor_finish_motion(void)
      *
      * 대가는 대기 전류(발열)다. 시연 시간에는 문제없지만 장시간 방치하면
      * 드라이버·모터가 따뜻해진다.
+     *
+     * ⚠️ 2026-08-09: "따뜻해진다"로 끝나지 않았다. 무기한 유지로 TMC2209 가
+     * 화상급으로 달아올라 열보호가 걸렸고, 포크가 안 내려가니 부팅 호밍이
+     * 하한 스위치를 못 찾아 실패·리부팅을 반복했다. 그래서 유지에
+     * **시간 제한**을 뒀다 — `STEPPER_MOTOR_HOLD_TIMEOUT_MS`.
      */
     if (STEPPER_MOTOR_HOLD_AFTER_MOTION == 0) {
         stepper_motor_set_enabled(false);
+    } else if (STEPPER_MOTOR_HOLD_TIMEOUT_MS > 0U) {
+        TickType_t deadline =
+            xTaskGetTickCount() +
+            pdMS_TO_TICKS(STEPPER_MOTOR_HOLD_TIMEOUT_MS);
+
+        /* 0 은 "예약 없음"이라 유효한 마감 시각으로 쓸 수 없다. */
+        s_hold_release_deadline = deadline == 0 ? 1 : deadline;
     }
 
     if (s_motion.timer_error) {
@@ -330,6 +350,19 @@ static void stepper_motor_profile_task(void *argument)
             s_motion.step_period_us = rate_to_period_us(rate);
         } else if (s_motion.timer_running) {
             stepper_motor_finish_motion();
+        } else if (s_driver_enabled &&
+                   s_hold_release_deadline != 0 &&
+                   xTaskGetTickCount() >= s_hold_release_deadline) {
+            /*
+             * 유지 토크 해제. 여기서부터 포크는 중력으로 조금씩 내려앉을 수
+             * 있으므로, 오래 세워둔 뒤에는 높이를 다시 맞춰야 한다.
+             */
+            stepper_motor_set_enabled(false);
+            ESP_LOGI(
+                TAG,
+                "Hold released after %u ms idle; driver disabled",
+                STEPPER_MOTOR_HOLD_TIMEOUT_MS
+            );
         }
     }
 }

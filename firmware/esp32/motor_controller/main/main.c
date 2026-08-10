@@ -1,5 +1,3 @@
-#include "driver/gpio.h"
-
 #include "task_comm.h"
 #include "task_imu.h"
 #include "task_motor.h"
@@ -41,20 +39,6 @@ static esp_err_t run_guarded_homing_sequence(void)
 {
     stepper_motor_status_t status;
 
-    /*
-     * 리밋의 원시 레벨을 먼저 찍는다. 이 핀은 내부 풀업이라 **선이 빠지면
-     * 1 로 읽히고, 활성 레벨도 1 이라 "이미 하한" 으로 판정된다.** 그러면
-     * 하강이 통째로 건너뛰어지고 backoff 만 돌아 포크가 위로만 간다 —
-     * 2026-08-07 에 중간 높이에서 실제로 그렇게 됐다.
-     *
-     * 증상이 "호밍이 반대로 돈다" 로만 보여서 배선을 의심하기 어렵다.
-     * 포크를 손으로 중간에 두고 부팅했을 때 active=1 이면 배선 문제다.
-     */
-    ESP_LOGW(TAG,
-             "Lower limit before homing: raw=%d active=%d "
-             "(raw 1 with the switch open means the wire is loose)",
-             gpio_get_level(STEPPER_MOTOR_LOWER_LIMIT_GPIO),
-             stepper_motor_is_lower_limit_active() ? 1 : 0);
     ESP_LOGW(TAG, "Starting guarded lower-limit homing");
     esp_err_t result = stepper_motor_home();
 
@@ -149,7 +133,31 @@ void app_main(void)
                  seconds);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    ESP_ERROR_CHECK(run_guarded_homing_sequence());
+    /*
+     * ⚠️ **여기에 ESP_ERROR_CHECK 를 쓰지 않는다.**
+     *
+     * 2026-08-09: 드라이버 열보호로 포크가 안 내려가 호밍이 실패했는데,
+     * ESP_ERROR_CHECK 가 패닉을 내 보드가 리셋되고 10 초 뒤 또 호밍을 걸었다.
+     * 뜨거운 드라이버에 통전이 끊기지 않고 반복돼 **과열을 오히려 키웠다.**
+     *
+     * 호밍 실패는 치명적이지 않다 — 포크 높이 기준만 없는 상태이고, 주행·통신은
+     * 그대로 살아 있어야 사람이 원인을 볼 수 있다. 그래서 드라이버를 끄고
+     * 시끄럽게 남긴 뒤 계속 부팅한다. 원인이 풀리면 `/fork/command` 의 `HOME`
+     * 으로 다시 걸면 된다.
+     */
+    esp_err_t homing_result = run_guarded_homing_sequence();
+
+    if (homing_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Startup homing failed: %s — driver disabled, fork height "
+            "is UNKNOWN. Check the lower-limit wiring, driver temperature "
+            "(TMC2209 shuts down when hot), and whether the fork is stuck. "
+            "Re-run with the HOME fork command once fixed.",
+            esp_err_to_name(homing_result)
+        );
+        (void)stepper_motor_stop();
+    }
 #elif STEPPER_MOTOR_STARTUP_TEST_ENABLED
     for (int seconds = 10; seconds > 0; --seconds) {
         ESP_LOGW(TAG,
