@@ -55,6 +55,17 @@ class StartupKick:
     steering_settle_sec: float = 0.6
     steering_center_cdeg: int = 0
     straight_steering_tolerance_cdeg: int = 300
+    # 방향이 뒤집힐 때, 조향이 이만큼 넘게 달라지면 **서보가 갈 동안 구동을
+    # 0으로 잡아둔다.** 사람이 서서 핸들을 돌리고 출발하는 것과 같다.
+    #
+    # 안 하면 차가 먼저 움직이고 바퀴가 나중에 꺾인다 -- 앞부분을 원치 않는
+    # 방향으로 가고, 좁은 곳에서는 꺾기도 전에 공간이 끝난다. 후진 탈출과
+    # nav 의 커스프(방향 전환점) 양쪽에서 같은 문제가 난다.
+    #
+    # ⚠️ **방향 전환에만 건다.** 조향이 바뀔 때마다 걸면 평소 주행이 0.6초씩
+    #    끊긴다. 커스프는 어차피 정지에서 다시 출발하는 지점이라 손해가 없다.
+    presteer_on_direction_change: bool = True
+    presteer_tolerance_cdeg: int = 600
     stall_speed_mps: float = 0.01
     max_stall_kick_sec: float = 2.0
     # 한 번 밀어 보고 포기하지 않는다. 위 시간만큼 밀고, 이만큼 쉬었다가 다시
@@ -108,6 +119,8 @@ class StartupKick:
     stall_started: float = -math.inf
     straight_since: float = -math.inf
     last_direction: int = 0
+    last_steering_cdeg: Optional[int] = None
+    presteer_until: float = -math.inf
 
     def _pushing(self, now: float) -> bool:
         """True during a push burst, False during the rest between bursts."""
@@ -198,12 +211,24 @@ class StartupKick:
             self.stall_started = -math.inf
             self.straightening_since = math.inf
             self.last_direction = 0
+            self.presteer_until = -math.inf
+            # ⚠️ 조향 이력은 지우지 않는다. 정지는 서보를 되돌리지 않으므로,
+            #    다시 출발할 때 바퀴는 마지막으로 명령한 곳에 있다.
             return command
         if direction != self.last_direction:
             self.deadline = now + self.duration_sec
             self.stall_started = now
             self.straightening_since = math.inf
+            # 방향이 뒤집혔다. 서보가 새 각으로 가야 하면 그동안 세워 둔다.
+            if (self.presteer_on_direction_change
+                    and self.last_steering_cdeg is not None
+                    and abs(command.steering_cdeg - self.last_steering_cdeg)
+                    > self.presteer_tolerance_cdeg):
+                self.presteer_until = now + self.steering_settle_sec
+            else:
+                self.presteer_until = -math.inf
         self.last_direction = direction
+        self.last_steering_cdeg = command.steering_cdeg
         stalled = (measured_speed_mps is not None
                    and abs(measured_speed_mps) < self.stall_speed_mps
                    and self._pushing(now))
@@ -214,6 +239,11 @@ class StartupKick:
         #    다음 직진 명령이 곧바로 할인(reverse_straight_percent)을 받았다 --
         #    서보가 아직 꺾여 있는데 모자란 듀티를 주는 바로 그 실패다.
         settled = self._steering_has_settled(command, now)
+
+        if now < self.presteer_until:
+            # 서보가 아직 가는 중이다. **조향은 그대로 내보내고 구동만 0**으로
+            # 잡는다 -- 명령을 통째로 죽이면 서보가 갈 목표를 못 받는다.
+            return replace(command, drive_percent=0)
 
         straightened = self._straighten(command, now, measured_speed_mps,
                                         stalled)

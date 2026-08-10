@@ -54,6 +54,11 @@ share/forklift_teleop/config/fastdds_remote.xml
       <transport_descriptor>
         <transport_id>udp_only</transport_id>
         <type>UDPv4</type>
+        <!-- ⚠️ **오린의 랜 주소다. 바뀌면 여기도 바꿔야 한다.**
+             화이트리스트에 이 기기에 없는 주소를 적으면 그 트랜스포트가
+             죽어서 노드끼리도 못 붙는다. 증상은 '토픽이 /rosout 과
+             /parameter_events 둘만 보인다' 이고, 노드는 멀쩡히 떠 있어서
+             원인을 찾기 어렵다(2026-08-10 실측). `ip -4 addr` 로 확인. -->
         <interfaceWhiteList>
           <address>70.12.247.81</address>
           <!-- ⚠️ **루프백을 빼면 오린 자기 도구가 못 붙는다.** 화이트리스트는

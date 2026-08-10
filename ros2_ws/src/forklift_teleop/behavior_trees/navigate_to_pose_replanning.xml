@@ -15,7 +15,7 @@
        component (mapping.py deadband), so Spin can never make progress and
        always times out. That is why the previous tree existed.
 
-    2. BackUp is tuned for this vehicle: 0.15 m instead of 0.30 m, because
+    2. BackUp is tuned for this vehicle: 0.20 m instead of 0.30 m, because
        the arena is 2 x 3 m and the vehicle is 0.435 m long. The obstacle
        guard watches the rear 18 deg lidar corridor during reverse
        (obstacle_avoidance_node, rear_stop_distance_m), so this is sensed.
@@ -48,20 +48,6 @@
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
         <RoundRobin name="RecoveryActions">
-          <!-- Backing up comes first, because the failure this vehicle
-               actually has is not a stale costmap.
-
-               With the rear wheels at full lock and the vehicle stopped, it
-               cannot start again at any duty the drivetrain can produce
-               (verified to 100%). Reversing straight breaks it out, and
-               reversing straight works.
-
-               Clearing the costmap first cost two full progress timeouts
-               before the tree reached this branch: about fifty seconds of
-               a vehicle sitting still while nav2 tidied a map that was never
-               the problem. Recoveries should be ordered by what fixes this
-               robot, not by what is cheapest to run. -->
-          <BackUp backup_dist="0.20" backup_speed="0.10"/>
           <Sequence name="ClearingActions">
             <ClearEntireCostmap name="ClearLocalCostmap-Subtree"
                                 service_name="local_costmap/clear_entirely_local_costmap"/>
@@ -71,6 +57,27 @@
           <!-- Waiting is a real recovery here: the obstacles this vehicle
                cannot drive around are usually people, and they move. -->
           <Wait wait_duration="3"/>
+          <!-- BackUp is LAST now. It used to be first, and that was the
+               problem being fixed.
+
+               It reverses straight (nav2's BackUp emits no yaw at all), and a
+               straight reverse retraces the arc the vehicle came in on: the
+               heading ends where it started, so the next forward attempt meets
+               the same obstacle at the same angle. The escape that actually
+               changes the heading now lives in unstick_node, which steers once
+               the encoder says the wheels are rolling.
+
+               Worse, while BackUp runs the guard overwrites its status with
+               CLEAR (obstacle_avoidance_node, the reverse branch), so
+               unstick_node's "guard says STOP" precondition is false and the
+               steered escape is suppressed for the whole 0.20 m.
+
+               It stays in the tree rather than being deleted for two reasons:
+               it still fires on a nav2 failure with no guard stop (no valid
+               path, controller failure), where unstick never triggers; and it
+               is the only reverse in the system that collision-checks the
+               local costmap. unstick's escape sees lidar only. -->
+          <BackUp backup_dist="0.20" backup_speed="0.10"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

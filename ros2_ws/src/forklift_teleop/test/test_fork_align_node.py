@@ -167,16 +167,19 @@ class ForkAlignNodeTest(unittest.TestCase):
         self.node._lift("UP")
         self.assertEqual(published[0], "UP 900")
 
-    def test_pickup_homes_to_the_entry_height_before_approaching(self):
-        """HOME 은 하한까지만 내려가고 백오프가 없다 -- UP 이 뒤따라야 한다.
+    def test_pickup_homes_and_does_not_stack_a_second_backoff(self):
+        """HOME 은 **그 자체로** 6500스텝 백오프까지 한다.
 
-        2026-08-07 에 이걸 모르고 HOME 만 걸어놓고 "높이가 맞다" 고 봤다.
+        task_comm.c 의 lift_backoff_waiting 경로가 하한 도달 뒤 500ms 쉬고
+        STEPPER_MOTOR_HOME_BACKOFF_STEPS 만큼 되올린다 -- 부팅 호밍과 같은
+        높이로 끝난다. 여기에 UP 6500 을 또 붙이면 13000, 두 배가 된다.
+        config.h 주석이 "백오프 없음" 이라고 적고 있는데 코드와 다르다.
         """
         sent = []
         self.node._send_fork = lambda action, steps, timeout: (
             sent.append((action, steps)) or True)
         self.assertIsNone(self.node._prepare({"action": "PICKUP"}))
-        self.assertEqual(sent, [("HOME", None), ("UP", 7500)])
+        self.assertEqual(sent, [("HOME", None)])
 
     def test_dropoff_never_homes_with_a_pallet_on_the_fork(self):
         """호밍은 하한 리밋까지 내려간다 -- 짐을 든 채로 하면 바닥에 찍는다."""

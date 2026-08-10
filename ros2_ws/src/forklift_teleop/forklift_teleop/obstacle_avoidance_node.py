@@ -30,6 +30,8 @@ from forklift_teleop.obstacle_fusion import (
     decide_avoidance,
     front_tof_corridors_from_points,
     lidar_corridors_from_points,
+    limit_reverse_yaw,
+    status_document,
 )
 
 
@@ -72,6 +74,19 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter("lidar_clearance_margin_m", 0.15)
         self.declare_parameter("minimum_turn_clearance_m", 0.55)
         self.declare_parameter("rear_stop_distance_m", 0.30)
+        # 정후방 콘 바깥의 고리. 조향 후진에서 꼬리가 쓸고 가는 구간이다.
+        #
+        # ⚠️ 90° 로 두면 **옆 평행벽이 후방 장애물로 읽힌다** -- 전방에서 이미
+        #    겪은 실패다(obstacle_avoidance.yaml 의 방위 구간 주석 참고).
+        #    0 이면 이 채널이 꺼지고 종전 동작 그대로다.
+        self.declare_parameter("lidar_rear_side_half_angle_deg", 60.0)
+        self.declare_parameter("reverse_tail_clearance_m", 0.40)
+        # 꺾인 명령일수록 감속을 덜 한다(0 = 종전, 1 = 최대 곡률에서 감속 없음).
+        self.declare_parameter("steered_scale_relief", 0.0)
+        # 이 반경보다 급하게 돌면 **감속을 전혀 안 한다.** 기동 한계(0.25 m,
+        # 조향 30°)가 아니라 그보다 완만한 값을 쓴다 -- 스톨은 최대 락에서만
+        # 나는 게 아니라 조금만 꺾여도 난다. 0.60 m 는 후륜 13.5° 다.
+        self.declare_parameter("full_relief_turning_radius_m", 0.60)
         # 파렛 진입 중에만 쓰는 전방 임계. footprint 전면이 0.190 m 이므로
         # 0.20 은 차체가 닿기 직전이다.
         self.declare_parameter("align_stop_distance_m", 0.20)
@@ -121,6 +136,15 @@ class ObstacleAvoidanceNode(Node):
         ))
         if not 0.0 < self._lidar_center_angle < self._lidar_front_angle:
             raise ValueError("LiDAR center angle must be inside front angle")
+        self._lidar_rear_side_angle = math.radians(float(
+            self.get_parameter("lidar_rear_side_half_angle_deg").value
+        ))
+        if self._lidar_rear_side_angle and (
+                self._lidar_rear_side_angle <= self._lidar_center_angle):
+            raise ValueError(
+                "lidar_rear_side_half_angle_deg 는 후방 콘 바깥이어야 한다 -- "
+                "lidar_center_half_angle_deg 보다 커야 고리가 생긴다"
+            )
         self._tof_center_angle = math.radians(float(
             self.get_parameter("tof_center_half_angle_deg").value
         ))
@@ -172,6 +196,12 @@ class ObstacleAvoidanceNode(Node):
             ),
             minimum_turn_clearance_m=float(
                 self.get_parameter("minimum_turn_clearance_m").value
+            ),
+            reverse_tail_clearance_m=float(
+                self.get_parameter("reverse_tail_clearance_m").value
+            ),
+            steered_scale_relief=float(
+                self.get_parameter("steered_scale_relief").value
             ),
             vision_confidence_threshold=float(
                 self.get_parameter("vision_confidence_threshold").value
@@ -234,6 +264,9 @@ class ObstacleAvoidanceNode(Node):
         self._tof_time = [-math.inf, -math.inf]
         self._vision = []
         self._vision_time = -math.inf
+        self._full_relief_radius = float(
+            self.get_parameter("full_relief_turning_radius_m").value)
+        self._reverse_yaw_folded = False
         self._last_action = None
 
         input_topic = str(
@@ -336,6 +369,7 @@ class ObstacleAvoidanceNode(Node):
                 self._lidar_center_angle,
                 self._lidar_front_angle,
                 self._minimum_hits,
+                self._lidar_rear_side_angle,
             )
             self._lidar_time = time.monotonic()
         except TransformException as error:
@@ -481,40 +515,50 @@ class ObstacleAvoidanceNode(Node):
                     0.0,
                     f"rear corridor clear at {self._lidar.rear_m:.2f}m",
                 )
-        linear, angular = apply_decision(
+        # 조향하며 후진하면 꼬리가 정후방 콘 밖으로 나간다. 그쪽이 막혔으면
+        # **요만** 0으로 만든다 -- 속도를 건드리면 앞이 막혀서 물러나는 중인
+        # 차를 그 자리에 세우게 된다.
+        reverse_yaw = limit_reverse_yaw(
             self._command.linear.x,
             self._command.angular.z,
+            self._lidar,
+            self._policy,
+        )
+        folded = reverse_yaw != self._command.angular.z
+        if folded != self._reverse_yaw_folded:
+            # 상태가 바뀔 때만 찍는다. 매 주기 찍으면 20Hz 로 로그가 묻힌다.
+            self.get_logger().info(
+                f"후진 조향을 접는다 -- 꼬리 쪽 여유가 "
+                f"{self._policy.reverse_tail_clearance_m:.2f} m 미만이다"
+                if folded else "후진 조향을 다시 편다 -- 꼬리 쪽이 트였다"
+            )
+            self._reverse_yaw_folded = folded
+        policy = (self._align_policy if self._drive_mode == "ALIGN"
+                  else self._policy)
+        linear, angular = apply_decision(
+            self._command.linear.x,
+            reverse_yaw,
             decision,
             self._max_yaw_rate,
+            policy.steered_scale_relief,
+            # 이 반경보다 급하면 완화가 100% -- 즉 감속이 사라진다.
+            (1.0 / self._full_relief_radius
+             if self._full_relief_radius > 0.0 else 0.0),
         )
         output.linear.x = linear
         output.angular.z = angular
         self._safe_publisher.publish(output)
 
-        def finite_or_none(value):
-            return None if math.isinf(value) else round(value, 3)
-
-        status = {
-            "action": decision.action.value,
-            "reason": decision.reason,
-            "speedScale": round(decision.speed_scale, 3),
-            "roofLidar": {
-                "left": finite_or_none(self._lidar.left_m),
-                "center": finite_or_none(self._lidar.center_m),
-                "right": finite_or_none(self._lidar.right_m),
-                "rear": finite_or_none(self._lidar.rear_m),
-            },
-            # Bearing sectors, not sensors -- the two used to read almost
-            # identically because each was one sensor's nearest hit.
-            "frontTof": {
-                "left": finite_or_none(tof.front_left_m),
-                "center": finite_or_none(tof.front_center_m),
-                "right": finite_or_none(tof.front_right_m),
-                # 정지 판정이 실제로 쓰는 값. 좌/우는 회전 방향 고를 때만 쓴다.
-                "path": finite_or_none(tof.front_path_m),
-            },
-            "visionLabels": [item.label for item in vision],
-        }
+        # 형식은 obstacle_fusion.status_document 한 곳에만 산다 -- unstick 이
+        # corridors_from_status 로 되읽으므로 여기서 손으로 만들면 어긋난다.
+        status = status_document(
+            decision.action.value,
+            decision.reason,
+            decision.speed_scale,
+            self._lidar,
+            tof,
+            [item.label for item in vision],
+        )
         self._status_publisher.publish(String(
             data=json.dumps(status, separators=(",", ":"))
         ))

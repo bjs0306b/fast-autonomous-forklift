@@ -236,10 +236,27 @@ controller_server:
       # 위와 같은 이유. 곡률 규제도 0.078 아래로는 의미가 없다.
       regulated_linear_scaling_min_speed: 0.12
       use_rotate_to_heading: false
-      # No rear obstacle sensor is installed.  Reeds-Shepp + reversing made
-      # Nav2 choose a negative-velocity path even for the first forward lap
-      # goal, where the low reverse ramp could not overcome static friction.
-      allow_reversing: false
+      # false -> true (2026-08-10). 껐던 근거 두 개가 모두 무효가 됐다:
+      #
+      #   "No rear obstacle sensor is installed"
+      #     -> 360도 라이다가 후방을 보고, rear_stop_distance_m 0.35 가 막는다.
+      #        오늘 후방 좌우 섹터(rearLeft/rearRight)까지 붙어 조향 후진의
+      #        꼬리 쪽도 센다.
+      #
+      #   "the low reverse ramp could not overcome static friction"
+      #     -> max_drive_percent_reverse 100 과 후진 시동 킥으로 해결됐다.
+      #        2026-08-10 탈출 실측에서 -0.17 ~ -0.25 m/s 로 꾸준히 후진했고,
+      #        조향을 넣은 채로도 갔다.
+      #
+      # 끈 채로 두면 **플래너와 컨트롤러가 어긋난다** -- Smac 은 REEDS_SHEPP
+      # 으로 후진 구간을 만드는데 컨트롤러가 그걸 못 따라가서, 후진 한 번이면
+      # 될 자리를 전진으로 크게 돌아간다.
+      #
+      # ⚠️ reverse_penalty 2.0 은 그대로 둔다. 후진을 **최후 수단**으로 남겨
+      #    커스프(방향 전환점)를 최소로 유지하려는 것이다 -- 커스프마다 정지에서
+      #    다시 출발해야 하는데, 조향이 크게 누운 채로 서면 못 뜨는 한계가 아직
+      #    남아 있다(아래 motion_model_for_search 주석 참고).
+      allow_reversing: true
       # 위 velocity_smoother 와 같은 이유로 0.5 -> 3.0. 컨트롤러가 낸 각속도를
       # 스무더가 다시 자르므로 **둘 다** 올려야 효과가 있다.
       max_angular_accel: 3.0

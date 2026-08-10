@@ -787,6 +787,71 @@ class SteeringSettleTest(unittest.TestCase):
         )
 
 
+
+class PreSteerOnDirectionChangeTest(unittest.TestCase):
+    """방향이 뒤집힐 때 서보가 갈 동안 세워 둔다.
+
+    안 하면 차가 먼저 움직이고 바퀴가 나중에 꺾인다 -- 후진 탈출에서는 앞부분을
+    방향 안 바꾼 채 쓰고, 좁은 곳에서는 꺾기도 전에 공간이 끝난다.
+    사람이 서서 핸들 돌리고 출발하는 것과 같은 동작이다.
+    """
+
+    def kick(self, **kwargs):
+        from forklift_teleop.mapping import StartupKick
+        base = dict(forward_percent=50, reverse_percent=100,
+                    duration_sec=0.3, steering_settle_sec=0.6,
+                    steering_center_cdeg=9000)
+        base.update(kwargs)
+        return StartupKick(**base)
+
+    def command(self, drive, steering):
+        from forklift_teleop.mapping import ActuatorCommand
+        return ActuatorCommand(drive, steering)
+
+    def test_a_reversal_with_a_new_angle_holds_the_drive_at_zero(self):
+        k = self.kick()
+        k.apply(self.command(60, 7500), 0.0)          # 전진, 왼쪽
+        out = k.apply(self.command(-60, 11000), 1.0)  # 후진, 반대쪽
+        self.assertEqual(out.drive_percent, 0)
+        # ⚠️ 조향은 그대로 나가야 한다 -- 안 그러면 서보가 갈 목표를 못 받는다.
+        self.assertEqual(out.steering_cdeg, 11000)
+
+    def test_the_hold_ends_after_the_servo_settle_time(self):
+        k = self.kick()
+        k.apply(self.command(60, 7500), 0.0)
+        k.apply(self.command(-60, 11000), 1.0)
+        moving = k.apply(self.command(-60, 11000), 1.7)   # 0.6초 경과
+        self.assertNotEqual(moving.drive_percent, 0)
+
+    def test_a_reversal_at_the_same_angle_does_not_wait(self):
+        """서보가 갈 곳이 없으면 기다릴 이유도 없다."""
+        k = self.kick()
+        k.apply(self.command(60, 9000), 0.0)
+        out = k.apply(self.command(-60, 9000), 1.0)
+        self.assertNotEqual(out.drive_percent, 0)
+
+    def test_steering_changes_without_a_reversal_are_not_delayed(self):
+        """조향이 바뀔 때마다 걸면 평소 주행이 0.6초씩 끊긴다."""
+        k = self.kick()
+        k.apply(self.command(60, 7500), 0.0)
+        out = k.apply(self.command(60, 11000), 1.0)   # 같은 방향
+        self.assertNotEqual(out.drive_percent, 0)
+
+    def test_it_can_be_turned_off(self):
+        k = self.kick(presteer_on_direction_change=False)
+        k.apply(self.command(60, 7500), 0.0)
+        out = k.apply(self.command(-60, 11000), 1.0)
+        self.assertNotEqual(out.drive_percent, 0)
+
+    def test_a_stop_does_not_forget_where_the_wheels_are(self):
+        """정지는 서보를 되돌리지 않는다 -- 이력을 지우면 다음 전환을 놓친다."""
+        k = self.kick()
+        k.apply(self.command(60, 7500), 0.0)
+        k.apply(self.command(0, 9000), 0.5)          # 정지
+        out = k.apply(self.command(-60, 11000), 1.0)  # 반대 방향으로 출발
+        self.assertEqual(out.drive_percent, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
 

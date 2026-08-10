@@ -5,18 +5,54 @@
   every recovery subtree that can request Spin. Any planning or tracking
   failure aborts the action; the mission coordinator then stops the fork and
   the UART bridge watchdog stops traction.
+
+  ⚠️ 복구가 **하나도 없던 동안** 여유가 0 이었다. 계획이든 추종이든 한 번 실패하면
+     즉시 abort 이고, 백엔드는 그 운반 작업을 실패로 끝낸다(재측정 없음).
+
+     2026-08-10 실측: 실물이 (0.50, 2.70) 로 가다 `status=6`(ABORTED) 으로 반복 실패했다.
+     같은 시각 짧은 목표 (1.65, 0.50) 은 도착했고, 직접 쏜 0.23m 목표도 accepted 됐다.
+     즉 **계획을 못 하는 게 아니라 한 번 삐끗하면 곧장 포기**하는 것이 증상이었다.
+
+  그래서 `ClearEntireCostmap` 만 복구로 넣는다.
+
+    - **차량을 움직이지 않는다.** 코스트맵(센서 기록)을 지우고 다시 볼 뿐이라
+      제자리 회전 문제와 무관하고 Ackermann 에 안전하다.
+    - 순간 오탐(라이다에 사람 다리가 스치는 등)이 원인이면 이걸로 풀린다.
+    - `Spin` 은 계속 뺀다. 넣는 순간 이 트리를 만든 이유가 사라진다.
+
+  재시도는 **한 번**이다(`num_attempts="2"` = 최초 1 + 재시도 1). 무한 재시도는 실패를
+  숨겨 "가는 줄 알았는데 계속 제자리"가 되고, 백엔드 쪽 타임아웃까지 시간만 먹는다.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <Sequence name="NavigateWithoutSpinRecovery">
-      <ComputePathToPose
-        goal="{goal}"
-        path="{path}"
-        planner_id="GridBased"/>
-      <FollowPath
-        path="{path}"
-        controller_id="FollowPath"
-        goal_checker_id="general_goal_checker"/>
-    </Sequence>
+    <RecoveryNode number_of_retries="1" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithoutSpinRecovery">
+        <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+          <ComputePathToPose
+            goal="{goal}"
+            path="{path}"
+            planner_id="GridBased"/>
+          <ClearEntireCostmap
+            name="ClearGlobalCostmap-Planner"
+            service_name="global_costmap/clear_entirely_global_costmap"/>
+        </RecoveryNode>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath
+            path="{path}"
+            controller_id="FollowPath"
+            goal_checker_id="general_goal_checker"/>
+          <ClearEntireCostmap
+            name="ClearLocalCostmap-Controller"
+            service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <!--
+        위 둘이 다 실패했을 때의 마지막 한 번. 여기서도 코스트맵만 지운다 —
+        움직이는 복구(Spin·BackUp)는 이 차량에 넣지 않는다.
+      -->
+      <ClearEntireCostmap
+        name="ClearGlobalCostmap-Recovery"
+        service_name="global_costmap/clear_entirely_global_costmap"/>
+    </RecoveryNode>
   </BehaviorTree>
 </root>

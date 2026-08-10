@@ -36,6 +36,10 @@ def generate_launch_description():
             executable="unstick_node",
             name="unstick_node",
             output="screen",
+            # 가드와 같은 파일에서 받는다. 탈출이 방향을 고를 때 쓰는
+            # tof_imbalance_m 같은 값이 가드와 어긋나면, 가드는 한쪽이
+            # 막혔다고 보는데 탈출은 대칭이라고 보는 상태가 된다.
+            parameters=[avoidance_parameters],
         ),
         # 주행이 멈추면 이유가 최소 넷이다(가드·플래너·컨트롤러·브리지). 밖에서
         # 보면 넷이 똑같이 "안 움직인다" 로 보이므로, 흩어진 토픽을 차 위에 글자로

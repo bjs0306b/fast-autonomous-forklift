@@ -102,14 +102,21 @@ class ForkAlignNode(Node):
         self.declare_parameter("fork_status_topic", "/fork/status")
         self.declare_parameter("loaded_topic", "/fork/loaded")
         self.declare_parameter("fork_timeout_sec", 30.0)
-        self.declare_parameter("home_timeout_sec", 60.0)
-        # 진입 전 포크 높이. 호밍 뒤 하한에서 여기까지 올려놓고 파렛에 들어간다.
+        # 호밍은 하한 리밋을 찾을 때까지 계속 내려간다 -- 최대 300000스텝을
+        # 2000sps 로 훑으므로 150초까지 간다. 실측 116초(200427스텝)를 봤다.
+        # 60초로 두면 **정상 호밍이 시간 초과로 죽는다.**
+        self.declare_parameter("home_timeout_sec", 200.0)
+        # 호밍 뒤 **추가로** 더 올릴 양(스텝). 기본은 0 이다.
         #
-        # ⚠️ **`HOME` 은 하한까지만 내려가고 거기서 멈춘다 -- 백오프가 없다.**
-        #    부팅 호밍(config.h STEPPER_MOTOR_HOME_BACKOFF_STEPS)과 다르다.
-        #    그래서 HOME 뒤에 "UP <스텝>" 을 따로 보내야 같은 높이가 된다.
-        #    2026-08-07 에 이걸 모르고 HOME 만 걸어놓고 "높이가 맞다" 고 봤다.
-        self.declare_parameter("entry_steps", 7500)
+        # ⚠️ **`HOME` 은 그 자체로 6500스텝 백오프까지 한다** -- 하한 리밋에
+        #    닿으면 500ms 쉬고 STEPPER_MOTOR_HOME_BACKOFF_STEPS 만큼 되올라온다
+        #    (task_comm.c 의 lift_backoff_waiting 경로). **부팅 호밍과 같은
+        #    높이로 끝난다.** 그러니 여기에 6500 을 또 넣으면 13000, 두 배가 된다.
+        #
+        #    config.h 주석에 "`/fork/command` 의 HOME 은 하한까지만 내려가고
+        #    거기서 멈춘다(백오프 없음)" 라고 적혀 있는데 **코드와 다르다.**
+        #    그 주석을 믿고 UP 6500 을 붙였다가 여기서 잡았다.
+        self.declare_parameter("entry_trim_steps", 0)
         self.declare_parameter("home_before_pickup", True)
         # 진입 뒤 파렛을 바닥에서 띄우는 양(스텝).
         #
@@ -380,9 +387,10 @@ class ForkAlignNode(Node):
         timeout = float(self.get_parameter("home_timeout_sec").value)
         if not self._send_fork("HOME", None, timeout):
             return "포크 호밍이 안 끝났다"
-        steps = int(self.get_parameter("entry_steps").value)
-        if steps > 0 and not self._send_fork("UP", steps, timeout):
-            return f"진입 높이({steps}스텝)로 못 올렸다"
+        # HOME 이 이미 백오프까지 끝냈다. 여기는 그 위로 더 올릴 때만 쓴다.
+        trim = int(self.get_parameter("entry_trim_steps").value)
+        if trim > 0 and not self._send_fork("UP", trim, timeout):
+            return f"진입 높이 보정({trim}스텝)에 실패했다"
         return None
 
     def _lift(self, action: str) -> bool:
