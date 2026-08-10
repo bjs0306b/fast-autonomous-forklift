@@ -52,6 +52,9 @@ class MqttBridgeNode(Node):
         "nav2_enabled": True,
         "nav2_action_name": "navigate_to_pose",
         "nav2_server_wait_s": 5.0,
+        # 백엔드 좌표(시뮬 20x30m) → 실물 맵(2.0x3.0m) 배수. 실물은 0.1.
+        # 기본을 1.0 으로 두는 이유는 nav2_adapter 주석 참고.
+        "nav2_destination_scale": 1.0,
     }
 
     def __init__(self, mqtt_client: Optional[mqtt.Client] = None) -> None:
@@ -261,11 +264,22 @@ class MqttBridgeNode(Node):
             return UnavailableCommandAdapter()
 
         action_name = str(self._parameter_value("nav2_action_name", "navigate_to_pose"))
-        self.get_logger().info(f"Nav2 연동 활성 — 액션 '{action_name}'")
+        scale = float(self._parameter_value("nav2_destination_scale", 1.0))
+        self.get_logger().info(
+            f"Nav2 연동 활성 — 액션 '{action_name}', 목표 배수 x{scale}")
+        if scale == 1.0:
+            # 실물 맵은 시뮬의 1/10 이라 이 값이 1.0 이면 목표가 맵 밖으로 나간다.
+            # 시뮬과 좌표계가 같은 환경에서는 정상이므로 error 가 아니라 warn 이다.
+            self.get_logger().warn(
+                "nav2_destination_scale=1.0 — 백엔드 좌표를 그대로 Nav2 로 넘긴다. "
+                "실물 맵(2.0x3.0m)에 시뮬 좌표(20x30m)가 오면 경로를 못 짠다. "
+                "실물이면 0.1 로 줄 것."
+            )
         return Nav2CommandAdapter(
             Nav2GoalSender(self, action_name),
             server_wait_s=float(self._parameter_value("nav2_server_wait_s", 5.0)),
             logger=self.get_logger(),
+            destination_scale=scale,
         )
 
     def _configure_optional_ros_adapters(self) -> None:

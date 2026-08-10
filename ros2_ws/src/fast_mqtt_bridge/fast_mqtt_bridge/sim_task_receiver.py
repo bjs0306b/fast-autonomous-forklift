@@ -188,6 +188,23 @@ class SimTaskReceiver(Node):
         task_id = str(payload.get("taskId", ""))
         action = str(payload.get("action", "")).upper()
 
+        # ⚠️ **백엔드는 좌표를 평면으로 보낸다** — `{"taskId","x","y","yaw"}`.
+        #    계약(orin-pose-spec §6.2)은 `action:"GOTO"` 에 `pickup` 을 싣는 형식이라
+        #    아래 두 갈래 어디에도 안 걸리고 pickup·dropoff 가 없어 **통째로 거절**됐다.
+        #    증상은 아래 주석과 같은 "좌표는 오는데 차가 안 움직인다" 였다
+        #    (2026-08-10 실측: T-40 `{"taskId":"T-40","x":15.5,"y":4.0,...}`).
+        #
+        #    시뮬 브리지(`isaac_sim/nav2/scripts/mqtt_bridge.py`)는 이 평면 형식을
+        #    이미 받아준다. 그래서 여기서만 거절돼 실물만 안 움직였다 — 받는 쪽을
+        #    맞춘다. 백엔드를 고치면 시뮬 쪽 동작까지 다시 봐야 한다.
+        if "pickup" not in payload and "dropoff" not in payload \
+                and "x" in payload and "y" in payload:
+            payload = dict(payload)
+            payload["action"] = action or "GOTO"
+            payload["pickup"] = {"x": payload["x"], "y": payload["y"],
+                                 "yaw": payload.get("yaw", 0.0)}
+            action = payload["action"]
+
         # ⚠️ **관제는 지점을 하나씩 보낸다** (orin-pose-spec §6.2). 순환로를
         #    따라 다음 지점만 오고, 같은 목표를 되풀이하지 않는다. 그 형식은
         #    action="GOTO" 에 pickup 하나뿐이라, pickup·dropoff 를 둘 다

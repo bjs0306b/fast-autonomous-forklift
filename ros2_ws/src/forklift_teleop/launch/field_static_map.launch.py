@@ -113,6 +113,10 @@ def generate_launch_description() -> LaunchDescription:
             description="시뮬 지도의 실물 축척 버전 (_real 이 붙은 쪽)",
         ),
         DeclareLaunchArgument("drive_enabled", default_value="false"),
+        # 관제 연동(브리지·텔레메트리·시뮬 수신기)을 같이 올린다. 따로 띄우면
+        # 매번 셋을 손으로 올려야 하고, 하나만 빠뜨려도 조용히 반쪽만 돈다.
+        # 비밀번호는 환경변수(MQTT_PASSWORD)로만 들어간다.
+        DeclareLaunchArgument("mqtt", default_value="true"),
         # manual: map_odom_publisher (사람이 RViz 로 고침, 추적 없음)
         # amcl:   스캔 정합으로 계속 추적
         #
@@ -269,8 +273,17 @@ def generate_launch_description() -> LaunchDescription:
         ),
         condition=IfCondition(LaunchConfiguration("drive_enabled")),
     )
+    mqtt = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory("fast_mqtt_bridge"),
+                "launch", "mqtt_stack.launch.py",
+            )
+        ),
+        condition=IfCondition(LaunchConfiguration("mqtt")),
+    )
 
     return LaunchDescription([
         *arguments, sensors, lidar_odom, map_server, map_manager,
-        map_to_odom, amcl, amcl_manager, nav2, guarded_drive,
+        map_to_odom, amcl, amcl_manager, nav2, guarded_drive, mqtt,
     ])
