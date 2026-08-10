@@ -44,11 +44,26 @@ class OnnxDetector:
         norm_mean: tuple[float, float, float] = (103.53, 116.28, 123.675),
         norm_std: tuple[float, float, float] = (57.375, 57.12, 58.395),
         class_thresholds: dict[str, float] | None = None,
+        num_threads: int | None = None,
     ) -> None:
+        """`num_threads` 를 주면 그만큼의 코어만 쓴다(기본은 onnxruntime 자율).
+
+        ⚠️ **기본값은 "쓸 수 있는 코어 전부"다.** 측정은 트리거마다 한 번이라 그게 맞지만,
+        송출 오버레이처럼 **계속 도는 추론**에 같은 설정을 쓰면 3fps 만으로도 기계가
+        내내 바쁘다(2026-08-10 실측: 22코어 중 61% = 13.5 코어분). 결과는 안 바뀌고
+        한 번의 추론이 느려질 뿐이므로, 상시 추론 쪽만 제한한다.
+        """
         import onnxruntime as ort
 
+        options = None
+        if num_threads is not None and num_threads > 0:
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = num_threads
+            # 연산자 간 병렬까지 열어두면 위 상한 밖에서 스레드가 더 뜬다.
+            options.inter_op_num_threads = 1
+            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         self._session = ort.InferenceSession(
-            str(model_path), providers=["CPUExecutionProvider"]
+            str(model_path), sess_options=options, providers=["CPUExecutionProvider"]
         )
         self._input_name = self._session.get_inputs()[0].name
         self.input_size = input_size

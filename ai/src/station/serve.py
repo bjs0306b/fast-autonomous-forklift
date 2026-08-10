@@ -391,10 +391,15 @@ def start_stream_overlay(args, cfg: StationConfig, bus, stop, detector=None,
     #
     # 판정이 갈릴 걱정은 없다 — 같은 exp8 모델·같은 임계이고, 클라이언트가 letterbox
     # 까지 해서 보내므로 보드가 보는 픽셀과 로컬이 보는 픽셀이 같다(score 소수 4자리 일치).
+    # ⚠️ **코어를 다 내주지 않는다.** onnxruntime 기본은 쓸 수 있는 코어 전부를 쓰는데,
+    # 이 추론은 트리거마다 한 번이 아니라 **계속 돈다.** 3fps 만으로 22코어 중 61%(=13.5
+    # 코어분)를 먹고 있었다(2026-08-10 실측). 화면에 그릴 상자를 얻는 일이라 한 번의
+    # 추론이 조금 느려져도 되고, 측정 쪽 detector 는 제한하지 않는다(세션 TTL 예산).
     detector = OnnxDetector(
         cfg.model_path, cfg.input_size, cfg.score_threshold,
         cfg.class_names, cfg.norm_mean, cfg.norm_std,
         class_thresholds=cfg.class_score_thresholds,
+        num_threads=args.stream_infer_threads,
     )
     overlay = livestream.Overlay()
     thread = livestream.InferenceThread(bus, detector, overlay, stop,
@@ -617,6 +622,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="송출 화면에 검출 상자를 그리는 주기(fps). 0이면 원본만 "
                              "내보낸다. ⚠️ 표시 전용이고 백엔드로 가지 않는다 — 저장되는 "
                              "측정은 트리거 시점 한 번뿐이다")
+    parser.add_argument("--stream-infer-threads", type=int, default=4,
+                        help="송출 오버레이 추론이 쓸 CPU 코어 수. 0이면 제한하지 않는다"
+                             "(onnxruntime 기본 = 코어 전부). 기본 4 — 제한이 없던 동안 "
+                             "22코어 중 61%%를 이 추론이 썼다(2026-08-10 실측). 측정 쪽 "
+                             "추론은 이 값과 무관하다")
     parser.add_argument("--stream-only", action="store_true",
                         help="송출만 한다 — MQTT·측정 없이 카메라 화면만 내보낸다. "
                              "브로커 자격증명 없이 관제 화면을 띄워보거나 카메라를 "
