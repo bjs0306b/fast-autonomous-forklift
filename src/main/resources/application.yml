@@ -64,6 +64,14 @@ traffic:
   enabled: ${TRAFFIC_ENABLED:false}
   tick-ms: ${TRAFFIC_TICK_MS:500}
   vehicles: ${TRAFFIC_VEHICLES:}
+  # 교통 판단에서 **통째로 빼는** 차량. 위 vehicles 와 방향이 다르다 — 그쪽은 "명령을 보낼
+  # 대상"이고 이쪽은 "다른 차량이 볼 대상"이다.
+  #
+  # ⚠️ 여기 넣은 차량은 **아무도 피하지 않는다.** 좌표계만 겹치고 물리적으로 다른 공간에 있는
+  #    차량에만 쓸 것(실물 지게차는 미니어처 공간, 시뮬은 20×30 창고라 좌표가 우연히 겹친다).
+  #    2026-08-10: 실물을 "정지"로 묶었는데도 위치가 계속 들어와 시뮬 두 대가 SAFETY_DISTANCE
+  #    로 15분간 서 있었다. 명령을 끊는 것과 판단에서 빼는 것은 다른 일이다.
+  ignored-vehicles: ${TRAFFIC_IGNORED_VEHICLES:}
   # 최소 안전거리(m). FR 의 "최소 안전거리".
   safe-distance-m: ${TRAFFIC_SAFE_DISTANCE_M:6.0}
   # 정지 판단 거리(m). 안전거리에 여유를 더한 값이라 보통 safe-distance-m 이상이다.

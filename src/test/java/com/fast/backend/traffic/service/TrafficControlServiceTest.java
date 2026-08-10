@@ -98,6 +98,10 @@ class TrafficControlServiceTest {
     }
 
     private static TrafficControlProperties props(boolean enabled, String... vehicles) {
+        return props(List.of(), enabled, vehicles);
+    }
+
+    private static TrafficControlProperties props(List<String> ignored, boolean enabled, String... vehicles) {
         return new TrafficControlProperties(
                 enabled, 500, List.of(vehicles),
                 6.0,    // safe
@@ -105,7 +109,8 @@ class TrafficControlServiceTest {
                 1.2,    // hysteresis → release = 10.8
                 2.0,    // horizon
                 3.0,    // zone radius
-                2000);  // stale ms
+                2000,   // stale ms
+                ignored);
     }
 
     /** 지금 막 받은 위치(신선함). */
@@ -178,6 +183,21 @@ class TrafficControlServiceTest {
         assertThat(issuedCommands("FOLLOWER")).containsExactly("STOP");
         // 접근하지 않는 선행 차량은 세우지 않는다.
         assertThat(issuedCommands("LEADER")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ignored-vehicles 에 든 차량은 남을 막지 않는다")
+    void 판단제외_차량은_후행을_세우지_않는다() {
+        location("FOLLOWER", 0, 0, 0, 2.0);
+        location("REAL-F01", 5, 0, 0, 0.0);     // 위 테스트와 같은 배치 — 원래는 STOP 이 나간다
+        status("FOLLOWER", VehicleStatus.MOVING);
+        status("REAL-F01", VehicleStatus.IDLE);
+
+        // 제어 대상에서 빼는 것만으로는 부족하다. 그래서 vehicles 에는 남겨 두고
+        // ignored-vehicles 로만 뺀다 — 그것이 실제로 겪은 상황이다(2026-08-10).
+        service(props(List.of("REAL-F01"), true, "FOLLOWER", "REAL-F01")).tick();
+
+        assertThat(issuedCommands("FOLLOWER")).isEmpty();
     }
 
     @Test

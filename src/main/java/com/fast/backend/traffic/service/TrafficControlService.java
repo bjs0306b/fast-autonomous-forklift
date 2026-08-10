@@ -446,6 +446,11 @@ public class TrafficControlService {
             if (snapshot.x() == null || snapshot.y() == null) {
                 continue;
             }
+            if (properties.ignores(snapshot.vehicleId())) {
+                // 좌표계만 겹치고 물리적으로는 다른 공간에 있는 차량. 여기서 빼지 않으면
+                // 명령을 안 보내도 **남을 막는다**(TrafficControlProperties.ignores 주석).
+                continue;
+            }
             if (isStale(snapshot.receivedAt(), now)) {
                 log.debug("교통 관제 판단 제외(위치 낡음): vehicleId={}, receivedAt={}",
                         snapshot.vehicleId(), snapshot.receivedAt());

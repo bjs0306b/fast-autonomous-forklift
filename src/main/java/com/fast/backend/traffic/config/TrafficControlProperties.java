@@ -30,6 +30,9 @@ import java.util.Set;
  * @param workZoneRadiusM    선반 작업 구역 반경(m). 선반 접근 좌표를 중심으로 한 원
  * @param staleLocationMs    위치가 이보다 오래됐으면 판단에서 제외한다. 낡은 좌표로 "안전하다"고
  *                           판정하는 것이 가장 위험하다
+ * @param ignoredVehicles    교통 판단에서 <b>통째로 빼는</b> 차량. {@link #vehicles} 와 다르다 —
+ *                           그쪽은 "명령을 보낼 대상"이고, 이쪽은 <b>"다른 차량이 볼 대상"</b>이다.
+ *                           비어 있는 것이 기본이자 안전한 값이다
  */
 @ConfigurationProperties(prefix = "traffic")
 public record TrafficControlProperties(
@@ -41,11 +44,13 @@ public record TrafficControlProperties(
         double releaseHysteresis,
         double predictionHorizonS,
         double workZoneRadiusM,
-        long staleLocationMs
+        long staleLocationMs,
+        List<String> ignoredVehicles
 ) {
 
     public TrafficControlProperties {
         vehicles = vehicles == null ? List.of() : List.copyOf(vehicles);
+        ignoredVehicles = ignoredVehicles == null ? List.of() : List.copyOf(ignoredVehicles);
         if (tickMs <= 0) tickMs = 500;
         if (safeDistanceM <= 0) safeDistanceM = 6.0;
         if (holdDistanceM <= 0) holdDistanceM = Math.max(safeDistanceM, 9.0);
@@ -67,5 +72,22 @@ public record TrafficControlProperties(
 
     private Set<String> controlledSet() {
         return Set.copyOf(vehicles);
+    }
+
+    /**
+     * 이 차량을 <b>교통 판단에서 통째로 뺄</b> 것인가.
+     *
+     * <p><b>{@link #controls} 와 반대 방향이다.</b> {@code controls} 는 "이 차량에게 명령을 보내도
+     * 되는가"라 빼도 그 차량이 <b>남을 막는 것</b>은 그대로다. 실제로 그래서 문제가 났다 —
+     * 실물 지게차를 관제에서 "정지"로 묶어 명령을 안 보냈는데, 위치는 계속 들어오니 시뮬 차량
+     * 입장에서는 앞을 막은 차량 그대로였고 시뮬 두 대가 {@code SAFETY_DISTANCE} 로 15분간
+     * 서 있었다(2026-08-10).
+     *
+     * <p><b>⚠️ 이 목록에 넣은 차량은 아무도 피하지 않는다.</b> 물리적으로 다른 공간에 있어
+     * 좌표계만 겹치는 차량에만 쓸 것. 같은 바닥을 공유하는 차량을 넣으면 충돌 예측이 그 차량에
+     * 대해서만 조용히 꺼진다.
+     */
+    public boolean ignores(String vehicleId) {
+        return vehicleId != null && Set.copyOf(ignoredVehicles).contains(vehicleId);
     }
 }
