@@ -13,3 +13,7 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .DS_Store
+
+# TypeScript 증분 컴파일 캐시 — 빌드할 때마다 내용이 바뀌는 산출물이다.
+# 추적하면 코드를 안 고쳐도 diff 에 뜨고, 팀원끼리 병합할 이유 없는 충돌이 난다.
+*.tsbuildinfo
