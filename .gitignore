@@ -46,6 +46,11 @@ __pycache__/
 ### Claude Code local settings ###
 .claude/
 
+### 그 밖의 에디터·도구 로컬 설정 ###
+# 사람마다 다른 값이고 프로젝트 산출물이 아니다. 추적되면 남의 설정이 계속 diff 로 뜬다.
+.omx/
+.ai/
+
 ### Mac OS ###
 .DS_Store
 ### Python (S15P11A304-121 규칙 복원 — Spring 템플릿 커밋으로 덮였던 것)
