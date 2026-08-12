@@ -142,17 +142,19 @@
  *    있으면 안 된다. 10초 카운트다운은 그걸 치우라고 있는 것이고, 로그에
  *    "keep power cutoff ready" 가 같이 찍힌다.
  *
- * !! 호밍이 실패하면 ESP_ERROR_CHECK 가 **MCU 를 abort(재부팅)** 시킨다.
- *    리밋 스위치가 눌린 채 고장나면 부팅 -> 호밍 실패 -> 재부팅 루프가 된다.
- *    그때는 STARTUP_HOME_ENABLED 를 0 으로 두고 플래시해 원인을 먼저 본다.
+ * !! 호밍이 실패해도 **재부팅하지 않는다.** 2026-08-09 에 ESP_ERROR_CHECK 를 걷어냈다
+ *    (main.c 참조). 드라이버 열보호로 호밍이 실패하자 패닉 -> 리셋 -> 10초 뒤 재호밍이
+ *    반복되며 과열을 오히려 키웠기 때문이다. 지금은 드라이버를 끄고 시끄럽게 로그를
+ *    남긴 뒤 계속 부팅한다. 원인이 풀리면 /fork/command 의 HOME 으로 다시 건다.
+ *
+ *    그래도 리밋 스위치가 눌린 채 고장나 부팅 때마다 갈아대는 게 싫으면
+ *    STARTUP_HOME_ENABLED 를 0 으로 두고 플래시해 원인을 먼저 본다.
  *
  * STARTUP_TEST_ENABLED 는 호밍 대신 도는 무부하 벤치 테스트다(#elif 라 둘이 동시에
  * 안 돈다). 바퀴를 띄우고 부하를 뗀 상태에서만 켤 것.
  */
 #define STEPPER_MOTOR_STARTUP_TEST_ENABLED 0
-/* 2026-08-10 진단용 임시 0. 호밍 실패 -> abort() -> 재부팅 루프(163초 주기)를
- * 끊어 스테퍼를 비워두려는 것. 모터가 도는 것을 확인하면 1 로 되돌린다. */
-#define STEPPER_MOTOR_STARTUP_HOME_ENABLED 0
+#define STEPPER_MOTOR_STARTUP_HOME_ENABLED 1
 #define STEPPER_MOTOR_STARTUP_TEST_STEPS   500U
 #define STEPPER_MOTOR_STARTUP_TEST_RATE_SPS 100U
 
