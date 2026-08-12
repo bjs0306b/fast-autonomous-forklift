@@ -142,5 +142,6 @@ docs/        설계·검증·운영 문서
 | 온보드 TensorRT 절차 | [docs/ai/onboard-tensorrt-runbook.md](docs/ai/onboard-tensorrt-runbook.md) |
 | 스테이션 측정 핸드오프 규격 | [docs/ai/station-measurement-handoff.md](docs/ai/station-measurement-handoff.md) |
 | 화물 측정 연동 계약 | [docs/backend-message/cargo-measurement-workflow-contract.md](docs/backend-message/cargo-measurement-workflow-contract.md) |
+| 관제 화면 와이어프레임 | [docs/와이어프레임-관제화면.md](docs/와이어프레임-관제화면.md) |
 | 백엔드 README | [docs/backend-readme.md](docs/backend-readme.md) |
 | 스프린트 회고 (KPT) | [docs/KPT/](docs/KPT/) |
