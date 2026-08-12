@@ -1,306 +1,129 @@
-# fast-backend
+# F.A.S.T. — AI 무인 지게차 기반 디지털 트윈 물류 자동화 시스템
 
-F.A.S.T. — AIoT 기반 무인 지게차 물류 자동화 시스템의 Spring Boot 백엔드입니다.
+카메라와 거리계로 화물을 재고, 그 값으로 적재 위치를 정하고, 무인 지게차가 파렛트에 포크를 꽂아 옮기는 것까지를 한 줄로 이은 시스템이다. 측정·주행·제어·관제·시뮬레이션이 REST와 MQTT 두 가지 방식으로만 대화한다.
 
-현재 저장소에는 Spring Boot 공통 기반뿐 아니라 MQTT 수신·명령 발행, MySQL/MyBatis 차량 상태·명령 저장,
-WebSocket 이벤트 중계가 구현되어 있습니다. 실제 Mosquitto/ROS2/임베디드와의 end-to-end 연동 완료 여부는
-코드 구현·자동 테스트와 구분해 각 문서의 `외부 연동 확인 필요` 항목으로 관리합니다.
+SSAFY 15기 자율 프로젝트 (2026-07 ~ 2026-08) · 6인 팀 · 프로젝트 코드 `S15P11A304`
 
-## 시스템 구성 (최종 목표)
+> 실물은 1/10 스케일 미니어처 지게차와 창고다. 화물 측정은 실제 카메라·거리계로 하고, 다중 차량 운영은 Isaac Sim 디지털 트윈으로 시연한다.
 
-```
-ROS2 / Jetson / Isaac Sim → MQTT Broker → Spring Boot → MySQL → REST API / WebSocket → Next.js 관제 화면
-                                              ↑
-                        AI 측정 스테이션은 MQTT 가 아니라 REST 로 올린다
-                        (POST /api/stations/measurements, 2026-07-31 전환)
-```
+---
 
-## 개발 환경
+## 무엇을 만들었나
 
-| 항목 | 내용 |
+| 덩어리 | 하는 일 |
 |---|---|
-| Java | 21 |
-| Build Tool | Maven |
-| Spring Boot | 3.3.x (Java 21 호환 안정 버전) |
-| Packaging | Jar |
-| Group | com.fast |
-| Artifact | backend |
-| Base Package | com.fast.backend |
-| Lombok | 사용하지 않음 |
-| Test | JUnit 5, Spring Boot Test (MockMvc) |
+| **측정 스테이션** | 지게차에 싣기 전 화물의 치수·전복 위험·편하중을 잰다. 카메라 + 거리계 + 검출 모델 |
+| **무인 지게차** | Nav2로 목표까지 자율주행하고, 온보드 비전으로 파렛트 구멍을 찾아 포크를 꽂는다 |
+| **클라우드 백엔드** | 작업을 만들고 차량에 배정하며, 측정 결과로 적재 위치를 정한다. 상태를 관제 화면에 중계한다 |
+| **디지털 트윈** | 가상 창고에서 다중 지게차를 시뮬레이션하고, 실물 위치를 받아 반영한다 |
 
-## 패키지 구조
+**아키텍처 다이어그램 →** [docs/아키텍처-다이어그램.md](docs/아키텍처-다이어그램.md)
 
-```
-com.fast.backend
-├─ FastBackendApplication.java   # 애플리케이션 진입점
-├─ common
-│  ├─ api                        # 공통 API 응답 구조 (ApiResponse, ErrorResponse)
-│  └─ exception                  # 공통 예외 처리 (ErrorCode, BusinessException, GlobalExceptionHandler)
-├─ health
-│  └─ controller                 # 서버 상태 확인 API (GET /api/health)
-├─ config
-│  └─ mqtt                       # MQTT 설정 (MqttProperties, MqttConfig, MqttTopics)
-├─ mqtt                          # MQTT 연동 (S15P11A304-89)
-│  ├─ gateway                    #   - MqttGateway (@MessagingGateway, 발행 진입점)
-│  ├─ inbound                    #   - MqttMessageReceiver / MqttMessageRouter / MqttErrorChannelHandler
-│  ├─ outbound                   #   - MqttPublisher, MqttPublishException
-│  ├─ service                    #   - MqttConnectionEventListener (연결/구독/발행 이벤트 로그)
-│  └─ controller                 #   - MqttTestController (검증용 임시 발행 API)
-├─ forklift                      # 지게차(차량) 도메인
-│  ├─ dto                        #   - ForkliftStatusMessage / ForkliftLocationMessage / ForkliftCommandMessage
-│  ├─ service                    #   - ForkliftStatusService / ForkliftLocationService (상태·위치 메시지 처리, 아직 DB 저장 없음)
-│  ├─ controller                 #   - (준비 단계, 아직 없음)
-│  └─ repository                 #   - (준비 단계, 아직 없음)
-├─ task                          # (준비 단계) 작업 배정 도메인
-│  ├─ controller / dto / service / repository
-└─ alert                         # (준비 단계) 경보/알림 도메인
-   ├─ controller / dto / service / repository
-```
+---
 
-`task/*`, `alert/*`, `forklift/controller`, `forklift/repository` 하위 패키지는 아직 실제 클래스 없이
-디렉터리만 준비되어 있습니다. 빈 패키지를 유지하기 위한 가짜(placeholder) 클래스는 만들지 않았습니다.
-`config/mqtt`, `mqtt/*`, `forklift/dto`, `forklift/service`는 S15P11A304-89(MQTT 브로커 구축·구독 연결)
-단계에서 실제 코드가 채워졌습니다.
+## 측정한 결과
 
-## MQTT 연동 (S15P11A304-89)
+숫자는 전부 실물에서 잰 값이다. 시뮬레이션이나 공개 데이터셋 성능이 아니다.
 
-Spring Integration MQTT + Eclipse Paho MQTT v3로 MQTT Broker(Eclipse Mosquitto) 연결, 구독, 발행을 구현했다.
+| 항목 | 결과 | 목표 |
+|---|---|---|
+| 화물 치수 오차 | **평균 0.66 mm** / 최대 2.10 mm | ≤ 4 mm |
+| 검출 성능 (실물 리그 평가셋) | **mAP@0.5 = 0.9898** (박스 0.9795 / 파렛트 1.0000) | — |
+| 온보드 추론 (Jetson Orin Nano) | **GPU 10.18 ms** · 전처리 포함 종단 44.96 ms (22.2 fps) | ≤ 100 ms |
+| 파렛트 구멍 검출 재현율 | **99.5 %** (220/221) | — |
+| 파렛트 검출 재현율 / 오탐 | **100 %** (105/105) / 네거티브 120장에 **0 건** | — |
+| 무인 측정 실물 검증 | 화물 높이 **92.3 mm** vs 실측 91.5 mm (**오차 0.8 mm**) | — |
+| 포크 정렬 | **45° 로 돌아간 파렛트에 관통 성공** (재접근 9회) | — |
 
-### Broker 실행 (infra/mqtt)
+---
 
-브로커 실행 구성은 [`infra/mqtt/`](infra/mqtt/README.md)에 있다. Docker 가 있으면 Compose 로,
-없으면 Windows/Ubuntu 직접 설치로 띄운다.
+## 기술 스택
 
-```bash
-cd infra/mqtt && docker compose up -d      # Docker 사용 시
-```
-
-MQTT 경로만 검증하려면(= MySQL 자격증명 없이) `mqttcheck` 프로필을 쓴다. 임베디드 H2 + 실제 브로커
-연결 조합이며, H2 가 `test` scope 라 테스트 classpath 를 빌려 쓴다.
-
-```bash
-mvn spring-boot:run "-Dspring-boot.run.profiles=mqttcheck" "-Dspring-boot.run.useTestClasspath=true"
-```
-
-브로커 실행·연결·구독·명령 발행·retained·재연결 확인 절차는 전부
-[`infra/mqtt/README.md`](infra/mqtt/README.md)에 정리돼 있다.
-
-- 구독 토픽(백엔드가 실제 사용하는 MQTT QoS는 전부 **1**): `forklift/+/status`, `forklift/+/location`,
-  `forklift/+/path`, `forklift/+/command-result`, `forklift/+/fork-status`, `forklift/+/error`,
-  `cargo/detected`. QoS는 `mqtt.default-qos`(로컬 기본 1)를 균등 적용한다
-  (`MqttConfig.mqttInboundAdapter`, `MqttConfigTest`로 회귀 검증).
-  - ⚠️ **`fast/station/+/measurement`는 폐기됐다**(2026-07-31, REST 전환). 스테이션 측정 결과는
-    `POST /api/stations/measurements` 한 경로로만 받는다. 구독·라우팅·DTO가 모두 제거돼
-    **코드에 존재하지 않는다**(2026-08-03 확인). 종전 "구독 8종" 기술이 이 토픽을 포함하고
-    있어 정정했다.
-- 발행 토픽(1종): `forklift/{vehicleId}/command` — 이동(ROS2)·포크/적재(임베디드)·비상정지를 모두
-  이 토픽 하나로 발행한다. payload의 `targetSystem`/`commandCategory`로 수신 측이 분기한다.
-  **MQTT QoS 1, retained false**(확정, `VehicleCommandPublisher`의 코드 상수 — 설정값을 참조하지 않음).
-  구 `forklift/{id}/emergency` 전용 토픽은 제거됐다.
-- **백엔드가 보장하는 범위**: ① 발행 시 QoS 1/retained false(코드 상수) ② 구독 시 QoS 1(`mqtt.default-qos`).
-  **외부 연동 확인 필요**: ROS2/Isaac/임베디드/AI/스테이션이 실제로 QoS 1로 발행하는지는 백엔드 코드만으로
-  보장할 수 없다 — 저장소만으로는 확인 불가.
-- 수신 흐름: `MqttPahoMessageDrivenChannelAdapter` → `mqttInputChannel` → `MqttMessageReceiver` → `MqttMessageRouter` → (`ForkliftStatusMessage`/`ForkliftLocationMessage`로 역직렬화 후 처리, 알 수 없는 토픽은 경고 로그, 잘못된 JSON은 오류 로그만 남기고 계속 동작)
-- 발행 흐름: 도메인 Service → `MqttPublisher` → `MqttGateway` → `mqttOutboundChannel` → `MqttPahoMessageHandler` → MQTT Broker
-- 접속 설정은 `application-local.yml`의 `mqtt.*`를 `MqttProperties`(`@ConfigurationProperties`)로 바인딩해서 사용하며, 코드에 하드코딩하지 않는다. 주요 접속 값(`enabled`, `test-api.enabled`, `broker-url`, `username`, `password`, `inbound-client-id`, `outbound-client-id`, `default-qos`)은 `${ENV_VAR:기본값}` 형태로 환경변수 오버라이드가 가능하다(아래 "EC2 Mosquitto Broker 연동" 참고).
-- Inbound(`fast-backend-inbound`)와 Outbound(`fast-backend-outbound`) Client ID는 분리되어 있고, `MqttPahoClientFactory` 하나를 공유한다.
-- 검증용 임시 API: `POST /api/mqtt/test` (`{"topic":"...","payload":"...","qos":1,"retained":false}`) — 실제 지게차 제어 API가 아니며, 이번 Jira 이슈 검증 목적으로만 존재한다. `mqtt.test-api.enabled` 프로퍼티로 켜고 끄며, **기본값은 `false`(비활성화)**다(prompt9.md 기준 변경 — 값을 명시하지 않은 환경에서는 노출되지 않는 것이 더 안전하다는 판단). 로컬 개발 환경(`application-local.yml`)에서는 이 값을 `true`로 명시적으로 켜뒀다(`@Profile`이 아니라 `@ConditionalOnProperty`를 쓰는 이유는 `answer7.md` 8장 참고).
-- MQTT의 broker 연결 Bean(Client Factory/Inbound Adapter/Outbound Handler)은 `mqtt.enabled`(기본값
-  `true`)로 켜고 끌 수 있다. `src/test/resources/application-test.yml`에서는 `false`로 두므로 실제
-  Broker에 접속하지 않는다. `@ServiceActivator`가 참조하는 내부 channel은 Spring Integration이 자동
-  생성할 수 있지만 Paho 연결 Bean이 없어 외부 접속은 발생하지 않는다.
-- 수신 경계는 전체 payload 대신 byte 길이만 로그에 남긴다. null/blank/non-object/잘못된 JSON은
-  Router가 해당 메시지만 폐기하고, 예상하지 못한 Service 예외도 Router와 Receiver의 이중 경계에서
-  consumer thread 밖으로 전파되지 않는다.
-- gateway 발행 실패는 `MqttPublishException`으로 변환된다. `VehicleCommandService`는 이를 받아 DB
-  상태를 `PUBLISH_FAILED`로 저장하며, gateway 호출 성공은 broker/차량 수신 성공과 구분한다.
-- 통신 규격(JSON 필드)은 2026-07-24 팀 확정 규격으로 갱신됐다(아래 "확정 통신 규격 요약" 참고).
-- 실제 로컬 Mosquitto(winget으로 설치, Windows 서비스로 상시 구동)를 대상으로 구독 성공, 상태/위치/cargo 메시지 수신, 잘못된 JSON 무시, `POST /api/mqtt/test` → `mosquitto_sub` 수신, Broker 재기동 후 자동 재연결까지 실제로 검증했다(`prompt/answer/answer5.md` 참고).
-
-### 실브로커 검증 완료 범위 (2026-07-24)
-
-`mqttcheck` 프로필로 실제 Mosquitto(localhost:1883)를 대상으로 아래를 확인했다. 상세 로그와 재현
-절차는 [`infra/mqtt/README.md`](infra/mqtt/README.md) 5절과 `prompt/answer/answer41.md` 참고.
-
-| 항목 | 결과 |
+| 영역 | 사용 기술 |
 |---|---|
-| `mosquitto_pub`/`sub` 왕복 | 성공 |
-| 백엔드 → 브로커 연결, 8토픽 구독(QoS 전부 1) | 성공 |
-| 상태 수신 → Router → Service → DB(current+history) → WebSocket | 성공 |
-| 명령 발행 `forklift/{id}/command` (QoS 1) | 성공 |
-| retained false 실동작(재구독 시 과거 명령 미전달) | 성공 |
-| 잘못된 JSON 폐기 후 consumer 계속 동작 | 성공 |
+| **AI · 비전** | RTMDet-m / RTMDet-s · MMDetection · MMDeploy · ONNX Runtime · TensorRT FP16 · OpenCV |
+| **온보드** | Jetson Orin Nano (JetPack 6 / CUDA 12.6 / TensorRT 10.3) · ROS 2 Humble · Nav2 · AMCL · SLAM |
+| **임베디드** | ESP32-S3 · ESP-IDF / FreeRTOS · PCA9685 PWM · MPU6500 IMU · MG996R 서보 |
+| **백엔드** | Java 21 · Spring Boot 3.3.4 · MyBatis · MySQL 8 · Spring Integration MQTT (Eclipse Paho) |
+| **프론트** | Next.js 16 · React 19 · TypeScript · Tailwind CSS 4 · shadcn/ui · STOMP over SockJS |
+| **인프라** | AWS EC2 · Docker Compose · Eclipse Mosquitto 2 (MQTT over TLS) · MediaMTX · GitLab CI/CD · systemd |
+| **시뮬레이션** | NVIDIA Isaac Sim 5.1 · Omniverse · USD |
 
-**당시 미검증이던 것 중 이후 해소된 것**(2026-08-05 기준):
+---
 
-| 항목 | 현재 |
+## 팀과 기여 범위
+
+6인 팀 프로젝트다. 커밋 이력 기준으로 각자 손댄 영역이 나뉜다.
+
+| 담당 | 이름 | 주 영역 |
+|---|---|---|
+| **AI · 비전 · 제어** | 방지섭 (본인) | `ai/` · 스테이션 측정 · 온보드 추론 · 포크 정렬 제어 · 조향 펌웨어 |
+| 백엔드 · 프론트 | 김재원 | `src/` · `frontend/` |
+| 백엔드 · 프론트 | 전지웅 | `src/` · `frontend/` |
+| ROS 2 · 임베디드 · 하드웨어 | 안제원 | `ros2_ws/` · `firmware/` · `3d_model/` |
+| ROS 2 · 임베디드 | 전희창 | `ros2_ws/` · `firmware/` |
+| 디지털 트윈 | 이준서 | `isaac_sim/` |
+
+### 본인이 한 것
+
+- **화물 측정 파이프라인** — 카메라·거리계·검출 모델을 묶어 치수·전복 위험·편하중을 내고, 세션을 열어 REST로 백엔드에 올리기까지. 무인 자동 측정(MQTT 트리거 → 정지 대기 → 촬영 → 전송 → 세션 종료)을 실물로 완주시켰다.
+- **검출 모델 학습·승격** — 공개 데이터셋에서 시작해 실물 리그·가림 상황까지 도메인을 넓히며 재학습했다. 승격 조건을 착수 전에 못 박고(목표 도메인 지표 / 기존 성능 회귀 없음 / 망각 없음) 셋 다 통과할 때만 교체했다.
+- **온보드 추론 이식** — 학습 산출물을 ONNX → TensorRT FP16으로 변환해 Jetson에 올리고, HTTP 추론 서버로 만들어 systemd 자동 기동까지 붙였다.
+- **포크 정렬 제어** — 파렛트 구멍 두 개의 화면 좌표에서 좌우 오차와 요각을 기하로 계산해 `/cmd_vel`을 내는 상태기계(SEARCH → APPROACH → ALIGN → VERIFY → INSERT, 실패 시 RETREAT 후 재접근).
+- **조향 펌웨어 수정** — 아래 트러블슈팅 참조.
+
+---
+
+## 기술적으로 어려웠던 것
+
+포폴에 남길 값어치가 있는 것은 잘 된 것보다 **틀렸던 것을 어떻게 찾았나**라고 생각해서 세 개만 적는다.
+
+### 1. 제어가 안 먹어서 게인을 이틀 의심했는데, 원인은 서보 펄스 범위였다
+
+포크 정렬이 45° 틀어진 파렛트 앞에서 발산하고, ALIGN 상태에서 요각이 교정되지 않았다. 매끈한 사인파 형태의 진동이라 "폐루프 한계진동"으로 읽고 게인과 감쇠를 계속 만졌다.
+
+실제 원인은 펌웨어의 `SERVO_MIN/MAX_PULSE_US`가 `1000~2000 µs`로 잡혀 있던 것이었다. MG996R은 `500~2500 µs`가 180°라, 코드가 28°라고 믿는 명령이 바퀴에서는 **8°**로만 나왔다 — 명령 대비 실제 회전이 `tan(8°)/tan(28°)` = **21~26 %**. 범위를 고치자 뒷바퀴 실각도가 36°가 되고 45° 파렛트 관통이 됐다.
+
+**얻은 것**: 파라미터를 바꿔도 거동이 안 변하면 제어 루프 **밖**을 본다. 명령 단위와 물리 단위 사이 변환은 한 번은 자로 잰다 — 각도기로 바퀴를 재는 데 5분이면 됐을 일이었다. 이론적으로 옳은 추론(한계진동)이 오히려 조사를 루프 안에 가뒀다.
+
+### 2. 모델이 못 잡는 것은 코드 문제가 아니라 데이터 분포 문제였다 (3회)
+
+같은 종류의 실패를 세 번 겪었다. 책상 클로즈업 박스 미검출, 검은 플라스틱 파렛트가 **임계 0.02에서도 0건**, 화물이 파렛트를 덮으면 score 0.101. 매번 전처리와 임계를 먼저 의심했지만, 셋 다 학습셋에 그 분포가 없어서였다. 마지막 건은 학습셋의 가림률 30% 이상 샘플이 **0장**이었다.
+
+**얻은 것**: 증상을 보면 코드보다 **학습셋 분포를 먼저 세어본다.** 그리고 오탐은 임계 상향이 아니라 기하 조건으로 거른다 — 임계를 0.5에서 0.7로 올리면 재현율이 95.5%에서 91.1%로 같이 깎였다.
+
+### 3. 가장 비싼 버그는 에러를 안 내고 그럴듯한 답을 내는 것이었다
+
+젯슨 추론 서버를 멀티스레드로 띄우자 pycuda의 CUDA 컨텍스트가 생성 스레드에 묶여 매 요청이 실패했는데, **예외가 아니라 검출 0개**로 나가고 서버는 HTTP 200을 응답했다. 클라이언트는 "물체가 없나 보다" 하고 넘어간다. 같은 날 비슷한 것을 다섯 건 더 잡았다 — 경로별 임계 불일치로 `ok`가 조용히 `dimensions_only`가 되고, 정지 판정 임계가 카메라 노이즈 바닥 아래라 "멎었다"가 영원히 성립하지 않고, 녹화 fps에 요청 상한값을 써서 영상이 1.45배 빨리 감겼다.
+
+**얻은 것**: 실패를 성공처럼 보이게 하는 반환값(빈 목록·기본값·상한값)을 그대로 흘리지 않는다. 기동 자가진단을 넣고, 폴백·가정값은 화면과 로그에 항상 표시한다. 임계는 추측하지 말고 노이즈 바닥을 재고 정한다.
+
+---
+
+## 저장소 구조
+
+```
+ai/          검출 모델 학습·평가, 측정 스테이션, 온보드 추론, 포크 정렬 제어
+src/         Spring Boot 백엔드
+frontend/    Next.js 관제 대시보드
+ros2_ws/     ROS 2 패키지 (MQTT 브리지, 텔레옵)
+firmware/    ESP32-S3 모터 컨트롤러 (ESP-IDF)
+isaac_sim/   디지털 트윈 · Nav2 시뮬레이션
+infra/       MQTT 브로커 구성
+3d_model/    출력용 하드웨어 파츠
+docs/        설계·검증·운영 문서
+```
+
+## 문서
+
+| 내용 | 경로 |
 |---|---|
-| Docker Compose 기동 | ✅ EC2에서 Compose 로 상시 구동, `develop` 푸시 자동배포(S15P11A304-179·182) |
-| EC2 인증 적용 | ✅ **TLS 8883 + 계정 인증**으로 일원화(S15P11A304-188). 아래 "EC2 브로커" 절 참조 |
-| 백엔드 → 스테이션 측정 요청 | ✅ MQTT TLS 왕복 검증(2026-08-03) |
-| 백엔드 → Nav2 MOVE → 도착 회신 | ⚠️ **배선까지만** 검증(S15P11A304-192·193). 실주행 미검증 |
-| 실제 차량의 명령 수신·결과 회신 | ⚠️ 미검증 |
-| 브로커 중지·재시작 재연결 실동작 | ⚠️ 미검증(로컬 브로커로만 확인) |
-
-### 확정 통신 규격 요약 (2026-07-24)
-
-팀 확정 규격을 코드에 반영했다. 상세는 `docs/backend-message/communication-protocol.md` 참고.
-
-- **시각**: 모든 통신 시각은 Asia/Seoul `+09:00` ISO-8601 `OffsetDateTime`
-  (예: `2026-07-23T11:20:27+09:00`). DB에는 Asia/Seoul 벽시계로 저장하고 읽을 때 오프셋을 복원한다.
-- **차량 상태 10종**: `UNKNOWN, IDLE, ACTIVE, MOVING, LIFTING, LOADING, UNLOADING, ESTOP, ERROR, OFFLINE`.
-  `MOVING`을 `ACTIVE`로 변환하던 기존 정규화는 폐지됐다 — 어떤 값도 다른 값으로 흡수되지 않는다.
-- **좌표·방향**: 좌표 단위 m, `frameId`는 `map`/`odom`만 허용(기본 `map`), 방향 필드는 `heading`
-  (단위 degree, [0,360) 정규화). Isaac의 구 `direction` 필드는 과도기 읽기 alias로만 허용한다.
-- **Isaac 확장 필드 DB 저장**: `forkHeight`/`hasCargo`/`cargoId`/`footprint`가 `vehicle_current_status`와
-  `vehicle_status_history`에 저장된다. ROS2 상태 메시지는 이 값들을 null로 덮어쓰지 않고 보존한다.
-- **명령 공통 envelope**: `{commandId, vehicleId, targetSystem, commandCategory, command, payload, reason, timestamp}`.
-  `commandId`(UUID)와 `timestamp`는 백엔드가 생성하며, 잘못된 조합은 발행하지 않고 400으로 거부한다.
-- **WebSocket 공통 envelope**: 차량·AI·스테이션 이벤트가 모두
-  `{eventType, vehicleId, occurredAt, data}` 형태를 공유한다(`vehicleId`는 nullable).
-
-**DB 적용 정책**: 증분 migration SQL을 운영하지 않는다(`db/migration` 폴더는 삭제됐다).
-구조가 바뀌면 개발 DB를 초기화한 뒤 `src/main/resources/db/schema.sql` 하나로 전체 테이블을
-다시 만든다(수동 실행 전제). 기존 DB를 점진적으로 업그레이드하는 경로는 지원하지 않으며,
-보존할 중요한 데이터가 없는 개발·연동 테스트 단계라 이 정책을 택했다.
-
-### 알려진 제한사항
-
-- **애플리케이션/테스트 종료 시 약 30초 지연**: `MqttPahoMessageDrivenChannelAdapter.doStop()`이 호출하는 `MqttAsyncClient.disconnectForcibly(long)`이 Eclipse Paho 라이브러리 내부에 **quiesceTimeout을 30000ms로 하드코딩**하고 있어서 발생한다(바이트코드 역어셈블로 확인, `answer7.md` 3장 참고). Spring Integration MQTT 6.3.4가 이 값을 조정할 수 있는 공개 API를 제공하지 않아, 안전하게 확정된 해결책이 없는 상태로 **알려진 제한**으로 남겨뒀다. 단, `mqtt.enabled=false`인 테스트(`application-test.yml`)에서는 애초에 Adapter/Client가 생성되지 않아 이 지연이 발생하지 않는다.
-
-### EC2 Mosquitto Broker 연동 (S15P11A304-89 확장)
-
-로컬 개발용 Mosquitto뿐 아니라 팀이 공유하는 AWS EC2 Mosquitto Broker에도 코드 변경 없이 연결할 수 있도록,
-`application-local.yml`의 MQTT 접속 값을 환경변수로 오버라이드할 수 있게 구성했다.
-
-⚠️ **EC2 브로커는 평문 1883이 아니라 TLS 8883이다**(2026-08-03 정정). `allow_anonymous false`라
-계정 인증이 필수고, **EC2의 1883에는 아무것도 리스닝하지 않는다** — `tcp://...:1883`으로 적으면
-연결이 안 된다.
-
-```env
-# 배포(EC2 도커) — 컨테이너끼리는 컨테이너명으로 붙는다. 현재 backend.env 의 실제 값이다.
-MQTT_BROKER_URL=ssl://fast-mosquitto:8883
-MQTT_USERNAME=<username>
-MQTT_PASSWORD=<password>
-
-# 도커 밖(AI 스테이션·ROS2)에서 붙을 때 — EC2 주소 + 8883 + CA 인증서
-#   ⚠️ 서버 인증서 SAN 이 IP 뿐이라 호스트명(i15a304.p.ssafy.io)으로는 검증에 실패한다.
-#      IP 로 붙거나, DNS SAN 을 넣어 인증서를 재발급해야 한다.
-
-# 로컬 개발 — 직접 띄운 브로커
-MQTT_BROKER_URL=tcp://localhost:1883
-```
-
-환경변수를 설정하지 않으면 `tcp://localhost:1883`(인증 없음)으로 접속한다.
-
-> ⚠️ 종전 기본값은 GPU서버 `tcp://70.12.130.106:1883` 이었는데, **그 브로커는 없어졌다**
-> (2026-08-03 GPU서버 학습 전용화). 죽은 주소로 기본값을 두면 발행이 **에러 없이 허공으로 간다** —
-> 실제로 측정 트리거가 통째로 사라진 적이 있다(S15P11A304-188·191).
-비밀번호는 코드/Git에 직접 작성하지 않고 실행 시점의 환경변수(`.env`, 쉘 환경변수, 배포 시크릿 등)로만 주입한다.
-
-EC2 Mosquitto 설치·설정 가이드, 보안 그룹 정책, 통합 테스트 절차, 재연결 테스트, 오류 점검표는
-`prompt/answer/answer11.md`에 상세히 정리되어 있다.
-
-## 공통 API 응답 형식
-
-성공:
-
-```json
-{
-  "success": true,
-  "data": {},
-  "error": null
-}
-```
-
-실패:
-
-```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "code": "INVALID_REQUEST",
-    "message": "잘못된 요청입니다."
-  }
-}
-```
-
-`ApiResponse<T>`는 Generic으로 작성되어 있으며, `ApiResponse.success(data)` / `ApiResponse.fail(errorResponse)`
-정적 팩토리 메서드로 생성합니다. 오류 코드는 `ErrorCode` Enum(`INVALID_REQUEST`, `VALIDATION_FAILED`,
-`METHOD_NOT_ALLOWED`, `JSON_PARSE_ERROR`, `INTERNAL_SERVER_ERROR`)으로 관리하며, 각 코드는 코드 문자열/기본 메시지/HTTP 상태를 함께 가집니다.
-`GlobalExceptionHandler`(`@RestControllerAdvice`)가 Validation 실패, `BusinessException`, 잘못된 HTTP Method,
-JSON 파싱 실패, `IllegalArgumentException`, 그 외 예외를 모두 위 형식으로 변환합니다.
-
-## Health API
-
-```
-GET /api/health
-```
-
-응답 예시 (200 OK):
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "UP",
-    "service": "fast-backend"
-  },
-  "error": null
-}
-```
-
-## 실행 방법
-
-### IntelliJ에서 실행
-
-1. IntelliJ에서 이 디렉터리(`fast-backend`)를 Maven 프로젝트로 열기
-2. Maven 창에서 **Reload All Maven Projects** 실행 (의존성 새로고침)
-3. `FastBackendApplication`을 실행
-
-### 커맨드라인에서 실행
-
-```bash
-mvn clean package
-mvn spring-boot:run
-```
-
-또는 빌드된 jar 실행:
-
-```bash
-java -jar target/backend-0.0.1-SNAPSHOT.jar
-```
-
-기본 포트는 `8080`이며, 기본 활성 프로필은 `local`입니다(`application-local.yml`).
-
-### 테스트 실행
-
-```bash
-mvn test
-```
-
-- `FastBackendApplicationTests`: Spring 컨텍스트 정상 로딩 확인
-- `HealthControllerTest`: `MockMvc`로 `GET /api/health` 호출 후 응답 형식 검증
-
-## 설정 파일
-
-- `application.yml`: 애플리케이션 이름, 기본 프로필(`local`), 서버 포트(`8080`), Jackson 공통 설정(널 필드 생략 방지), 기본 로그 레벨
-- `application-local.yml`: 로컬 전용 설정. `mqtt.*`(브로커 접속 정보, 토픽 패턴)를 포함하며, DB 등 향후 설정이 추가될 위치를 주석으로 표시
-- `logback-spring.xml`: 콘솔 Appender와 로그 패턴(날짜, 레벨, 스레드, Logger, 메시지)을 정의. 비밀번호/토큰 등 민감한 값은 어떤 로그 레벨에서도 출력하지 않습니다.
-
-## 로깅
-
-- `System.out.println()`을 사용하지 않고 SLF4J `Logger`를 직접 사용합니다(Lombok `@Slf4j` 미사용).
-- 민감 정보(비밀번호, 토큰, 인증키 등)는 로그에 출력하지 않습니다.
-
-## 이번 단계에서 구현하지 않은 것
-
-- ROS2 Node 실제 구현, Isaac Sim 연동
-- MySQL 연결, MyBatis Mapper, Entity/DB 테이블 (지게차 상태/위치는 현재 DB 저장 없이 로그만 남긴다)
-- WebSocket/STOMP 연결, React 화면 연동
-- 차량 등록, 작업 배정, 이동·정지·비상정지 실제 제어, 충돌 방지, 다중 차량 관제, AI 추론/화물 적재 위치 추천
-
-이 기능들은 `forklift`, `task`, `alert` 패키지 위치에 이후 단계에서 추가될 예정입니다. MQTT Broker 연결/구독/발행은
-S15P11A304-89 단계에서 구현이 완료되었다(위 "MQTT 연동" 절 참고).
+| 아키텍처 다이어그램 | [docs/아키텍처-다이어그램.md](docs/아키텍처-다이어그램.md) |
+| 다이어그램 작성 명세 (블록·연결·검증 상태) | [docs/아키텍처-다이어그램-명세.md](docs/아키텍처-다이어그램-명세.md) |
+| 요구사항 명세서 | [docs/요구사항명세서.md](docs/요구사항명세서.md) |
+| 포크 정렬 설계 근거 | [docs/ai/onboard-fork-align-design.md](docs/ai/onboard-fork-align-design.md) |
+| 온보드 TensorRT 절차 | [docs/ai/onboard-tensorrt-runbook.md](docs/ai/onboard-tensorrt-runbook.md) |
+| 스테이션 측정 핸드오프 규격 | [docs/ai/station-measurement-handoff.md](docs/ai/station-measurement-handoff.md) |
+| 화물 측정 연동 계약 | [docs/backend-message/cargo-measurement-workflow-contract.md](docs/backend-message/cargo-measurement-workflow-contract.md) |
+| 백엔드 README | [docs/backend-readme.md](docs/backend-readme.md) |
+| 스프린트 회고 (KPT) | [docs/KPT/](docs/KPT/) |
